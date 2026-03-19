@@ -11,7 +11,7 @@ Jobs:
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -184,7 +184,7 @@ def start():
             minutes=REFRESH_INTERVAL_MINUTES,
             id="portfolio_snapshot",
             name="Portfolio Snapshot",
-            minutes_offset=5,  # slightly after full refresh
+            start_date=datetime.now(timezone.utc) + timedelta(minutes=5),
         )
         _scheduler.add_job(
             job_ai_feedback, "interval",

@@ -178,7 +178,7 @@ def fetch_protocol_tvl(slug: str) -> Optional[dict]:
         if not data:
             return None
         tvl_history = data.get("tvl", [])
-        current_tvl = tvl_history[-1]["totalLiquidityUSD"] if tvl_history else 0
+        current_tvl = tvl_history[-1].get("totalLiquidityUSD", 0) if tvl_history else 0
         chains_tvl  = data.get("chainTvls", {})
         return {
             "name":         data.get("name"),
@@ -296,7 +296,7 @@ RWA_NEWS_KEYWORDS = [
     "private credit", "on-chain credit", "defi lending rwa",
     "blackrock blockchain", "franklin templeton blockchain",
     "openeden", "securitize", "carbon credit token",
-    "parkl", "tangible usdr",
+    "parcl", "tangible usdr",
 ]
 
 

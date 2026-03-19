@@ -836,7 +836,7 @@ with tab_arb:
             sig_label = signal.replace("_", " ")
 
             with st.expander(
-                f"[{row.get('type','').upper()}] {row.get('asset_a_name','?')} → "
+                f"[{row.get('type','').upper()}] {row.get('asset_a_name') or row.get('asset_a_id','?')} → "
                 f"Net Spread: {net_spread:.2f}%",
                 expanded=(net_spread >= ARB_STRONG_THRESHOLD_PCT)
             ):
@@ -862,11 +862,11 @@ with tab_arb:
     if not arb_df.empty and len(arb_df) > 3:
         fig_arb = px.bar(
             arb_df.head(15),
-            x="asset_a_name",
+            x="asset_a_id",
             y="net_spread_pct",
             color="type",
             color_discrete_sequence=px.colors.qualitative.Set3,
-            labels={"net_spread_pct": "Net Spread (%)", "asset_a_name": "Opportunity"},
+            labels={"net_spread_pct": "Net Spread (%)", "asset_a_id": "Opportunity"},
             title="Top Arbitrage Opportunities by Net Spread",
             height=350,
         )
@@ -1041,8 +1041,8 @@ with tab_ai:
                                 format_func=lambda x: f"{x}s" if x < 60 else f"{x//60}m")
     with ac3:
         sup_status = _agent.supervisor.status()
-        is_running = sup_status.get("running", False)
-        if not is_running:
+        agent_is_running = sup_status.get("running", False)
+        if not agent_is_running:
             if st.button(f"▶ Start {agent_detail['icon']} {agent_detail['name']}",
                          use_container_width=True, key="btn_start_agent",
                          type="primary"):
@@ -1068,7 +1068,7 @@ with tab_ai:
             st.rerun()
 
     # Agent status
-    if is_running:
+    if agent_is_running:
         st.markdown(f"""
         <div style="background:#0A1A0A;border:1px solid #34D399;border-radius:8px;padding:12px;margin:8px 0">
             <span class="status-live"></span>

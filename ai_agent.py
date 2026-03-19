@@ -279,6 +279,8 @@ Respond with ONLY the JSON object, no markdown, no explanation outside JSON."""
             max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
+        if not response.content:
+            return "HOLD", "Empty response from Claude", 30.0, []
         raw_text = response.content[0].text.strip()
 
         # Extract JSON from response
@@ -295,8 +297,8 @@ Respond with ONLY the JSON object, no markdown, no explanation outside JSON."""
 
         # Validate decision is in allowed set
         if decision not in ("REBALANCE", "HOLD", "DEPLOY", "REDUCE"):
-            decision = "HOLD"
             rationale = f"Invalid decision '{decision}' overridden to HOLD"
+            decision = "HOLD"
 
         # Sanitize actions
         clean_actions = []
@@ -342,7 +344,7 @@ def _node_load_state(state: AgentState) -> AgentState:
         port_state = _get_live_portfolio_state(tier)
 
         # Get top arb opportunities
-        arb_opps = _db.get_active_arb_opportunities(10).to_dict("records") if True else []
+        arb_opps = _db.get_active_arb_opportunities(10).to_dict("records")
 
         state["portfolio"]          = portfolio
         state["portfolio_state"]    = port_state

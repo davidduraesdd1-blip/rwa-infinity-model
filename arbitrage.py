@@ -9,6 +9,7 @@ Multi-dimensional RWA arbitrage scanner:
   6. Stablecoin Yield     — yield-bearing stablecoin vs vanilla stablecoin
 """
 
+import json
 import logging
 import threading
 import time
@@ -341,9 +342,19 @@ def scan_stablecoin_yield_arb(assets: List[dict]) -> List[dict]:
     opportunities = []
     now = datetime.now(timezone.utc).isoformat()
 
+    def _parse_tags(raw):
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except Exception:
+                return []
+        return []
+
     yield_stables = [
         a for a in assets
-        if "stablecoin" in [t.lower() for t in (a.get("tags") or [])]
+        if "stablecoin" in [t.lower() for t in _parse_tags(a.get("tags"))]
         and (a.get("current_yield_pct") or 0) > 0
     ]
 
@@ -635,10 +646,10 @@ def run_full_arb_scan(assets: List[dict] = None) -> List[dict]:
 
     # Mark old opportunities as inactive
     try:
-        conn = _db._get_conn()
-        conn.execute("UPDATE arb_opportunities SET is_active=0 WHERE is_active=1")
-        conn.commit()
-        conn.close()
+        with _db._write_lock:
+            conn = _db._get_conn()
+            conn.execute("UPDATE arb_opportunities SET is_active=0 WHERE is_active=1")
+            conn.commit()
     except Exception as e:
         logger.warning("[Arb] Failed to clear old opportunities: %s", e)
 

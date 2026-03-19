@@ -517,17 +517,26 @@ def save_news(items: List[dict]):
         conn = _get_conn()
         try:
             for item in items:
+                headline = item.get("headline")
+                if not headline:
+                    continue
+                # Deduplicate by headline — no UNIQUE constraint on table so check manually
+                exists = conn.execute(
+                    "SELECT 1 FROM news_feed WHERE headline = ? LIMIT 1", (headline,)
+                ).fetchone()
+                if exists:
+                    continue
                 cats = item.get("categories", [])
                 if isinstance(cats, list):
                     cats = json.dumps(cats)
                 conn.execute("""
-                    INSERT OR IGNORE INTO news_feed
+                    INSERT INTO news_feed
                     (timestamp, source, headline, url, sentiment, sentiment_score,
                      categories, relevance_score)
                     VALUES (?,?,?,?,?,?,?,?)
                 """, (
                     item.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                    item.get("source"), item.get("headline"), item.get("url"),
+                    item.get("source"), headline, item.get("url"),
                     item.get("sentiment", "NEUTRAL"), item.get("sentiment_score", 0.0),
                     cats, item.get("relevance_score", 0.5),
                 ))
@@ -554,7 +563,7 @@ def get_recent_news(limit: int = 30) -> pd.DataFrame:
 
 # ─── Yield History ────────────────────────────────────────────────────────────
 
-def save_yield_history(asset_id: str, yield_pct: float, tvl_usd: float = None):
+def save_yield_history(asset_id: str, yield_pct: float, tvl_usd: Optional[float] = None):
     with _write_lock:
         conn = _get_conn()
         try:

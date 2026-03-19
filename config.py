@@ -180,7 +180,7 @@ RWA_UNIVERSE = [
         "chain": "Ethereum / Solana / Mantle",
         "protocol": "Ondo Finance",
         "token_symbol": "USDY",
-        "coingecko_id": "ondo-us-dollar-yield",
+        "coingecko_id": "ondo-us-dollar-yield-token",
         "defillama_slug": "ondo-finance",
         "expected_yield_pct": 5.00,
         "risk_score": 2,
@@ -439,7 +439,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 8,
         "min_investment_usd": 1_000,
         "inception_date": "2017-01-01",
-        "description": "Blockchain property titles and real estate NFT marketplacen. US + international properties.",
+        "description": "Blockchain property titles and real estate NFT marketplace. US + international properties.",
         "tags": ["retail", "real-estate", "title-nft", "marketplace"],
     },
     {
@@ -599,13 +599,13 @@ RWA_UNIVERSE = [
 
     # ── CORPORATE BONDS / FIXED INCOME ──────────────────────────────────────
     {
-        "id": "BACKED_AAPL",
-        "name": "Backed Finance Apple Bond",
-        "category": "Corporate Bonds",
-        "subcategory": "Investment Grade",
+        "id": "BACKED_LQD",
+        "name": "Backed iShares USD Corporate Bond ETF",
+        "category": "Equities",
+        "subcategory": "Bond ETF",
         "chain": "Ethereum",
         "protocol": "Backed Finance",
-        "token_symbol": "bCSPX",
+        "token_symbol": "bLQD",
         "coingecko_id": None,
         "defillama_slug": "backed-finance",
         "expected_yield_pct": 4.50,
@@ -614,7 +614,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 8,
         "min_investment_usd": 1,
         "inception_date": "2021-12-01",
-        "description": "Tokenized corporate bond ETF (iShares Core S&P 500 Tracker). Swiss-regulated, 1:1 backing.",
+        "description": "Tokenized iShares iBoxx USD Investment Grade Corporate Bond ETF. Swiss FINMA-supervised, 1:1 backing.",
         "tags": ["retail", "corporate-bond", "etf", "ig", "swiss"],
     },
     {

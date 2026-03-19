@@ -399,8 +399,8 @@ def run_monte_carlo(portfolio: dict, n_simulations: int = MC_SIMULATIONS,
     prob_loss    = float(np.mean(final_values < initial_value) * 100)
     # Probability of > 10% gain
     prob_10pct   = float(np.mean(final_values > initial_value * 1.10) * 100)
-    # Max sim drawdown
-    path_min     = float(np.min(cumulative, axis=1))
+    # Max sim drawdown (path_min shape: n_simulations — min cumulative return per path)
+    path_min     = np.min(cumulative, axis=1)
     avg_drawdown = float(np.mean((1 - path_min) * 100))
 
     # Sample paths for chart (50 representative paths)
