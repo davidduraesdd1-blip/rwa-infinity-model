@@ -103,7 +103,13 @@ def fetch_defillama_protocols() -> List[dict]:
             "centrifuge", "maple", "goldfinch", "truefi", "ondo", "maker",
             "backed", "superstate", "mountain", "openeden", "tangible",
             "realtoken", "lofty", "credix", "parcl", "toucan", "klima",
-            "nexus", "polytrade", "blocksquare"
+            "nexus", "polytrade", "blocksquare",
+            # New 2024-2026 protocols
+            "pendle", "morpho", "usual", "agora", "huma", "kamino",
+            "ethena", "term", "notional", "clearpool", "sky", "kinesis",
+            "plume", "mantra", "noble", "swarm", "dinari", "spiko",
+            "hashnote", "archax", "gains-network", "synthetix", "enzyme",
+            "flowcarbon", "agrotoken", "bucket", "thala",
         ]
         results = []
         for p in data:
@@ -137,18 +143,31 @@ def fetch_defillama_yields() -> List[dict]:
         # Filter for RWA-relevant pools
         rwa_projects = {
             "centrifuge", "maple", "goldfinch", "truefi", "ondo-finance",
-            "makerdao", "backed-finance", "superstate", "mountain-protocol",
+            "makerdao", "sky", "backed-finance", "superstate", "mountain-protocol",
             "openeden", "tangible", "credix", "polytrade", "klimadao",
             "toucan-protocol", "nexus-mutual", "parcl", "realtoken",
+            # New 2024-2026
+            "pendle", "morpho", "usual", "agora-finance", "huma-finance",
+            "kamino", "ethena", "term-finance", "notional", "clearpool",
+            "gains-network", "synthetix", "enzyme", "lofty", "spiko",
+            "hashnote", "flowcarbon", "agrotoken", "bucket-protocol", "thala",
+            "plume", "mantra",
         }
         results = []
         for pool in pools:
             proj = (pool.get("project") or "").lower()
             sym  = (pool.get("symbol") or "").upper()
             # Include pools from known RWA projects OR pools with RWA-related symbols
-            rwa_syms = {"TBILL", "OUSG", "OMMF", "USDY", "USDM", "BUIDL", "BENJI",
-                        "USTB", "STBT", "PAXG", "XAUT", "MCO2", "NCT", "KLIMA",
-                        "CFG", "MPL", "GFI", "TRU", "USDR", "NXM"}
+            rwa_syms = {
+                "TBILL", "OUSG", "OMMF", "USDY", "USDM", "BUIDL", "BENJI",
+                "USTB", "STBT", "PAXG", "XAUT", "MCO2", "NCT", "KLIMA",
+                "CFG", "MPL", "GFI", "TRU", "USDR", "NXM",
+                # New 2024-2026 symbols
+                "USYC", "USCC", "RLUSD", "BUCK", "MOD", "ACRED", "SCOPE",
+                "GNS", "DSHR", "USD0", "AUSD", "USDS", "SUSDE", "USDE",
+                "KAU", "KAG", "PT-USDY", "YT-USDY", "PT-USDM", "RTBILL",
+                "STEAKUSDC", "RE7USDC", "KUSDC", "SNX", "NOTE",
+            }
             if proj in rwa_projects or sym in rwa_syms or "rwa" in proj:
                 apy = pool.get("apy") or 0
                 tvl = pool.get("tvlUsd") or 0
