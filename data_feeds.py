@@ -261,21 +261,30 @@ NEWS_SOURCES = [
         "format": "json",
     },
     {
-        "name": "CoinDesk RWA",
-        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=json&offset=0&size=20",
-        "format": "json",
-    },
-    {
-        "name": "RWA.xyz Blog",
-        "url": "https://app.rwa.xyz/api/news",
-        "format": "json",
-    },
-    {
         "name": "DeFiLlama News",
         "url": "https://api.llama.fi/news",
         "format": "json",
     },
 ]
+
+# ─── Protocol-Specific APIs ────────────────────────────────────────────────────
+
+PROTOCOL_APIS = {
+    "centrifuge": {
+        "pools":   "https://api.centrifuge.io/pools",
+        "subgraph": "https://api.thegraph.com/subgraphs/name/centrifuge/mainnet-v3",
+    },
+    "maple": {
+        "pools":   "https://api.maple.finance/v1/pools",
+        "loans":   "https://api.maple.finance/v1/loans",
+        "stats":   "https://api.maple.finance/v1/stats",
+    },
+    "rwa_xyz": {
+        "protocols": "https://app.rwa.xyz/api/protocols",
+        "treasuries":"https://app.rwa.xyz/api/treasuries",
+        "overview":  "https://app.rwa.xyz/api/market-overview",
+    },
+}
 
 RWA_NEWS_KEYWORDS = [
     "real world asset", "rwa", "tokenized", "tokenization",
@@ -612,6 +621,44 @@ def refresh_all_assets(progress_callback=None) -> List[dict]:
 
     logger.info("[DataFeeds] Refresh complete — %d assets updated", len(enriched))
     return enriched
+
+
+def fetch_rwa_xyz_market() -> dict:
+    """Fetch market overview from rwa.xyz (primary RWA data aggregator)."""
+    def _fetch():
+        data = _get(PROTOCOL_APIS["rwa_xyz"]["overview"], timeout=12)
+        if data:
+            return data
+        # Fallback: try treasuries endpoint
+        t = _get(PROTOCOL_APIS["rwa_xyz"]["treasuries"], timeout=12)
+        return t or {}
+    return _cached_get("rwa_xyz_market", CACHE_TTL["tvl"], _fetch) or {}
+
+
+def fetch_centrifuge_pools() -> List[dict]:
+    """Fetch Centrifuge pool data."""
+    def _fetch():
+        data = _get(PROTOCOL_APIS["centrifuge"]["pools"], timeout=12)
+        if not data or not isinstance(data, list):
+            return []
+        return [
+            {
+                "id":       p.get("id"),
+                "name":     p.get("name"),
+                "tvl":      p.get("value", {}).get("usd", 0) if isinstance(p.get("value"), dict) else 0,
+                "yield":    p.get("yield", {}).get("apy", 0) if isinstance(p.get("yield"), dict) else 0,
+                "currency": p.get("currency", "USDC"),
+            }
+            for p in data[:20]
+        ]
+    return _cached_get("centrifuge_pools", CACHE_TTL["yields"], _fetch) or []
+
+
+def fetch_maple_stats() -> dict:
+    """Fetch Maple Finance aggregate stats."""
+    def _fetch():
+        return _get(PROTOCOL_APIS["maple"]["stats"], timeout=12) or {}
+    return _cached_get("maple_stats", CACHE_TTL["yields"], _fetch) or {}
 
 
 def refresh_news():
