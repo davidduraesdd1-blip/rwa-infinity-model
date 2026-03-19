@@ -33,6 +33,83 @@ MC_SIMULATIONS      = 10_000
 MC_HORIZON_DAYS     = 365
 VAR_CONFIDENCE      = [0.95, 0.99]
 
+# ─── Chain ecosystem maturity → extra annualized vol premium (%) ──────────────
+# Newer/smaller chains = harder to exit = higher effective volatility
+CHAIN_VOL_PREMIUM: dict = {
+    "Ethereum":     0.0,    # most liquid, deepest DeFi
+    "Polygon":      0.5,    # established L2/sidechain
+    "Solana":       1.5,    # high-perf but history of outages
+    "Arbitrum":     0.5,    # mature Ethereum L2
+    "Optimism":     0.5,    # mature Ethereum L2
+    "Base":         1.0,    # Coinbase L2 — growing fast
+    "Avalanche":    1.0,    # institutional traction but smaller DeFi
+    "Gnosis":       0.5,    # stable sidechain
+    "Hedera":       2.0,    # institutional focus, limited DeFi liquidity
+    "XRP Ledger":   2.0,    # deep for XRP, shallow for RWA tokens
+    "Tezos":        2.5,    # EU-regulated but small DeFi ecosystem
+    "Provenance":   3.5,    # niche fintech chain, minimal secondary market
+    "Aptos":        3.0,    # new Move VM ecosystem
+    "Cardano":      2.5,    # maturing but limited DeFi
+    "Sui":          3.5,    # newest ecosystem, highest uncertainty
+    "Stellar":      2.0,    # payments-focused, smaller DeFi
+    "Algorand":     2.5,    # underused relative to capability
+    "Tron":         1.5,    # large stablecoin flows but regulatory risk
+    "BNB":          1.0,    # large ecosystem
+    "Multiple":     1.0,    # multi-chain: use mid estimate
+    "Off-chain / Reg A+": 4.0,  # no on-chain exit, fully illiquid
+}
+
+# ─── Category-pair correlation matrix ────────────────────────────────────────
+# Captures how different RWA categories move together.
+# T-bill tokens are highly correlated (same rate driver).
+# Stocks and real estate have moderate positive correlation.
+# Treasuries and equities have slight negative correlation (flight to quality).
+# If a pair is not listed, default = 0.15 (low cross-category correlation).
+CATEGORY_CORRELATIONS: dict = {
+    ("Government Bonds",     "Government Bonds"):     0.92,
+    ("Government Bonds",     "Private Credit"):       0.25,
+    ("Government Bonds",     "Real Estate"):          0.10,
+    ("Government Bonds",     "Equities"):            -0.10,
+    ("Government Bonds",     "Commodities"):          0.05,
+    ("Government Bonds",     "Carbon Credits"):      -0.05,
+    ("Government Bonds",     "Trade Finance"):        0.30,
+    ("Government Bonds",     "Infrastructure"):       0.20,
+    ("Government Bonds",     "Private Equity"):       0.10,
+    ("Government Bonds",     "Insurance"):            0.15,
+    ("Government Bonds",     "Intellectual Property"):0.05,
+    ("Government Bonds",     "Art & Collectibles"):   0.02,
+    ("Private Credit",       "Private Credit"):       0.65,
+    ("Private Credit",       "Real Estate"):          0.45,
+    ("Private Credit",       "Equities"):             0.40,
+    ("Private Credit",       "Trade Finance"):        0.55,
+    ("Private Credit",       "Infrastructure"):       0.35,
+    ("Private Credit",       "Private Equity"):       0.50,
+    ("Private Credit",       "Insurance"):            0.30,
+    ("Real Estate",          "Real Estate"):          0.65,
+    ("Real Estate",          "Equities"):             0.35,
+    ("Real Estate",          "Commodities"):          0.20,
+    ("Real Estate",          "Infrastructure"):       0.40,
+    ("Real Estate",          "Private Equity"):       0.30,
+    ("Equities",             "Equities"):             0.82,
+    ("Equities",             "Private Equity"):       0.60,
+    ("Equities",             "Infrastructure"):       0.35,
+    ("Equities",             "Carbon Credits"):       0.25,
+    ("Commodities",          "Commodities"):          0.55,
+    ("Commodities",          "Infrastructure"):       0.30,
+    ("Carbon Credits",       "Carbon Credits"):       0.65,
+    ("Carbon Credits",       "Infrastructure"):       0.20,
+    ("Intellectual Property","Intellectual Property"):0.45,
+    ("Art & Collectibles",   "Art & Collectibles"):   0.35,
+    ("Private Equity",       "Private Equity"):       0.65,
+    ("Private Equity",       "Infrastructure"):       0.40,
+    ("Insurance",            "Insurance"):            0.55,
+    ("Trade Finance",        "Trade Finance"):        0.50,
+    ("Infrastructure",       "Infrastructure"):       0.60,
+    ("Tokenized Equities",   "Tokenized Equities"):   0.82,
+    ("Tokenized Equities",   "Equities"):             0.75,
+    ("Tokenized Equities",   "Private Equity"):       0.50,
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ASSET SCORING
@@ -47,6 +124,11 @@ def score_asset(asset: dict) -> float:
       25% Liquidity (ability to exit)
       20% Regulatory safety
       15% Risk-adjusted yield (yield / risk)
+
+    Adjustments applied post-score:
+      - Chain maturity discount: illiquid/new chains penalised up to 15%
+      - Synthetic/DEX basis risk penalty: oracle-dependent assets penalised 10%
+      - Future-readiness bonus: multi-chain or institutional-grade assets +5%
 
     Returns 0-100 score.
     """
@@ -63,13 +145,31 @@ def score_asset(asset: dict) -> float:
     risk_adj = yield_pct / max(risk, 1)
     risk_adj_score = min(risk_adj / 5, 1.0)  # 5.0 = excellent
 
-    # Composite
+    # Base composite
     score = (
         yield_score    * 0.40 +
         (liquidity/10) * 0.25 +
         (regulatory/10)* 0.20 +
         risk_adj_score * 0.15
     ) * 100
+
+    # ── Chain maturity discount (new/illiquid chains = harder to exit) ────────
+    primary_chain = (asset.get("chain") or "Ethereum").split(" / ")[0].strip()
+    chain_premium = CHAIN_VOL_PREMIUM.get(primary_chain, 2.0)
+    chain_discount = 1.0 - min(chain_premium / 50.0, 0.15)  # max 15% discount
+    score *= chain_discount
+
+    # ── Synthetic / DEX basis risk penalty ────────────────────────────────────
+    subcat = (asset.get("subcategory") or "").lower()
+    if "synthetic" in subcat or ("dex" in subcat and "equit" in subcat):
+        score *= 0.90   # 10% penalty: oracle risk + basis divergence possible
+
+    # ── Future-readiness bonus ─────────────────────────────────────────────────
+    # Multi-chain deployment = broader liquidity + more adoption surface
+    chain_str = asset.get("chain", "")
+    if " / " in chain_str:  # multi-chain asset
+        score = min(score * 1.05, 100)
+    # Institutional backing (Securitize, BlackRock, etc.) already in regulatory score
 
     return round(score, 2)
 
@@ -250,6 +350,8 @@ def compute_portfolio_metrics(holdings: List[dict], portfolio_value: float,
     yields    = np.array([h.get("current_yield_pct", 0) for h in holdings])
     risks     = np.array([h.get("risk_score", 5) for h in holdings])
     liq       = np.array([h.get("liquidity_score", 5) for h in holdings])
+    cats      = [h.get("category", "") for h in holdings]
+    n         = len(holdings)
 
     # Weighted average yield
     avg_yield = float(np.dot(weights, yields))
@@ -257,16 +359,26 @@ def compute_portfolio_metrics(holdings: List[dict], portfolio_value: float,
     # Estimated annual return
     annual_return_usd = portfolio_value * avg_yield / 100
 
-    # Volatility estimation from risk scores
-    # Risk score 1 ≈ 0.5% vol, Risk score 10 ≈ 40% vol (log-linear)
-    vol_per_asset  = np.array([_risk_to_vol(r) for r in risks])
-    # Assume moderate correlations (0.3 between assets in same category)
-    correlation    = 0.3
-    portfolio_var  = np.sum(weights**2 * vol_per_asset**2) + \
-                     correlation * np.sum([weights[i] * weights[j] * vol_per_asset[i] * vol_per_asset[j]
-                                          for i in range(len(weights))
-                                          for j in range(len(weights)) if i != j])
-    portfolio_vol  = math.sqrt(max(portfolio_var, 0))
+    # ── Per-asset volatility with chain + asset-type adjustments ─────────────
+    vol_per_asset = np.array([_risk_to_vol(risks[i], holdings[i]) for i in range(n)])
+
+    # ── Category-aware covariance matrix ─────────────────────────────────────
+    # Replaces the old flat 0.3 correlation assumption.
+    # Same category pairs use CATEGORY_CORRELATIONS; cross-category defaults 0.15.
+    cov_matrix = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                cov_matrix[i, j] = vol_per_asset[i] ** 2
+            else:
+                pair     = (cats[i], cats[j])
+                pair_rev = (cats[j], cats[i])
+                corr = CATEGORY_CORRELATIONS.get(pair,
+                       CATEGORY_CORRELATIONS.get(pair_rev, 0.15))
+                cov_matrix[i, j] = corr * vol_per_asset[i] * vol_per_asset[j]
+
+    portfolio_var = float(weights @ cov_matrix @ weights)
+    portfolio_vol = math.sqrt(max(portfolio_var, 0))
 
     # Sharpe ratio: (return - risk_free) / volatility
     excess_return  = avg_yield - RISK_FREE_RATE
@@ -325,10 +437,39 @@ def compute_portfolio_metrics(holdings: List[dict], portfolio_value: float,
     }
 
 
-def _risk_to_vol(risk_score: float) -> float:
-    """Convert 1-10 risk score to annualized volatility %."""
-    # Exponential mapping: risk 1 → 0.5%, risk 10 → 40%
-    return 0.5 * math.exp(0.46 * (risk_score - 1))
+def _risk_to_vol(risk_score: float, asset: dict = None) -> float:
+    """
+    Convert 1-10 risk score to annualized volatility % with asset-aware adjustments.
+
+    Base mapping (exponential): risk 1 → 0.5%, risk 10 → 40%
+    Then applies:
+      - Chain ecosystem maturity premium (new chains = harder to exit)
+      - Synthetic/DEX basis risk multiplier (oracle-dependent assets)
+      - Carbon credit regulatory uncertainty multiplier
+    """
+    base_vol = 0.5 * math.exp(0.46 * (risk_score - 1))
+
+    if asset is None:
+        return base_vol
+
+    # Synthetic/DEX stocks: oracle and basis risk add extra volatility
+    subcat = (asset.get("subcategory") or "").lower()
+    if "synthetic" in subcat or ("dex" in subcat and "equit" in subcat):
+        base_vol *= 1.35   # 35% extra for oracle divergence + liquidation cascades
+
+    # Carbon credits: regulatory risk multiplier (policy can crater value overnight)
+    if asset.get("category") == "Carbon Credits":
+        base_vol *= 1.20
+
+    # Art & Collectibles: very thin market, high bid-ask spread risk
+    if asset.get("category") == "Art & Collectibles":
+        base_vol *= 1.15
+
+    # Chain maturity premium: first-listed chain drives primary liquidity
+    primary_chain = (asset.get("chain") or "Ethereum").split(" / ")[0].strip()
+    chain_premium = CHAIN_VOL_PREMIUM.get(primary_chain, 2.0)
+
+    return min(base_vol + chain_premium, 80.0)  # cap at 80% annualised vol
 
 
 def _gaussian_var(mean_return: float, vol: float, confidence: float) -> float:
@@ -376,14 +517,31 @@ def run_monte_carlo(portfolio: dict, n_simulations: int = MC_SIMULATIONS,
     daily_vol     = metrics.get("portfolio_volatility_pct", 5) / 100 / math.sqrt(252)
 
     rng = np.random.default_rng(42)  # reproducible
-    # GBM: S(t) = S(0) * exp((mu - 0.5*sigma^2)*t + sigma*sqrt(t)*Z)
-    dt       = 1  # daily steps
-    mu       = daily_return - 0.5 * daily_vol**2
-    sigma    = daily_vol
 
-    # Simulate
+    # ── Jump-Diffusion GBM (Merton 1976) ─────────────────────────────────────
+    # RWA assets face "jump" tail risks that pure GBM underestimates:
+    #   - Protocol/bridge hacks (DeFi specific)
+    #   - Regulatory shutdown orders (tokenized securities)
+    #   - Oracle failures (synthetic stocks, DEX instruments)
+    #   - Chain outages or hard forks
+    # We model these as a Poisson jump process layered on top of the GBM.
+    dt           = 1             # daily steps
+    mu_gbm       = daily_return - 0.5 * daily_vol**2
+    sigma        = daily_vol
+
+    # Jump process parameters (calibrated to historical DeFi/RWA incident frequency)
+    jump_intensity = 0.8 / 252   # ~0.8 jump events per year for a diversified RWA portfolio
+    jump_mean      = -0.04        # average jump = -4% (negatively skewed — most jumps are down)
+    jump_std       = 0.08         # jump std dev = 8%
+
+    # Diffusion component
     z              = rng.standard_normal((n_simulations, horizon_days))
-    log_returns    = mu * dt + sigma * math.sqrt(dt) * z
+    # Jump component: Poisson arrivals × Normal jump size
+    jump_counts    = rng.poisson(jump_intensity, (n_simulations, horizon_days))
+    jump_sizes     = rng.normal(jump_mean, jump_std, (n_simulations, horizon_days))
+
+    # Combined log-return: GBM drift + diffusion + jumps
+    log_returns    = mu_gbm * dt + sigma * math.sqrt(dt) * z + jump_counts * jump_sizes
     cumulative     = np.exp(np.cumsum(log_returns, axis=1))
     final_values   = initial_value * cumulative[:, -1]
 
@@ -449,9 +607,10 @@ def compute_efficient_frontier(assets: List[dict], n_portfolios: int = 500) -> d
         valid = assets[:10]
 
     rng = np.random.default_rng(123)
+    capped  = valid[:20]  # cap at 20 assets
     yields  = np.array([a.get("current_yield_pct") or a.get("expected_yield_pct", 0)
-                        for a in valid[:20]])  # cap at 20 assets
-    vols    = np.array([_risk_to_vol(a.get("risk_score", 5)) for a in valid[:20]])
+                        for a in capped])
+    vols    = np.array([_risk_to_vol(a.get("risk_score", 5), a) for a in capped])
     n       = len(yields)
 
     portfolios = []

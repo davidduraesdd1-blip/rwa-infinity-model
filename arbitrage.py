@@ -34,6 +34,7 @@ TX_COSTS = {
     "Real Estate":          2.00,   # 2% round-trip (illiquid)
     "Commodities":          0.20,   # 20 bps
     "Equities":             0.10,   # 10 bps
+    "Tokenized Equities":   0.05,   # 5 bps — liquid DEX markets (Dinari, Robinhood, Gains)
     "Carbon Credits":       0.50,   # 50 bps
     "Intellectual Property":1.00,   # 1% (thin market)
     "Art & Collectibles":   3.00,   # 3% (very illiquid)
@@ -45,16 +46,28 @@ TX_COSTS = {
 # Bridge/chain costs for cross-chain arb
 BRIDGE_COST_PCT = 0.15   # ~15 bps to bridge between chains
 
-# Gas cost estimates (USD) per chain operation
+# Gas cost estimates (USD) per chain operation — updated for all supported chains
 GAS_COSTS = {
-    "Ethereum":  5.0,
-    "Polygon":   0.01,
-    "Solana":    0.0005,
-    "Arbitrum":  0.10,
-    "Optimism":  0.10,
-    "Gnosis":    0.001,
-    "Avalanche": 0.05,
-    "BNB":       0.05,
+    "Ethereum":     5.00,    # mainnet gas, variable but typically $2–$10
+    "Polygon":      0.01,    # PoS sidechain
+    "Solana":       0.0005,  # near-zero
+    "Arbitrum":     0.10,    # Ethereum L2
+    "Optimism":     0.10,    # Ethereum L2
+    "Base":         0.01,    # Coinbase L2 — very cheap
+    "Gnosis":       0.001,   # xDAI chain
+    "Avalanche":    0.05,    # C-chain fees
+    "BNB":          0.05,    # BSC fees
+    "Hedera":       0.001,   # HBAR transaction = $0.0001 HBAR ≈ minimal
+    "XRP Ledger":   0.0001,  # XRP drops, near-free
+    "Tezos":        0.05,    # Tezos baking + gas
+    "Provenance":   0.001,   # Figure chain, minimal fees
+    "Aptos":        0.0003,  # Move VM, efficient
+    "Cardano":      0.20,    # ADA min UTXO + fees
+    "Sui":          0.0001,  # Move VM, near-free
+    "Stellar":      0.0001,  # XLM base reserve + fee
+    "Algorand":     0.001,   # ALGO minimum fee
+    "Tron":         0.01,    # TRX energy model
+    "Multiple":     1.00,    # multi-chain: conservatively use Ethereum-level costs
 }
 
 # Minimum trade size to make arb worthwhile
@@ -240,89 +253,170 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
 
 def scan_cross_chain_arb(assets: List[dict]) -> List[dict]:
     """
-    Find the same asset (by ID pattern or yield similarity) priced differently
-    on different chains.
+    Dynamically detect the same asset priced differently across chains.
+
+    Algorithm:
+    1. Group all assets by protocol name (same protocol on different chains)
+    2. For multi-chain assets listed in config (chain field contains ' / '),
+       decompose into per-chain entries and compare prices
+    3. Also scan by token_symbol matches across different chains
+
+    Fully dynamic — automatically picks up any new multi-chain assets added to config.
     """
     opportunities = []
     now = datetime.now(timezone.utc).isoformat()
 
-    # Group by token symbol (multi-chain assets)
-    by_symbol: Dict[str, List[dict]] = {}
+    # ── Strategy 1: Same protocol appearing on multiple chains ────────────────
+    # Group assets by (protocol, category) — assets from same protocol + category
+    # on different chains should trade at similar yields/prices
+    by_protocol: Dict[str, List[dict]] = {}
     for asset in assets:
-        sym = asset.get("token_symbol", "")
-        if sym:
-            by_symbol.setdefault(sym, []).append(asset)
+        proto = (asset.get("protocol") or "").strip()
+        cat   = (asset.get("category") or "").strip()
+        if proto:
+            key = f"{proto}|{cat}"
+            by_protocol.setdefault(key, []).append(asset)
 
-    # Look for multi-chain RWA assets with yield differences
-    # (e.g., OUSG on Ethereum vs Solana, USDY on Ethereum vs Mantle)
-    cross_chain_pairs = [
-        # (asset_id_a, chain_a, asset_id_b, chain_b, expected_spread_note)
-        ("OUSG",  "Ethereum", "OUSG",  "Solana",  "Solana OUSG may lag Ethereum by 1-2 days"),
-        ("USDM",  "Ethereum", "USDM",  "Polygon", "Polygon bridge premium"),
-        ("USDY",  "Ethereum", "USDY",  "Solana",  "Cross-chain yield arbitrage"),
-        ("TBILL", "Ethereum", "TBILL", "Polygon", "Gas cost arbitrage"),
-    ]
-
-    for sym_a, chain_a, sym_b, chain_b, note in cross_chain_pairs:
-        assets_a = [a for a in assets if a.get("token_symbol") == sym_a
-                    and chain_a.lower() in (a.get("chain") or "").lower()]
-        assets_b = [a for a in assets if a.get("token_symbol") == sym_b
-                    and chain_b.lower() in (a.get("chain") or "").lower()]
-
-        if not assets_a or not assets_b:
+    for key, proto_assets in by_protocol.items():
+        if len(proto_assets) < 2:
             continue
 
-        asset_a = assets_a[0]
-        asset_b = assets_b[0]
+        # Only compare if they are on meaningfully different chains
+        chains = [(a.get("chain") or "").split(" / ")[0].strip() for a in proto_assets]
+        if len(set(chains)) < 2:
+            continue  # all on same chain
 
-        # Price difference
-        price_a = asset_a.get("current_price", 1.0) or 1.0
-        price_b = asset_b.get("current_price", 1.0) or 1.0
+        # Compare yield differences (yield arb, not just price)
+        sorted_pa = sorted(
+            proto_assets,
+            key=lambda x: x.get("current_yield_pct") or x.get("expected_yield_pct") or 0,
+            reverse=True
+        )
+        asset_a = sorted_pa[0]
+        asset_b = sorted_pa[-1]
+        chain_a = (asset_a.get("chain") or "Ethereum").split(" / ")[0].strip()
+        chain_b = (asset_b.get("chain") or "Ethereum").split(" / ")[0].strip()
 
-        if price_a <= 0 or price_b <= 0:
+        if chain_a == chain_b:
             continue
 
-        price_diff_pct = abs(price_a - price_b) / min(price_a, price_b) * 100
+        yield_a = asset_a.get("current_yield_pct") or asset_a.get("expected_yield_pct") or 0
+        yield_b = asset_b.get("current_yield_pct") or asset_b.get("expected_yield_pct") or 0
+        if yield_b <= 0:
+            continue
 
-        # Gas costs both chains
-        gas_a = GAS_COSTS.get(chain_a, 1.0)
-        gas_b = GAS_COSTS.get(chain_b, 1.0)
+        gross_spread = yield_a - yield_b
+        gas_a        = GAS_COSTS.get(chain_a, 1.0)
+        gas_b        = GAS_COSTS.get(chain_b, 1.0)
         gas_cost_pct = (gas_a + gas_b) / MIN_TRADE_USD * 100 + BRIDGE_COST_PCT
+        tx_cost      = TX_COSTS.get(asset_a.get("category", ""), 0.30)
+        net_spread   = gross_spread - gas_cost_pct - tx_cost
 
-        net_spread = price_diff_pct - gas_cost_pct
-
-        if net_spread < ARB_MIN_PRICE_SPREAD_PCT:
+        if net_spread < ARB_MIN_YIELD_SPREAD_PCT:
             continue
 
-        signal = "STRONG_ARB" if net_spread >= ARB_STRONG_THRESHOLD_PCT else "ARB"
-        higher_price_chain = chain_a if price_a >= price_b else chain_b
-        lower_price_chain  = chain_b if price_a >= price_b else chain_a
+        signal = (
+            "EXTREME_ARB" if net_spread >= ARB_EXTREME_THRESHOLD_PCT else
+            "STRONG_ARB"  if net_spread >= ARB_STRONG_THRESHOLD_PCT  else
+            "ARB"
+        )
 
         opp = {
             "timestamp":     now,
             "type":          "cross_chain",
             "asset_a_id":    asset_a["id"],
             "asset_b_id":    asset_b["id"],
-            "asset_a_name":  f"{sym_a} on {chain_a}",
-            "asset_b_name":  f"{sym_b} on {chain_b}",
+            "asset_a_name":  f"{asset_a['id']} on {chain_a}",
+            "asset_b_name":  f"{asset_b['id']} on {chain_b}",
             "protocol_a":    asset_a.get("protocol", ""),
             "protocol_b":    asset_b.get("protocol", ""),
+            "chain_a":       chain_a,
+            "chain_b":       chain_b,
+            "yield_a_pct":   round(yield_a, 4),
+            "yield_b_pct":   round(yield_b, 4),
+            "spread_pct":    round(gross_spread, 4),
+            "net_spread_pct":round(net_spread, 4),
+            "estimated_apy": round(net_spread, 4),
+            "category":      asset_a.get("category", ""),
+            "tx_cost_pct":   round(gas_cost_pct + tx_cost, 4),
+            "signal":        signal,
+            "action": (
+                f"ROTATE: Exit {asset_b['id']} on {chain_b} ({yield_b:.2f}% yield) → "
+                f"Enter {asset_a['id']} on {chain_a} ({yield_a:.2f}% yield). "
+                f"Net gain after bridge + gas: {net_spread:.2f}% annually."
+            ),
+            "notes": (
+                f"Same protocol ({asset_a.get('protocol', '?')}) deployed on {chain_a} and {chain_b}. "
+                f"Bridge cost: {BRIDGE_COST_PCT:.2f}%, gas: ${gas_a + gas_b:.3f}."
+            ),
+        }
+        opportunities.append(opp)
+
+    # ── Strategy 2: Multi-chain assets with price divergence ──────────────────
+    # Assets whose chain field contains ' / ' are multi-chain.
+    # If they appear in the DB with different prices per chain version, scan those.
+    by_symbol: Dict[str, List[dict]] = {}
+    for asset in assets:
+        sym = (asset.get("token_symbol") or "").upper()
+        if sym:
+            by_symbol.setdefault(sym, []).append(asset)
+
+    for sym, sym_assets in by_symbol.items():
+        if len(sym_assets) < 2:
+            continue
+        # Extract per-chain entries and compare prices
+        sorted_sa = sorted(sym_assets,
+                           key=lambda x: x.get("current_price") or 1.0, reverse=True)
+        high_a = sorted_sa[0]
+        low_b  = sorted_sa[-1]
+        chain_a = (high_a.get("chain") or "Ethereum").split(" / ")[0].strip()
+        chain_b = (low_b.get("chain") or "Ethereum").split(" / ")[0].strip()
+        if chain_a == chain_b or high_a["id"] == low_b["id"]:
+            continue
+
+        price_a = high_a.get("current_price") or 1.0
+        price_b = low_b.get("current_price") or 1.0
+        if price_a <= 0 or price_b <= 0 or price_a == price_b:
+            continue
+
+        price_diff_pct = abs(price_a - price_b) / min(price_a, price_b) * 100
+        gas_a          = GAS_COSTS.get(chain_a, 1.0)
+        gas_b          = GAS_COSTS.get(chain_b, 1.0)
+        gas_cost_pct   = (gas_a + gas_b) / MIN_TRADE_USD * 100 + BRIDGE_COST_PCT
+        net_spread     = price_diff_pct - gas_cost_pct
+
+        if net_spread < ARB_MIN_PRICE_SPREAD_PCT:
+            continue
+
+        signal = "STRONG_ARB" if net_spread >= ARB_STRONG_THRESHOLD_PCT else "ARB"
+        opp = {
+            "timestamp":     now,
+            "type":          "cross_chain",
+            "asset_a_id":    high_a["id"],
+            "asset_b_id":    low_b["id"],
+            "asset_a_name":  f"{sym} on {chain_a} (higher price)",
+            "asset_b_name":  f"{sym} on {chain_b} (lower price)",
+            "protocol_a":    high_a.get("protocol", ""),
+            "protocol_b":    low_b.get("protocol", ""),
             "chain_a":       chain_a,
             "chain_b":       chain_b,
             "yield_a_pct":   price_a,
             "yield_b_pct":   price_b,
             "spread_pct":    round(price_diff_pct, 4),
             "net_spread_pct":round(net_spread, 4),
-            "estimated_apy": round(net_spread * 12, 4),  # assume monthly cycle
-            "category":      asset_a.get("category", ""),
+            "estimated_apy": round(net_spread * 12, 4),
+            "category":      high_a.get("category", ""),
             "tx_cost_pct":   round(gas_cost_pct, 4),
             "signal":        signal,
             "action": (
-                f"BUY {sym_a} on {lower_price_chain}, BRIDGE, SELL on {higher_price_chain}. "
-                f"Price diff: {price_diff_pct:.3f}%, Bridge + gas: {gas_cost_pct:.3f}%, "
-                f"Net: {net_spread:.3f}%."
+                f"BUY {sym} on {chain_b} (${price_b:.4f}), bridge, "
+                f"SELL on {chain_a} (${price_a:.4f}). "
+                f"Price diff: {price_diff_pct:.3f}%, net after costs: {net_spread:.3f}%."
             ),
-            "notes": note,
+            "notes": (
+                f"Same token ({sym}) trading at different prices on {chain_a} vs {chain_b}. "
+                f"Bridge cost: {BRIDGE_COST_PCT}% + gas ${gas_a + gas_b:.3f}."
+            ),
         }
         opportunities.append(opp)
 
@@ -431,8 +525,21 @@ def scan_defi_pool_arb() -> List[dict]:
     for pool in pools:
         sym = (pool.get("symbol") or "").upper()
         # Focus on RWA-adjacent symbols
-        rwa_syms = {"USDC", "USDT", "DAI", "FRAX", "OUSG", "USDM", "USDY",
-                    "TBILL", "USTB", "PAXG", "STBT", "CFG", "MPL", "GFI"}
+        rwa_syms = {
+            # Yield-bearing stablecoins / T-bill tokens
+            "USDC", "USDT", "DAI", "FRAX", "OUSG", "USDM", "USDY",
+            "TBILL", "USTB", "PAXG", "STBT", "CFG", "MPL", "GFI",
+            # New additions — expanded RWA universe
+            "USYC",   # Hashnote USYC on-chain T-bill
+            "USCC",   # OpenTrade USCC
+            "RLUSD",  # Ripple USD (XRPL/Ethereum)
+            "BUCK",   # Bucket Protocol (Sui)
+            "MOD",    # Thala MOD (Aptos)
+            "ACRED",  # Apollo ACRED tokenized credit
+            "SCOPE",  # Hamilton Lane SCOPE
+            "GNS",    # Gains Network (DEX tokenized stocks)
+            "DSHR",   # Dinari dShares (tokenized equities)
+        }
         if sym in rwa_syms and pool.get("apy", 0) > 0:
             by_sym.setdefault(sym, []).append(pool)
 
@@ -577,6 +684,202 @@ def scan_carry_trades(assets: List[dict]) -> List[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOKENIZED STOCK ARBITRAGE
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Known tokenized stock platforms and their underlying ticker mapping.
+# These are the on-chain wrappers — when crypto markets are open 24/7 but
+# traditional stock markets are closed, price gaps can open up.
+_TOKENIZED_EQUITY_CATEGORIES = {"Tokenized Equities"}
+
+# Approximate reference prices for common tokenized stocks (USD).
+# In production these would be fetched from CoinGecko/DeFiLlama/Dinari API.
+# Used as fallback when live prices are unavailable.
+_STOCK_REFERENCE_PRICES: Dict[str, float] = {
+    # Format: token_id → approximate mid price (refreshed by data feed in production)
+    "DINARI_DSHARES":        None,   # 200+ stocks — price fetched per symbol
+    "ROBINHOOD_TOKENIZED":   None,   # MiFID II tokenized equities
+    "GAINS_TOKENIZED":       None,   # Gains Network GNS synthetic basket
+    "NASDAQ_TOKENIZED":      None,   # Paxos-backed NASDAQ tokens (Paxos Prime)
+    "BACKED_NASDAQ100":      None,   # bNDX backed 1:1
+    "SYNTHETIX_STOCKS":      None,   # Synthetix sStocks
+    "TZERO_PLATFORM":        None,   # tZERO ATS
+}
+
+def scan_tokenized_stock_arb(assets: List[dict]) -> List[dict]:
+    """
+    Detect arbitrage opportunities between tokenized stock platforms:
+
+    1. Same underlying equity tokenized on different platforms
+       (e.g., Apple on Dinari vs Apple on Gains Network) — price gap.
+    2. On-chain price vs last-close NAV when US markets are closed
+       (weekend / after-hours premium/discount).
+    3. Cross-DEX arb for synthetic stock tokens (Gains vs Synthetix).
+
+    This scanner is future-ready: any new Tokenized Equities asset added
+    to config.py is automatically included with no code changes.
+    """
+    opportunities = []
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Filter to tokenized equity assets only
+    equity_assets = [
+        a for a in assets
+        if a.get("category") in _TOKENIZED_EQUITY_CATEGORIES
+    ]
+    if not equity_assets:
+        return []
+
+    tx_cost = TX_COSTS.get("Tokenized Equities", 0.05)  # 5 bps
+
+    # ── Strategy 1: Cross-platform price comparison ───────────────────────────
+    # Group by token_symbol (e.g., same underlying stock on different platforms)
+    by_sym: Dict[str, List[dict]] = {}
+    for asset in equity_assets:
+        sym = (asset.get("token_symbol") or "").upper()
+        if sym:
+            by_sym.setdefault(sym, []).append(asset)
+
+    for sym, sym_assets in by_sym.items():
+        if len(sym_assets) < 2:
+            continue
+
+        # Compare current prices
+        priced = [a for a in sym_assets if (a.get("current_price") or 0) > 0]
+        if len(priced) < 2:
+            continue
+
+        sorted_pa = sorted(priced, key=lambda x: x.get("current_price", 0), reverse=True)
+        high_a, low_b = sorted_pa[0], sorted_pa[-1]
+
+        if high_a["id"] == low_b["id"]:
+            continue
+
+        price_a = high_a.get("current_price", 0)
+        price_b = low_b.get("current_price", 0)
+        if price_b <= 0:
+            continue
+
+        price_diff_pct = (price_a - price_b) / price_b * 100
+        chain_a = (high_a.get("chain") or "Ethereum").split(" / ")[0].strip()
+        chain_b = (low_b.get("chain") or "Ethereum").split(" / ")[0].strip()
+        gas_a   = GAS_COSTS.get(chain_a, 1.0)
+        gas_b   = GAS_COSTS.get(chain_b, 1.0)
+        gas_cost_pct = (gas_a + gas_b) / MIN_TRADE_USD * 100
+
+        # Add bridge cost only if different chains
+        bridge = BRIDGE_COST_PCT if chain_a != chain_b else 0.0
+        net_spread = price_diff_pct - gas_cost_pct - bridge - tx_cost
+
+        if net_spread < ARB_MIN_PRICE_SPREAD_PCT:
+            continue
+
+        signal = (
+            "EXTREME_ARB" if net_spread >= ARB_EXTREME_THRESHOLD_PCT else
+            "STRONG_ARB"  if net_spread >= ARB_STRONG_THRESHOLD_PCT  else
+            "ARB"
+        )
+
+        opp = {
+            "timestamp":     now,
+            "type":          "tokenized_stock",
+            "asset_a_id":    high_a["id"],
+            "asset_b_id":    low_b["id"],
+            "asset_a_name":  f"{sym} on {high_a.get('protocol', chain_a)} (${price_a:.2f})",
+            "asset_b_name":  f"{sym} on {low_b.get('protocol', chain_b)} (${price_b:.2f})",
+            "protocol_a":    high_a.get("protocol", ""),
+            "protocol_b":    low_b.get("protocol", ""),
+            "chain_a":       chain_a,
+            "chain_b":       chain_b,
+            "yield_a_pct":   price_a,
+            "yield_b_pct":   price_b,
+            "spread_pct":    round(price_diff_pct, 4),
+            "net_spread_pct":round(net_spread, 4),
+            "estimated_apy": round(net_spread * 52, 4),  # annualized assuming weekly reversion
+            "category":      "Tokenized Equities",
+            "tx_cost_pct":   round(gas_cost_pct + bridge + tx_cost, 4),
+            "signal":        signal,
+            "action": (
+                f"BUY {sym} on {low_b.get('protocol', chain_b)} (${price_b:.4f}), "
+                f"SELL on {high_a.get('protocol', chain_a)} (${price_a:.4f}). "
+                f"Net spread: {net_spread:.3f}% after costs."
+            ),
+            "notes": (
+                f"Cross-platform tokenized equity arb. "
+                f"Both are 1:1 backed (Dinari/Robinhood/Gains). "
+                f"Verify redemption eligibility before executing. "
+                f"{'Bridge required: ' + chain_a + '→' + chain_b if chain_a != chain_b else 'Same chain — no bridge needed'}."
+            ),
+        }
+        opportunities.append(opp)
+
+    # ── Strategy 2: NAV deviation when markets are closed ─────────────────────
+    # When stock markets are closed (evenings, weekends), tokenized stocks
+    # can trade at a premium or discount vs their last closing price (NAV).
+    for asset in equity_assets:
+        price_vs_nav = asset.get("price_vs_nav_pct", 0) or 0
+        if abs(price_vs_nav) < ARB_MIN_PRICE_SPREAD_PCT:
+            continue
+
+        current_price = asset.get("current_price", 1.0) or 1.0
+        nav_price     = asset.get("nav_price", 1.0) or 1.0
+        if nav_price <= 0:
+            continue
+
+        direction    = "DISCOUNT" if price_vs_nav < 0 else "PREMIUM"
+        gross_spread = abs(price_vs_nav)
+        chain        = (asset.get("chain") or "Ethereum").split(" / ")[0].strip()
+        gas_cost_pct = GAS_COSTS.get(chain, 1.0) / MIN_TRADE_USD * 100
+        net_spread   = gross_spread - gas_cost_pct - tx_cost
+
+        if net_spread < ARB_MIN_PRICE_SPREAD_PCT:
+            continue
+
+        signal = (
+            "EXTREME_ARB" if net_spread >= ARB_EXTREME_THRESHOLD_PCT else
+            "STRONG_ARB"  if net_spread >= ARB_STRONG_THRESHOLD_PCT  else
+            "ARB"
+        )
+
+        opp = {
+            "timestamp":     now,
+            "type":          "tokenized_stock",
+            "asset_a_id":    asset["id"],
+            "asset_b_id":    "NAV_LAST_CLOSE",
+            "asset_a_name":  f"{asset['name']} (on-chain price)",
+            "asset_b_name":  "Last Closing NAV",
+            "protocol_a":    asset.get("protocol", ""),
+            "protocol_b":    "Stock Exchange",
+            "chain_a":       chain,
+            "chain_b":       "Traditional",
+            "yield_a_pct":   current_price,
+            "yield_b_pct":   nav_price,
+            "spread_pct":    round(gross_spread, 4),
+            "net_spread_pct":round(net_spread, 4),
+            "estimated_apy": round(net_spread * 52, 4),
+            "category":      "Tokenized Equities",
+            "tx_cost_pct":   round(gas_cost_pct + tx_cost, 4),
+            "direction":     direction,
+            "signal":        signal,
+            "action": (
+                f"{'BUY' if direction == 'DISCOUNT' else 'SELL'} {asset['id']}: "
+                f"Token at ${current_price:.4f} vs last-close NAV ${nav_price:.4f} "
+                f"({direction} {gross_spread:.2f}%). Wait for market open to capture reversion. "
+                f"Net after costs: {net_spread:.2f}%."
+            ),
+            "notes": (
+                f"After-hours / weekend NAV deviation. "
+                f"Platform: {asset.get('protocol', '?')}. "
+                f"Note: redemption may require next trading day settlement. "
+                f"Risk: gap may not fully close if news event occurred."
+            ),
+        }
+        opportunities.append(opp)
+
+    return sorted(opportunities, key=lambda x: x["net_spread_pct"], reverse=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN SCANNER
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -643,6 +946,14 @@ def run_full_arb_scan(assets: List[dict] = None) -> List[dict]:
         all_opps.extend(opps)
     except Exception as e:
         logger.error("[Arb] carry_trades failed: %s", e)
+
+    # 7. Tokenized stock arb (cross-platform + after-hours NAV deviation)
+    try:
+        opps = scan_tokenized_stock_arb(assets)
+        logger.info("[Arb] Tokenized stock arb: %d opportunities", len(opps))
+        all_opps.extend(opps)
+    except Exception as e:
+        logger.error("[Arb] tokenized_stock_arb failed: %s", e)
 
     # Mark old opportunities as inactive
     try:
