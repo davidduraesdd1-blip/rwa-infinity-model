@@ -68,6 +68,17 @@ GAS_COSTS = {
     "Algorand":     0.001,   # ALGO minimum fee
     "Tron":         0.01,    # TRX energy model
     "Multiple":     1.00,    # multi-chain: conservatively use Ethereum-level costs
+    # New chains — 2025/2026 additions
+    "Plume":        0.01,    # purpose-built RWA chain, EVM-compatible, very low gas
+    "Mantra":       0.01,    # Cosmos SDK appchain, very low gas
+    "Noble":        0.001,   # Cosmos IBC T-bill chain, near-zero fees
+    "TON":          0.01,    # Telegram Open Network
+    "ZKsync Era":   0.05,    # ZK rollup, cheaper than Ethereum mainnet
+    "Starknet":     0.05,    # StarkWare ZK rollup
+    "Linea":        0.02,    # Consensys L2
+    "Mantle":       0.01,    # Bybit-backed L2
+    "Kinexys":      0.10,    # JPMorgan private EVM (internal transfer estimate)
+    "Centrifuge Chain": 0.10, # Polkadot parachain
 }
 
 # Minimum trade size to make arb worthwhile
@@ -530,15 +541,25 @@ def scan_defi_pool_arb() -> List[dict]:
             "USDC", "USDT", "DAI", "FRAX", "OUSG", "USDM", "USDY",
             "TBILL", "USTB", "PAXG", "STBT", "CFG", "MPL", "GFI",
             # New additions — expanded RWA universe
-            "USYC",   # Hashnote USYC on-chain T-bill
-            "USCC",   # OpenTrade USCC
-            "RLUSD",  # Ripple USD (XRPL/Ethereum)
-            "BUCK",   # Bucket Protocol (Sui)
-            "MOD",    # Thala MOD (Aptos)
-            "ACRED",  # Apollo ACRED tokenized credit
-            "SCOPE",  # Hamilton Lane SCOPE
-            "GNS",    # Gains Network (DEX tokenized stocks)
-            "DSHR",   # Dinari dShares (tokenized equities)
+            "USYC",     # Hashnote USYC on-chain T-bill
+            "USCC",     # Superstate Crypto Carry Fund
+            "RLUSD",    # Ripple USD (XRPL/Ethereum)
+            "BUCK",     # Bucket Protocol (Sui)
+            "MOD",      # Thala MOD (Aptos)
+            "ACRED",    # Apollo ACRED tokenized credit
+            "SCOPE",    # Hamilton Lane SCOPE
+            "GNS",      # Gains Network (DEX tokenized stocks)
+            "DSHR",     # Dinari dShares (tokenized equities)
+            # 2025-2026 additions
+            "USD0",     # Usual Protocol USD0 (BUIDL-backed stablecoin)
+            "AUSD",     # Agora AUSD T-bill stablecoin
+            "USDS",     # Sky/MakerDAO USDS upgraded stablecoin
+            "sUSDe",    # Ethena staked USDe (basis-trade yield)
+            "USDY-APT", # Ondo USDY on Aptos
+            "KAU",      # Kinesis Gold
+            "KAG",      # Kinesis Silver
+            "PT-USDY",  # Pendle PT (fixed-rate T-bill)
+            "rTBILL",   # Plume Network T-bill token
         }
         if sym in rwa_syms and pool.get("apy", 0) > 0:
             by_sym.setdefault(sym, []).append(pool)
