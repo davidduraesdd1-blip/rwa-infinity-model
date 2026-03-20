@@ -24,6 +24,8 @@ from config import (
     NEWSAPI_API_KEY, CRYPTOPANIC_API_KEY,
     BINANCE_API_KEY, BINANCE_API_SECRET,
     DUNE_API_KEY,
+    SANTIMENT_API_KEY, FRED_API_KEY,
+    get_asset_fee_bps,
 )
 
 logger = logging.getLogger(__name__)
@@ -989,3 +991,373 @@ def fetch_dune_tbill_holders() -> dict:
         "rows": [], "source": "unavailable",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 1: YIELD NORMALIZATION ENGINE
+# Standardizes all RWA yields to Net APY (compound annual, after fees, USD)
+# This creates the "RWA Infinity Net APY" — a single comparable standard.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def normalize_yield_to_net_apy(gross_yield_pct: float, fee_bps: int,
+                                compounding_periods: int = 365) -> float:
+    """
+    Convert a gross yield to Net APY after fees, compounded annually.
+
+    Formula:
+        daily_gross = (1 + gross/100)^(1/periods) - 1
+        daily_fee   = fee_bps / 10000 / 365
+        daily_net   = daily_gross - daily_fee
+        net_apy     = (1 + daily_net)^periods - 1
+
+    Args:
+        gross_yield_pct:    Gross annual yield percentage (e.g. 4.5 for 4.5%)
+        fee_bps:            Annual management fee in basis points (e.g. 15 for 0.15%)
+        compounding_periods: 365 for daily, 12 for monthly, 1 for annual
+
+    Returns: Net APY as a percentage (e.g. 4.32)
+    """
+    if gross_yield_pct <= 0:
+        return 0.0
+    try:
+        fee_pct      = fee_bps / 100.0          # convert bps → pct
+        net_annual   = gross_yield_pct - fee_pct # simplified linear deduction
+        # Compound the net yield
+        period_rate  = (1 + net_annual / 100) ** (1 / compounding_periods) - 1
+        net_apy      = ((1 + period_rate) ** compounding_periods - 1) * 100
+        return round(max(net_apy, 0.0), 4)
+    except Exception:
+        return max(gross_yield_pct - fee_bps / 100.0, 0.0)
+
+
+def get_normalized_universe() -> list:
+    """
+    Return the full RWA universe with an added 'net_apy_pct' field
+    representing the standardized Net APY after fees.
+    """
+    result = []
+    for asset in RWA_UNIVERSE:
+        asset_id   = asset.get("id", "")
+        category   = asset.get("category", "")
+        gross      = asset.get("current_yield_pct") or asset.get("expected_yield_pct") or 0.0
+        fee_bps    = get_asset_fee_bps(asset_id, category)
+        net_apy    = normalize_yield_to_net_apy(float(gross), fee_bps)
+        enriched   = dict(asset)
+        enriched["fee_bps"]    = fee_bps
+        enriched["net_apy_pct"]= net_apy
+        result.append(enriched)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 2: FRED / US TREASURY YIELD CURVE
+# Fetches live yield curve from Federal Reserve FRED (no API key required
+# for CSV endpoint). Falls back to hardcoded values on failure.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# FRED CSV series IDs → tenor labels
+_FRED_YIELD_SERIES = {
+    "1m":  "DGS1MO",
+    "3m":  "DGS3MO",
+    "6m":  "DGS6MO",
+    "1y":  "DGS1",
+    "2y":  "DGS2",
+    "5y":  "DGS5",
+    "10y": "DGS10",
+    "30y": "DGS30",
+}
+
+# Fallback values (March 2026 approximate)
+_YIELD_CURVE_FALLBACK = {
+    "1m": 4.30, "3m": 4.32, "6m": 4.28,
+    "1y": 4.18, "2y": 4.05, "5y": 4.10,
+    "10y": 4.25, "30y": 4.55,
+}
+
+
+def fetch_treasury_yield_curve() -> dict:
+    """
+    Fetch the US Treasury par yield curve from FRED.
+    Uses public CSV endpoint — no API key required.
+
+    Returns:
+        {
+          "yields":    {"1m": 4.32, "3m": 4.30, ...},
+          "source":    "FRED" | "fallback",
+          "timestamp": ISO string,
+        }
+    """
+    def _fetch():
+        yields = {}
+        for tenor, series_id in _FRED_YIELD_SERIES.items():
+            try:
+                # Use FRED API if key present, else CSV endpoint
+                if FRED_API_KEY:
+                    url = "https://api.stlouisfed.org/fred/series/observations"
+                    params = {
+                        "series_id":   series_id,
+                        "api_key":     FRED_API_KEY,
+                        "file_type":   "json",
+                        "sort_order":  "desc",
+                        "limit":       5,
+                    }
+                    resp = _session.get(url, params=params, timeout=10)
+                    if resp.status_code == 200:
+                        obs = resp.json().get("observations", [])
+                        for o in obs:
+                            val = o.get("value", ".")
+                            if val != ".":
+                                yields[tenor] = float(val)
+                                break
+                else:
+                    # FRED public CSV (no key)
+                    url  = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+                    resp = _session.get(url, timeout=10)
+                    if resp.status_code == 200:
+                        lines = resp.text.strip().split("\n")
+                        for line in reversed(lines[1:]):
+                            parts = line.split(",")
+                            if len(parts) == 2 and parts[1].strip() not in (".", ""):
+                                yields[tenor] = float(parts[1].strip())
+                                break
+            except Exception as e:
+                logger.debug("[FRED] %s fetch failed: %s", series_id, e)
+
+        if not yields:
+            return {"yields": _YIELD_CURVE_FALLBACK, "source": "fallback",
+                    "timestamp": datetime.now(timezone.utc).isoformat()}
+
+        # Fill any missing tenors from fallback
+        for k, v in _YIELD_CURVE_FALLBACK.items():
+            yields.setdefault(k, v)
+
+        return {
+            "yields":    yields,
+            "source":    "FRED",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return _cached_get("treasury_yield_curve", CACHE_TTL["yields"], _fetch) or {
+        "yields": _YIELD_CURVE_FALLBACK, "source": "fallback",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def get_risk_free_rate() -> float:
+    """Return the current 3-month T-bill yield as the risk-free rate."""
+    curve = fetch_treasury_yield_curve()
+    return curve["yields"].get("3m", 4.32)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 3: PRIVATE CREDIT EARLY-WARNING SYSTEM
+# Monitors Maple, Centrifuge, Goldfinch, TrueFi, Clearpool for stress signals.
+# Warning signals: high utilization, single-borrower concentration, past-due loans.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_private_credit_warnings() -> list:
+    """
+    Aggregate health warnings across all tracked private credit protocols.
+
+    Returns list of warning dicts:
+        {
+          "protocol":  str,
+          "pool":      str,
+          "type":      "HIGH_UTILIZATION" | "CONCENTRATION" | "YIELD_DROP" | "LOW_TVL",
+          "severity":  "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",
+          "value":     float,   # the metric value that triggered the warning
+          "threshold": float,   # the threshold exceeded
+          "message":   str,
+        }
+    """
+    warnings = []
+
+    # ── Maple Finance ──────────────────────────────────────────────────────────
+    try:
+        maple = fetch_maple_stats()
+        pools = maple.get("pools", []) if isinstance(maple, dict) else []
+        if not pools and isinstance(maple, dict):
+            # Try top-level fields from the aggregate stats endpoint
+            total_value  = float(maple.get("totalValueLocked", 0) or 0)
+            total_loans  = float(maple.get("totalLoansOriginated", 0) or 0)
+            if total_value > 0:
+                util = min(total_loans / total_value, 1.0) if total_value > 0 else 0
+                if util > 0.90:
+                    warnings.append({
+                        "protocol": "Maple Finance", "pool": "Aggregate",
+                        "type": "HIGH_UTILIZATION", "severity": "HIGH",
+                        "value": round(util * 100, 1), "threshold": 90.0,
+                        "message": f"Maple aggregate utilization {util*100:.1f}% > 90% — limited liquidity buffer",
+                    })
+    except Exception as e:
+        logger.debug("[EarlyWarning] Maple: %s", e)
+
+    # ── Centrifuge ─────────────────────────────────────────────────────────────
+    try:
+        cf_pools = fetch_centrifuge_pools()
+        for pool in cf_pools:
+            tvl   = float(pool.get("tvl", 0) or 0)
+            yld   = float(pool.get("yield", 0) or 0)
+            name  = pool.get("name", pool.get("id", "Unknown"))
+
+            if tvl > 0 and tvl < 500_000:
+                warnings.append({
+                    "protocol": "Centrifuge", "pool": name,
+                    "type": "LOW_TVL", "severity": "MEDIUM",
+                    "value": tvl, "threshold": 500_000,
+                    "message": f"Pool '{name}' TVL ${tvl:,.0f} below $500K — thin liquidity",
+                })
+            if yld > 0 and yld < 3.0:
+                warnings.append({
+                    "protocol": "Centrifuge", "pool": name,
+                    "type": "YIELD_DROP", "severity": "LOW",
+                    "value": round(yld, 2), "threshold": 3.0,
+                    "message": f"Pool '{name}' yield {yld:.2f}% — below 3% floor",
+                })
+    except Exception as e:
+        logger.debug("[EarlyWarning] Centrifuge: %s", e)
+
+    # ── DeFiLlama protocol health check ───────────────────────────────────────
+    try:
+        protocols = fetch_defillama_protocols()
+        private_credit_protocols = {
+            "maple", "goldfinch", "truefi", "centrifuge", "credix",
+            "clearpool", "polytrade", "huma-finance",
+        }
+        for p in protocols:
+            slug  = (p.get("slug") or p.get("name") or "").lower()
+            name  = p.get("name", slug)
+            tvl   = float(p.get("tvl", 0) or 0)
+            ch24  = float(p.get("change_1d", 0) or 0)
+
+            if not any(s in slug for s in private_credit_protocols):
+                continue
+
+            # Sharp TVL drop in 24h = potential withdrawal pressure
+            if ch24 < -15:
+                warnings.append({
+                    "protocol": name, "pool": "Protocol TVL",
+                    "type": "TVL_DROP", "severity": "HIGH",
+                    "value": round(ch24, 1), "threshold": -15.0,
+                    "message": f"{name} TVL dropped {ch24:.1f}% in 24h — withdrawal pressure signal",
+                })
+            elif ch24 < -8:
+                warnings.append({
+                    "protocol": name, "pool": "Protocol TVL",
+                    "type": "TVL_DROP", "severity": "MEDIUM",
+                    "value": round(ch24, 1), "threshold": -8.0,
+                    "message": f"{name} TVL dropped {ch24:.1f}% in 24h — monitor closely",
+                })
+    except Exception as e:
+        logger.debug("[EarlyWarning] DeFiLlama protocols: %s", e)
+
+    # Sort by severity
+    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    warnings.sort(key=lambda w: severity_order.get(w["severity"], 9))
+    return warnings
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 4: SOCIAL INTELLIGENCE
+# Optional Santiment API integration for social volume + dev activity.
+# Falls back gracefully when SANTIMENT_API_KEY not set.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Santiment slugs for major RWA protocols
+_SANTIMENT_SLUGS = {
+    "ondo-finance":    "ondo-finance",
+    "maple-finance":   "maple-finance",
+    "centrifuge":      "centrifuge",
+    "goldfinch":       "goldfinch",
+    "truefi":          "truefi",
+    "pendle":          "pendle",
+    "ethena":          "ethena",
+    "morpho":          "morpho",
+}
+
+_SANTIMENT_API = "https://api.santiment.net/graphql"
+
+
+def fetch_social_signals() -> dict:
+    """
+    Fetch social volume and developer activity for key RWA protocols.
+    Requires SANTIMENT_API_KEY. Returns empty dict gracefully when unavailable.
+
+    Returns:
+        {
+          "protocol_slug": {
+            "social_volume_7d": float,  # social mentions last 7 days
+            "dev_activity_30d": float,  # GitHub commits last 30 days
+            "sentiment":        float,  # -1.0 to 1.0
+          },
+          ...
+          "timestamp": str,
+          "source": "santiment" | "unavailable",
+        }
+    """
+    if not SANTIMENT_API_KEY:
+        return {"source": "unavailable", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    def _fetch():
+        slugs_str = '", "'.join(_SANTIMENT_SLUGS.values())
+        # GraphQL query for social volume (last 7 days) and dev activity (last 30 days)
+        query = f"""
+        {{
+          allProjects(
+            selector: {{ slugs: ["{slugs_str}"] }}
+          ) {{
+            slug
+            socialVolumeLast7d: aggregatedTimeseriesData(
+              metric: "social_volume_total"
+              from: "{(datetime.now(timezone.utc) - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ')}"
+              to:   "{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}"
+              aggregation: SUM
+            )
+            devActivity30d: aggregatedTimeseriesData(
+              metric: "dev_activity"
+              from: "{(datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')}"
+              to:   "{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}"
+              aggregation: SUM
+            )
+          }}
+        }}
+        """
+        headers = {"Authorization": f"Apikey {SANTIMENT_API_KEY}"}
+        resp = _session.post(_SANTIMENT_API, json={"query": query},
+                             headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return {"source": "unavailable", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+        data    = resp.json().get("data", {}).get("allProjects", [])
+        result  = {}
+        for item in data:
+            slug = item.get("slug", "")
+            result[slug] = {
+                "social_volume_7d": float(item.get("socialVolumeLast7d") or 0),
+                "dev_activity_30d": float(item.get("devActivity30d") or 0),
+                "sentiment":        0.0,   # neutral default — sentiment endpoint needs separate call
+            }
+        result["source"]    = "santiment"
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    return _cached_get("social_signals", 3600, _fetch) or {
+        "source": "unavailable", "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def get_social_signal_for_asset(asset_id: str) -> dict:
+    """
+    Return social signal data for a specific asset ID.
+    Maps RWA universe IDs to Santiment slugs.
+    """
+    signals = fetch_social_signals()
+    # Direct slug mapping
+    id_to_slug = {
+        "OUSG": "ondo-finance", "USDY": "ondo-finance", "ONDO-GM": "ondo-finance",
+        "MPL": "maple-finance", "CLPOOL": "clearpool",
+        "GFI": "goldfinch", "TRU": "truefi", "CFG": "centrifuge",
+        "PT-USDY": "pendle", "PT-USDM": "pendle",
+    }
+    slug = id_to_slug.get(asset_id, "")
+    return signals.get(slug, {"social_volume_7d": 0, "dev_activity_30d": 0, "sentiment": 0.0})

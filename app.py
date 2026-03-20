@@ -683,6 +683,136 @@ with tab_portfolio:
                 )
                 st.plotly_chart(fig_mc, use_container_width=True)
 
+    # ── Duration / Interest Rate Risk ────────────────────────────────────────
+    if holdings:
+        try:
+            from portfolio import calculate_portfolio_duration, calculate_portfolio_liquidity
+            from data_feeds import fetch_treasury_yield_curve, get_private_credit_warnings
+
+            st.markdown('<div class="section-header">Interest Rate Risk</div>',
+                        unsafe_allow_html=True)
+            dur = calculate_portfolio_duration(holdings, portfolio_value)
+            if dur:
+                d1, d2, d3, d4 = st.columns(4)
+                with d1:
+                    _metric_card("Avg Duration",
+                                 f"{dur['weighted_avg_duration']:.2f} yrs",
+                                 dur["rate_exposure_label"])
+                with d2:
+                    _metric_card("DV01 (per $1M)",
+                                 f"${dur['dv01_per_million']:,.0f}",
+                                 "$ loss per 1bp rate rise")
+                with d3:
+                    zero_pct = dur.get("zero_duration_pct", 0)
+                    _metric_card("Zero-Duration Assets",
+                                 f"{zero_pct:.1f}%",
+                                 "Commodities / Equity (no rate risk)")
+                with d4:
+                    curve = fetch_treasury_yield_curve()
+                    rf    = curve["yields"].get("3m", 4.32)
+                    _metric_card("Live Risk-Free Rate",
+                                 f"{rf:.2f}%",
+                                 f"3m T-bill — source: {curve['source']}")
+
+                # Rate scenario table
+                scen_df = pd.DataFrame(dur["scenarios"])
+                scen_df["Impact"] = scen_df["pnl_usd"].apply(
+                    lambda v: f"{'▲' if v > 0 else '▼' if v < 0 else '—'} {_fmt_usd(abs(v))}"
+                )
+                scen_df["P&L %"] = scen_df["pnl_pct"].apply(
+                    lambda v: f"{'+' if v > 0 else ''}{v:.3f}%"
+                )
+                st.caption("Parallel yield curve shift scenarios (estimated price impact)")
+                st.dataframe(
+                    scen_df[["label", "Impact", "P&L %"]].rename(
+                        columns={"label": "Rate Shift"}
+                    ).set_index("Rate Shift"),
+                    use_container_width=True,
+                    height=280,
+                )
+
+                # Duration breakdown
+                with st.expander("Duration by Holding", expanded=False):
+                    hdur_df = pd.DataFrame(dur["holdings_duration"])
+                    if not hdur_df.empty:
+                        st.dataframe(
+                            hdur_df[["id", "category", "weight_pct",
+                                     "duration_years", "contribution_years"]].rename(columns={
+                                "id": "Asset", "category": "Category",
+                                "weight_pct": "Weight %",
+                                "duration_years": "Duration (yrs)",
+                                "contribution_years": "Contribution (yrs)",
+                            }).style.format({"Weight %": "{:.1f}", "Duration (yrs)": "{:.2f}",
+                                             "Contribution (yrs)": "{:.4f}"}),
+                            use_container_width=True,
+                        )
+        except Exception as e:
+            logger.warning("[UI] Duration section failed: %s", e)
+
+    # ── Liquidity Profile ────────────────────────────────────────────────────
+    if holdings:
+        try:
+            from portfolio import calculate_portfolio_liquidity
+            st.markdown('<div class="section-header">Liquidity Profile</div>',
+                        unsafe_allow_html=True)
+            liq = calculate_portfolio_liquidity(holdings, portfolio_value)
+            if liq:
+                l1, l2, l3, l4 = st.columns(4)
+                with l1:
+                    _metric_card("Liquidity Score",
+                                 f"{liq['portfolio_liquidity_score']:.0f}/100",
+                                 liq["liquidity_label"])
+                with l2:
+                    _metric_card("Liquid (<3 days)",
+                                 f"{liq['liquid_pct']:.1f}%",
+                                 f"{_fmt_usd(portfolio_value * liq['liquid_pct'] / 100)}")
+                with l3:
+                    _metric_card("30-Day Exit",
+                                 _fmt_usd(liq["30d_exit_usd"]),
+                                 f"{(liq['liquid_pct'] + liq['semi_liquid_pct']):.1f}% of portfolio")
+                with l4:
+                    _metric_card("Illiquid (>30 days)",
+                                 f"{liq['illiquid_pct']:.1f}%",
+                                 f"{_fmt_usd(portfolio_value * liq['illiquid_pct'] / 100)}")
+
+                # Liquidity donut
+                liq_labels = ["Liquid (<3d)", "Semi-Liquid (3-30d)", "Illiquid (>30d)"]
+                liq_vals   = [liq["liquid_pct"], liq["semi_liquid_pct"], liq["illiquid_pct"]]
+                fig_liq = go.Figure(go.Pie(
+                    labels=liq_labels, values=liq_vals,
+                    hole=0.55,
+                    marker_colors=["#34D399", "#FBBF24", "#EF4444"],
+                ))
+                fig_liq.update_layout(
+                    paper_bgcolor="#111827", font_color="#E2E8F0",
+                    showlegend=True, height=250,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                )
+                st.plotly_chart(fig_liq, use_container_width=True)
+        except Exception as e:
+            logger.warning("[UI] Liquidity section failed: %s", e)
+
+    # ── Private Credit Early Warnings ────────────────────────────────────────
+    try:
+        from data_feeds import get_private_credit_warnings
+        pc_warnings = get_private_credit_warnings()
+        if pc_warnings:
+            st.markdown('<div class="section-header">⚠️ Private Credit Early Warnings</div>',
+                        unsafe_allow_html=True)
+            sev_colors = {"CRITICAL": "#EF4444", "HIGH": "#F97316",
+                          "MEDIUM": "#FBBF24", "LOW": "#34D399"}
+            for w in pc_warnings[:8]:
+                color = sev_colors.get(w["severity"], "#6B7280")
+                st.markdown(
+                    f'<div style="border-left:3px solid {color};padding:8px 12px;'
+                    f'margin:4px 0;background:#1F2937;border-radius:4px;">'
+                    f'<span style="color:{color};font-weight:bold;">[{w["severity"]}] '
+                    f'{w["protocol"]}</span> — {w["message"]}</div>',
+                    unsafe_allow_html=True,
+                )
+    except Exception as e:
+        logger.warning("[UI] Credit warnings failed: %s", e)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2: ASSET UNIVERSE
@@ -704,6 +834,7 @@ with tab_universe:
         min_yield = st.number_input("Min Yield %", 0.0, 50.0, 0.0, 0.5, key="filter_yield")
     with f4:
         sort_by = st.selectbox("Sort By", ["composite_score", "current_yield_pct",
+                                            "net_apy_pct", "liq_score_comp",
                                             "tvl_usd", "risk_score", "liquidity_score"],
                                 key="filter_sort")
 
@@ -741,15 +872,36 @@ with tab_universe:
         )
         st.plotly_chart(fig_cats, use_container_width=True)
 
+        # Enrich with Net APY and composite liquidity score
+        try:
+            from data_feeds import normalize_yield_to_net_apy
+            from portfolio import calculate_asset_liquidity_score
+            from config import get_asset_fee_bps
+            def _net_apy(row):
+                gross = row.get("current_yield_pct") or row.get("expected_yield_pct") or 0
+                fee   = get_asset_fee_bps(row.get("id", ""), row.get("category", ""))
+                return normalize_yield_to_net_apy(float(gross), fee)
+            def _liq_score(row):
+                return calculate_asset_liquidity_score(
+                    row.get("id", ""), row.get("category", ""),
+                    int(row.get("liquidity_score", 5) or 5)
+                )
+            filtered_df = filtered_df.copy()
+            filtered_df["net_apy_pct"]      = filtered_df.apply(_net_apy, axis=1)
+            filtered_df["liq_score_comp"]   = filtered_df.apply(_liq_score, axis=1)
+        except Exception:
+            filtered_df["net_apy_pct"]    = filtered_df.get("current_yield_pct", 0)
+            filtered_df["liq_score_comp"] = filtered_df.get("liquidity_score", 5)
+
         # Asset table
         show_cols = {
             "id": "ID", "name": "Name", "category": "Category",
             "chain": "Chain", "protocol": "Protocol",
-            "current_yield_pct": "Yield %",
-            "expected_yield_pct": "Expected Yield %",
+            "current_yield_pct": "Gross Yield %",
+            "net_apy_pct": "Net APY %",
             "tvl_usd": "TVL",
             "risk_score": "Risk",
-            "liquidity_score": "Liquidity",
+            "liq_score_comp": "Liq Score",
             "regulatory_score": "Regulatory",
             "composite_score": "Score",
             "min_investment_usd": "Min Investment",
@@ -766,8 +918,8 @@ with tab_universe:
                 return "Public" if v == 0 else f"${v:,.0f}"
             except Exception: return "—"
 
-        fmt_map = {"Yield %": "{:.2f}%", "Expected Yield %": "{:.2f}%",
-                   "Score": "{:.1f}"}
+        fmt_map = {"Gross Yield %": "{:.2f}%", "Net APY %": "{:.2f}%",
+                   "Score": "{:.1f}", "Liq Score": "{:.0f}"}
         for col in ["TVL", "Min Investment"]:
             if col in table_df.columns:
                 fn = _fmt_tvl if col == "TVL" else _fmt_min_inv
@@ -1268,6 +1420,52 @@ with tab_reg:
         "</p>",
         unsafe_allow_html=True,
     )
+
+    # ── Live US Treasury Yield Curve ──────────────────────────────────────────
+    try:
+        from data_feeds import fetch_treasury_yield_curve
+        st.markdown('<div class="section-header">Live US Treasury Yield Curve</div>',
+                    unsafe_allow_html=True)
+        curve_data = fetch_treasury_yield_curve()
+        curve_ylds = curve_data.get("yields", {})
+        tenor_order = ["1m", "3m", "6m", "1y", "2y", "5y", "10y", "30y"]
+        tenor_labels = {"1m": "1M", "3m": "3M", "6m": "6M", "1y": "1Y",
+                        "2y": "2Y", "5y": "5Y", "10y": "10Y", "30y": "30Y"}
+        tenors = [t for t in tenor_order if t in curve_ylds]
+        yields = [curve_ylds[t] for t in tenors]
+        if tenors:
+            fig_curve = go.Figure()
+            fig_curve.add_trace(go.Scatter(
+                x=[tenor_labels[t] for t in tenors], y=yields,
+                mode="lines+markers",
+                line=dict(color="#00D4FF", width=2.5),
+                marker=dict(size=8, color="#00D4FF"),
+                fill="tozeroy", fillcolor="rgba(0,212,255,0.08)",
+                name="Treasury Yield",
+            ))
+            fig_curve.update_layout(
+                paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+                font_color="#E2E8F0",
+                xaxis=dict(title="Tenor", gridcolor="#1F2937"),
+                yaxis=dict(title="Yield %", gridcolor="#1F2937"),
+                height=280,
+                margin=dict(l=50, r=20, t=20, b=40),
+            )
+            st.plotly_chart(fig_curve, use_container_width=True)
+            # KPI row for key rates
+            rc1, rc2, rc3, rc4, rc5 = st.columns(5)
+            rate_kpis = [
+                ("3M T-Bill", "3m"), ("1Y", "1y"), ("2Y", "2y"),
+                ("10Y", "10y"), ("30Y", "30y"),
+            ]
+            for col, (label, tenor) in zip([rc1, rc2, rc3, rc4, rc5], rate_kpis):
+                with col:
+                    _metric_card(label, f"{curve_ylds.get(tenor, 'N/A')}%",
+                                 f"Source: {curve_data['source']}")
+        else:
+            st.info("Yield curve data unavailable — check connection")
+    except Exception as e:
+        logger.warning("[UI] Yield curve: %s", e)
 
     from datetime import date as _date
 

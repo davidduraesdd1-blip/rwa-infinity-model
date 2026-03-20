@@ -21,7 +21,8 @@ import pandas as pd
 import database as _db
 from config import (
     RWA_UNIVERSE, PORTFOLIO_TIERS, CATEGORY_COLORS,
-    ARB_MIN_YIELD_SPREAD_PCT
+    ARB_MIN_YIELD_SPREAD_PCT,
+    get_asset_duration, get_asset_liquidity_meta, get_asset_fee_bps,
 )
 
 logger = logging.getLogger(__name__)
@@ -930,4 +931,238 @@ def stress_test_correlations(portfolio: dict, scenario: str = "crisis") -> dict:
         "metrics":      stressed_metrics,
         "delta":        delta,
         "correlation":  corr_value,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE: DURATION / INTEREST RATE RISK MODULE
+# Calculates portfolio duration, DV01, and rate scenario P&L.
+# DV01 = dollar value of a 1 basis point move in rates (per $1M invested).
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RATE_SCENARIOS_BPS = [-200, -100, -50, 0, 50, 100, 200]
+
+
+def calculate_portfolio_duration(holdings: list, portfolio_value_usd: float = 100_000) -> dict:
+    """
+    Compute interest rate risk metrics for a portfolio of RWA holdings.
+
+    Args:
+        holdings: List of holding dicts with keys: id, category, weight_pct
+        portfolio_value_usd: Total portfolio value in USD
+
+    Returns dict:
+        {
+          "weighted_avg_duration":  float,  # years
+          "dv01_usd":               float,  # $ loss per 1bp rate rise
+          "dv01_per_million":        float,  # DV01 scaled to $1M
+          "rate_exposure_label":    str,    # "Ultra-Short" | "Short" | "Medium" | "Long"
+          "zero_duration_pct":      float,  # % of portfolio with zero rate sensitivity
+          "scenarios": [
+            {"shift_bps": int, "pnl_usd": float, "pnl_pct": float, "label": str},
+            ...
+          ],
+          "holdings_duration": [
+            {"id": str, "category": str, "weight_pct": float, "duration_years": float,
+             "contribution_years": float},
+            ...
+          ],
+        }
+    """
+    if not holdings:
+        return {}
+
+    holdings_dur = []
+    total_weight = sum(h.get("weight_pct", 0) for h in holdings)
+
+    for h in holdings:
+        asset_id   = h.get("id", "")
+        category   = h.get("category", "")
+        weight_pct = h.get("weight_pct", 0)
+        weight_frac = weight_pct / max(total_weight, 1.0)
+        duration   = get_asset_duration(asset_id, category)
+        holdings_dur.append({
+            "id":               asset_id,
+            "category":         category,
+            "weight_pct":       round(weight_pct, 2),
+            "duration_years":   duration,
+            "contribution_years": round(weight_frac * duration, 4),
+        })
+
+    # Weighted average duration
+    wav_duration = sum(h["contribution_years"] for h in holdings_dur)
+
+    # DV01: for a 1bp (0.0001) rate change, bond price moves by ~ -Duration × 0.0001 × Value
+    dv01 = portfolio_value_usd * wav_duration * 0.0001   # $ loss per 1bp rate RISE
+
+    # % of portfolio with zero duration (commodities, art, equity-like)
+    zero_dur_pct = sum(
+        h["weight_pct"] for h in holdings_dur if h["duration_years"] == 0.0
+    )
+
+    # Duration label
+    if wav_duration < 0.25:
+        dur_label = "Ultra-Short (<3 months)"
+    elif wav_duration < 1.0:
+        dur_label = "Short (3-12 months)"
+    elif wav_duration < 3.0:
+        dur_label = "Medium (1-3 years)"
+    elif wav_duration < 7.0:
+        dur_label = "Long (3-7 years)"
+    else:
+        dur_label = "Ultra-Long (>7 years)"
+
+    # Rate scenarios: P&L impact of parallel yield curve shifts
+    scenarios = []
+    for shift_bps in _RATE_SCENARIOS_BPS:
+        # Price impact ≈ -ModDuration × ΔRate  (convexity adjustment skipped for simplicity)
+        pnl_pct = -wav_duration * (shift_bps / 10000) * 100   # as % of portfolio
+        pnl_usd = portfolio_value_usd * pnl_pct / 100
+        label = (
+            f"+{shift_bps}bp" if shift_bps > 0
+            else f"{shift_bps}bp" if shift_bps < 0
+            else "Unchanged"
+        )
+        scenarios.append({
+            "shift_bps": shift_bps,
+            "label":     label,
+            "pnl_usd":   round(pnl_usd, 2),
+            "pnl_pct":   round(pnl_pct, 3),
+        })
+
+    return {
+        "weighted_avg_duration": round(wav_duration, 4),
+        "dv01_usd":              round(dv01, 2),
+        "dv01_per_million":      round(dv01 * (1_000_000 / max(portfolio_value_usd, 1)), 2),
+        "rate_exposure_label":   dur_label,
+        "zero_duration_pct":     round(zero_dur_pct, 2),
+        "scenarios":             scenarios,
+        "holdings_duration":     sorted(holdings_dur, key=lambda x: -x["contribution_years"]),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE: SECONDARY MARKET LIQUIDITY SCORING
+# Composite liquidity score (0–100) per asset incorporating:
+#   - Redemption speed (primary driver)
+#   - Secondary market existence and depth
+#   - Protocol liquidity_score from config (1-10)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _redemption_speed_score(days: int) -> float:
+    """Convert redemption window (days) to a speed score 0-100."""
+    if days == 0:    return 100.0   # instant DEX
+    if days <= 1:    return 90.0    # T+1
+    if days <= 3:    return 80.0    # T+3
+    if days <= 7:    return 65.0    # weekly
+    if days <= 14:   return 50.0    # bi-weekly
+    if days <= 30:   return 35.0    # monthly
+    if days <= 90:   return 20.0    # quarterly
+    if days <= 180:  return 10.0    # semi-annual
+    if days <= 365:  return 5.0     # annual
+    return 1.0                      # locked / 999
+
+
+def calculate_asset_liquidity_score(asset_id: str, category: str,
+                                    protocol_liquidity_score: int = 5) -> float:
+    """
+    Compute composite liquidity score (0–100) for a single asset.
+
+    Weights:
+      60% redemption speed
+      25% secondary market depth
+      15% protocol liquidity score from config
+    """
+    meta       = get_asset_liquidity_meta(asset_id, category)
+    speed      = _redemption_speed_score(meta["redemption_days"])
+    depth_map  = {0: 0.0, 1: 40.0, 2: 70.0, 3: 100.0}
+    depth      = depth_map.get(meta.get("secondary_depth", 0), 0.0)
+    proto_norm = (protocol_liquidity_score / 10.0) * 100.0   # 1-10 → 0-100
+    score = 0.60 * speed + 0.25 * depth + 0.15 * proto_norm
+    return round(min(score, 100.0), 1)
+
+
+def calculate_portfolio_liquidity(holdings: list, portfolio_value_usd: float = 100_000) -> dict:
+    """
+    Compute portfolio-level liquidity analytics from a list of holdings.
+
+    Returns:
+        {
+          "portfolio_liquidity_score": float,    # 0-100 weighted average
+          "liquid_pct":                float,    # % redeemable within 3 days
+          "semi_liquid_pct":           float,    # % redeemable within 30 days
+          "illiquid_pct":              float,    # % locked > 30 days
+          "instant_exit_usd":          float,    # $ redeemable immediately
+          "30d_exit_usd":              float,    # $ redeemable within 30 days
+          "liquidity_label":           str,
+          "holdings_liquidity": [
+            {"id": str, "category": str, "weight_pct": float,
+             "liquidity_score": float, "redemption_days": int,
+             "has_secondary": bool},
+            ...
+          ],
+        }
+    """
+    if not holdings:
+        return {}
+
+    holdings_liq = []
+    total_weight = sum(h.get("weight_pct", 0) for h in holdings)
+
+    for h in holdings:
+        asset_id    = h.get("id", "")
+        category    = h.get("category", "")
+        weight_pct  = h.get("weight_pct", 0)
+        proto_liq   = h.get("liquidity_score", 5)
+        meta        = get_asset_liquidity_meta(asset_id, category)
+        liq_score   = calculate_asset_liquidity_score(asset_id, category, proto_liq)
+        holdings_liq.append({
+            "id":               asset_id,
+            "category":         category,
+            "weight_pct":       round(weight_pct, 2),
+            "liquidity_score":  liq_score,
+            "redemption_days":  meta["redemption_days"],
+            "has_secondary":    meta["has_secondary"],
+        })
+
+    # Portfolio-level weighted score
+    port_liq_score = sum(
+        h["liquidity_score"] * h["weight_pct"] / max(total_weight, 1.0)
+        for h in holdings_liq
+    )
+
+    # Bucket by redemption speed
+    liquid_pct     = sum(h["weight_pct"] for h in holdings_liq if h["redemption_days"] <= 3)
+    semi_liq_pct   = sum(h["weight_pct"] for h in holdings_liq if 3 < h["redemption_days"] <= 30)
+    illiquid_pct   = sum(h["weight_pct"] for h in holdings_liq if h["redemption_days"] > 30)
+
+    # $ exit capacity
+    instant_usd = portfolio_value_usd * sum(
+        h["weight_pct"] / 100 for h in holdings_liq if h["redemption_days"] == 0
+    )
+    d30_usd = portfolio_value_usd * sum(
+        h["weight_pct"] / 100 for h in holdings_liq if h["redemption_days"] <= 30
+    )
+
+    # Label
+    if port_liq_score >= 80:
+        liq_label = "Highly Liquid"
+    elif port_liq_score >= 60:
+        liq_label = "Moderately Liquid"
+    elif port_liq_score >= 40:
+        liq_label = "Semi-Liquid"
+    elif port_liq_score >= 20:
+        liq_label = "Illiquid"
+    else:
+        liq_label = "Locked"
+
+    return {
+        "portfolio_liquidity_score": round(port_liq_score, 1),
+        "liquid_pct":                round(liquid_pct, 1),
+        "semi_liquid_pct":           round(semi_liq_pct, 1),
+        "illiquid_pct":              round(illiquid_pct, 1),
+        "instant_exit_usd":          round(instant_usd, 2),
+        "30d_exit_usd":              round(d30_usd, 2),
+        "liquidity_label":           liq_label,
+        "holdings_liquidity":        sorted(holdings_liq, key=lambda x: x["liquidity_score"]),
     }

@@ -226,6 +226,40 @@ Current Portfolio (Tier {portfolio.get('tier')}: {_sanitize(portfolio.get('tier_
         for o in arb_opps[:3]
     ])
 
+    # Fetch live yield curve and social signals for richer AI context
+    yield_curve_text = ""
+    social_text      = ""
+    try:
+        from data_feeds import fetch_treasury_yield_curve, fetch_social_signals, get_private_credit_warnings
+        curve = fetch_treasury_yield_curve()
+        ylds  = curve.get("yields", {})
+        yield_curve_text = (
+            f"  3m: {ylds.get('3m', 'N/A')}%  |  1y: {ylds.get('1y', 'N/A')}%  |  "
+            f"2y: {ylds.get('2y', 'N/A')}%  |  10y: {ylds.get('10y', 'N/A')}%"
+        )
+        signals = fetch_social_signals()
+        if signals.get("source") == "santiment":
+            top_signal = max(
+                [(k, v) for k, v in signals.items() if isinstance(v, dict)],
+                key=lambda x: x[1].get("social_volume_7d", 0),
+                default=(None, None)
+            )
+            if top_signal[0]:
+                social_text = (
+                    f"  Highest buzz (7d): {top_signal[0]} — "
+                    f"{top_signal[1].get('social_volume_7d', 0):.0f} mentions, "
+                    f"dev activity: {top_signal[1].get('dev_activity_30d', 0):.0f} commits/30d"
+                )
+        # Private credit warnings
+        pc_warnings = get_private_credit_warnings()
+        if pc_warnings:
+            social_text += "\n  CREDIT WARNINGS: " + " | ".join(
+                f"[{w['severity']}] {w['protocol']}: {w['type']}"
+                for w in pc_warnings[:3]
+            )
+    except Exception:
+        pass
+
     prompt = f"""You are {_sanitize(agent_cfg['name'])}, an autonomous RWA (Real World Asset) portfolio manager.
 
 AGENT PROFILE:
@@ -242,6 +276,12 @@ TOP HOLDINGS:
 
 TOP ARBITRAGE OPPORTUNITIES:
 {arb_text if arb_text else "  No significant arbitrage opportunities detected"}
+
+US TREASURY YIELD CURVE (live):
+{yield_curve_text if yield_curve_text else "  Unavailable"}
+
+MARKET INTELLIGENCE:
+{social_text if social_text else "  No social or credit warning signals available"}
 
 TASK: Analyze the above and provide EXACTLY ONE decision in JSON format:
 

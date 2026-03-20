@@ -175,7 +175,7 @@ NEWS_INTERVAL_MINUTES    = 30   # news sentiment refresh
 DB_FILE = "rwa_model.db"
 
 # ─── Anthropic ────────────────────────────────────────────────────────────────
-CLAUDE_MODEL    = "claude-sonnet-4-6"
+CLAUDE_MODEL    = "claude-3-5-sonnet-20241022"
 CLAUDE_TIMEOUT  = 45.0
 AI_CACHE_TTL    = 1800   # 30 min
 
@@ -2988,3 +2988,276 @@ ARB_MIN_YIELD_SPREAD_PCT    = 1.0   # minimum yield spread to flag arb opportuni
 ARB_MIN_PRICE_SPREAD_PCT    = 0.5   # minimum price spread (vs NAV) to flag
 ARB_STRONG_THRESHOLD_PCT    = 3.0   # strong arbitrage threshold
 ARB_EXTREME_THRESHOLD_PCT   = 5.0   # extreme/exceptional arbitrage
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ASSET MANAGEMENT FEES (basis points per year)
+# Used by yield normalization engine to compute Net APY
+# Source: protocol docs / fund prospectuses (March 2026)
+# ─────────────────────────────────────────────────────────────────────────────
+
+ASSET_FEE_BPS: dict = {
+    # Government Bonds — T-bill / money market products
+    "BUIDL":        15,   # BlackRock 0.15% mgmt fee
+    "BENJI":        20,   # Franklin Templeton 0.20% mgmt fee
+    "USTB":         15,   # Superstate 0.15% mgmt fee
+    "TBILL":        50,   # OpenEden 0.50% (vault fee included)
+    "USDY":          0,   # Ondo USDY — no explicit fee; yield is net
+    "OUSG":         15,   # Ondo OUSG 0.15% mgmt fee
+    "STBT":         30,   # Matrixdock STBT 0.30%
+    "USYC":         50,   # Hashnote USYC 0.50%
+    "USCC":         20,   # CF Benchmarks 0.20%
+    "NOBLE-TBILL":  10,   # Noble T-bill 0.10%
+    "rTBILL":       25,   # Ondo/Plume rTBILL 0.25%
+    "PT-USDY":       0,   # Pendle PT — fee baked in discount
+    "PT-USDM":       0,   # Pendle PT — fee baked in discount
+    "USYIELD":      30,   # 0.30%
+    "BUIDL-BR":     15,
+    "mTBILL":       15,   # Midas mTBILL 0.15%
+    "mBASIS":       50,   # Midas mBASIS 0.50%
+    "AUSD":         20,   # Agora AUSD 0.20%
+    "SPIKO-TBILL":  10,   # Spiko 0.10%
+    "ARCHI-TBILL":  15,   # Archax 0.15%
+    # Private Credit
+    "MPL":         100,   # Maple 1.00% mgmt fee (on deployed capital)
+    "CLPOOL":      150,   # Clearpool ~1.5% protocol fee
+    "GFI":         150,   # Goldfinch ~1.5%
+    "TRU":         100,   # TrueFi ~1.0%
+    "CFG":         100,   # Centrifuge ~1.0%
+    "HUMA":         80,   # Huma Finance 0.80%
+    "CREDIX":      150,   # Credix ~1.5% EM premium
+    "POLYTRADE":   100,   # Polytrade 1.0%
+    "MORPHO-RE7":   75,   # Morpho Re7 vault 0.75%
+    "MORPHO-STEAK": 50,   # Steakhouse vault 0.50%
+    # Real Estate
+    "REALT":       200,   # RealT ~2% fees total
+    "LOFTY":       150,   # Lofty 1.5%
+    "PARCL":        50,   # Parcl 0.5%
+    "PROPY":       100,   # Propy 1.0%
+    "TANGIBLE":    150,   # Tangible 1.5%
+    "MANTRA-RE":   100,   # Mantra RE 1.0%
+    "PLUME-RE":    100,   # Plume RE 1.0%
+    # Commodities (spot — no mgmt fee beyond spread)
+    "PAXG":         20,   # Paxos PAXG 0.20% custody fee
+    "XAUT":         15,   # Tether Gold 0.15%
+    "KAU":          25,   # Kinesis KAU 0.25% velocity fee
+    "KAG":          25,   # Kinesis KAG 0.25%
+    "XAUm":         20,   # Aurus Gold 0.20%
+    "CXAU":         20,
+    "MCO2":          5,   # Moss MCO2 minimal fee
+    "BCT":           5,   # Toucan BCT minimal fee
+    # Tokenized Equities / Synthetic
+    "ONDO-GM":      15,   # Ondo Global Markets 0.15%
+    "DSHARES":      25,   # Dinari dShares 0.25%
+    "BACKED-CSPX":  15,   # Backed Finance 0.15%
+    "SWARM-TSLA":   25,   # Swarm Markets 0.25%
+    "SWARM-AAPL":   25,
+    "SWARM-MSFT":   25,
+    "SWARM-NVDA":   25,
+    "BACKED-NASDAQ":15,
+    "ROBINHOOD-RWA":15,
+}
+
+# Default fees by category (fallback when asset not in above dict)
+_CATEGORY_FEE_BPS_DEFAULT: dict = {
+    "Government Bonds":     20,
+    "Private Credit":      100,
+    "Real Estate":         150,
+    "Commodities":          20,
+    "Tokenized Equities":   20,
+    "Equities":             20,
+    "Private Equity":      200,
+    "Carbon Credits":       20,
+    "Intellectual Property":150,
+    "Art & Collectibles":  200,
+    "Infrastructure":      100,
+    "Insurance":           100,
+    "Trade Finance":        80,
+}
+
+def get_asset_fee_bps(asset_id: str, category: str = "") -> int:
+    """Return management fee in basis points for a given asset."""
+    return ASSET_FEE_BPS.get(
+        asset_id,
+        _CATEGORY_FEE_BPS_DEFAULT.get(category, 25)
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ASSET DURATION (years) — for interest rate risk / DV01 calculations
+# Duration = price sensitivity to a 1% move in yields
+# Money market (<90d): ~0.08y | Short (<1y): 0.25-0.75y | Medium (2-5y): 2-5y
+# ─────────────────────────────────────────────────────────────────────────────
+
+ASSET_DURATION_YEARS: dict = {
+    # Government Bonds — money market (30-90 day bills)
+    "BUIDL":        0.08,   # overnight repo / T-bills <30d
+    "BENJI":        0.08,   # overnight repo + short bills
+    "USTB":         0.10,   # short-duration (0-3 month)
+    "TBILL":        0.08,   # T-bills <90 day
+    "USDY":         0.17,   # 1-2 month bills (day 60 avg)
+    "OUSG":         0.15,   # short US Treasuries
+    "STBT":         0.17,   # STBT short-term bills
+    "USYC":         0.08,   # overnight USDC / T-bill
+    "USCC":         0.25,   # 0-6 month composite
+    "NOBLE-TBILL":  0.08,
+    "rTBILL":       0.17,
+    "PT-USDY":      0.50,   # fixed term Pendle PT
+    "PT-USDM":      0.50,
+    "mTBILL":       0.08,
+    "mBASIS":       0.10,
+    "AUSD":         0.08,
+    "SPIKO-TBILL":  0.08,
+    "ARCHI-TBILL":  0.17,
+    # Private Credit — typical loan tenor 6-36 months
+    "MPL":          1.50,
+    "CLPOOL":       0.75,   # shorter tenor clearpool
+    "GFI":          2.00,   # EM credit 2yr avg
+    "TRU":          1.00,
+    "CFG":          2.00,   # Centrifuge pools vary; avg ~2yr
+    "HUMA":         0.50,   # PayFi — short receivables
+    "CREDIX":       2.00,
+    "POLYTRADE":    0.25,   # trade finance — 60-90d
+    "MORPHO-RE7":   0.50,
+    "MORPHO-STEAK": 0.25,
+    # Real Estate — long duration assets
+    "REALT":        5.00,
+    "LOFTY":        5.00,
+    "PARCL":        3.00,   # derivatives-based, shorter effective duration
+    "PROPY":        7.00,
+    "TANGIBLE":     5.00,
+    "MANTRA-RE":    5.00,
+    "PLUME-RE":     5.00,
+    # Commodities — zero interest rate duration (commodity price risk, not rate risk)
+    "PAXG":         0.00,
+    "XAUT":         0.00,
+    "KAU":          0.00,
+    "KAG":          0.00,
+    "XAUm":         0.00,
+    "CXAU":         0.00,
+    # Carbon — effectively zero duration
+    "MCO2":         0.00,
+    "BCT":          0.00,
+    # Tokenized Equities — equity duration (~15-20yr theoretical, but for rate sensitivity use ~5yr)
+    "ONDO-GM":      5.00,
+    "DSHARES":      5.00,
+    "BACKED-CSPX":  5.00,
+    "BACKED-NASDAQ":5.00,
+}
+
+# Default durations by category
+_CATEGORY_DURATION_DEFAULT: dict = {
+    "Government Bonds":      0.17,   # avg 2-month T-bill
+    "Private Credit":        1.50,
+    "Real Estate":           5.00,
+    "Commodities":           0.00,
+    "Tokenized Equities":    5.00,
+    "Equities":              5.00,
+    "Private Equity":        7.00,
+    "Carbon Credits":        0.00,
+    "Intellectual Property": 3.00,
+    "Art & Collectibles":    0.00,
+    "Infrastructure":        8.00,   # long-duration infra assets
+    "Insurance":             2.00,
+    "Trade Finance":         0.25,   # short receivables
+}
+
+def get_asset_duration(asset_id: str, category: str = "") -> float:
+    """Return effective duration in years for a given asset."""
+    return ASSET_DURATION_YEARS.get(
+        asset_id,
+        _CATEGORY_DURATION_DEFAULT.get(category, 1.0)
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ASSET LIQUIDITY METADATA
+# redemption_days: business days to full exit at par / NAV
+#   0 = instant DEX exit | 1 = T+1 | 7 = weekly | 30 = monthly
+#   90 = quarterly | 180 = semi-annual | 365 = annual | 999 = effectively locked
+# has_secondary: whether a liquid secondary market exists
+# secondary_depth: qualitative secondary market depth (0=none, 1=thin, 2=moderate, 3=deep)
+# ─────────────────────────────────────────────────────────────────────────────
+
+ASSET_LIQUIDITY_META: dict = {
+    # Government Bonds
+    "BUIDL":        {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "BENJI":        {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "USTB":         {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "TBILL":        {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
+    "USDY":         {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},  # DEX pools
+    "OUSG":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "STBT":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
+    "USYC":         {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "USCC":         {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "NOBLE-TBILL":  {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "rTBILL":       {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
+    "PT-USDY":      {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},  # Pendle DEX
+    "PT-USDM":      {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 1},
+    "mTBILL":       {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    # Private Credit
+    "MPL":          {"redemption_days": 30,  "has_secondary": True,  "secondary_depth": 1},
+    "CLPOOL":       {"redemption_days": 7,   "has_secondary": False, "secondary_depth": 0},
+    "GFI":          {"redemption_days": 90,  "has_secondary": False, "secondary_depth": 0},
+    "TRU":          {"redemption_days": 30,  "has_secondary": False, "secondary_depth": 0},
+    "CFG":          {"redemption_days": 90,  "has_secondary": True,  "secondary_depth": 1},
+    "HUMA":         {"redemption_days": 7,   "has_secondary": False, "secondary_depth": 0},
+    "CREDIX":       {"redemption_days": 90,  "has_secondary": False, "secondary_depth": 0},
+    "POLYTRADE":    {"redemption_days": 7,   "has_secondary": False, "secondary_depth": 0},
+    "MORPHO-RE7":   {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "MORPHO-STEAK": {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    # Real Estate
+    "REALT":        {"redemption_days": 30,  "has_secondary": True,  "secondary_depth": 1},
+    "LOFTY":        {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},  # marketplace
+    "PARCL":        {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},  # DEX perps
+    "PROPY":        {"redemption_days": 180, "has_secondary": False, "secondary_depth": 0},
+    "TANGIBLE":     {"redemption_days": 30,  "has_secondary": True,  "secondary_depth": 1},
+    "MANTRA-RE":    {"redemption_days": 30,  "has_secondary": False, "secondary_depth": 0},
+    "PLUME-RE":     {"redemption_days": 30,  "has_secondary": False, "secondary_depth": 0},
+    # Commodities — liquid DEX / exchange markets
+    "PAXG":         {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 3},
+    "XAUT":         {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 3},
+    "KAU":          {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "KAG":          {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "XAUm":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
+    "MCO2":         {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    "BCT":          {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    # Tokenized Equities
+    "ONDO-GM":      {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "DSHARES":      {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
+    "BACKED-CSPX":  {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "BACKED-NASDAQ":{"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "SWARM-TSLA":   {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "SWARM-AAPL":   {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "SWARM-MSFT":   {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "SWARM-NVDA":   {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "ROBINHOOD-RWA":{"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+}
+
+# Default liquidity by category
+_CATEGORY_LIQUIDITY_DEFAULT: dict = {
+    "Government Bonds":      {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "Private Credit":        {"redemption_days": 60,  "has_secondary": False, "secondary_depth": 0},
+    "Real Estate":           {"redemption_days": 90,  "has_secondary": False, "secondary_depth": 0},
+    "Commodities":           {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "Tokenized Equities":    {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "Equities":              {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
+    "Private Equity":        {"redemption_days": 365, "has_secondary": False, "secondary_depth": 0},
+    "Carbon Credits":        {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    "Intellectual Property": {"redemption_days": 180, "has_secondary": False, "secondary_depth": 0},
+    "Art & Collectibles":    {"redemption_days": 180, "has_secondary": False, "secondary_depth": 0},
+    "Infrastructure":        {"redemption_days": 365, "has_secondary": False, "secondary_depth": 0},
+    "Insurance":             {"redemption_days": 90,  "has_secondary": False, "secondary_depth": 0},
+    "Trade Finance":         {"redemption_days": 30,  "has_secondary": False, "secondary_depth": 0},
+}
+
+def get_asset_liquidity_meta(asset_id: str, category: str = "") -> dict:
+    """Return liquidity metadata for a given asset."""
+    return ASSET_LIQUIDITY_META.get(
+        asset_id,
+        _CATEGORY_LIQUIDITY_DEFAULT.get(category, {"redemption_days": 30, "has_secondary": False, "secondary_depth": 0})
+    )
+
+# Optional API keys for new data sources
+KAITO_API_KEY    = os.environ.get("KAITO_API_KEY", "")
+SANTIMENT_API_KEY= os.environ.get("SANTIMENT_API_KEY", "")
+FRED_API_KEY     = os.environ.get("FRED_API_KEY", "")   # free at fred.stlouisfed.org
