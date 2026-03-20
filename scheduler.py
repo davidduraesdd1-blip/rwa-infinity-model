@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+    from apscheduler.events import EVENT_JOB_ERROR
     _APScheduler = True
 except ImportError:
     _APScheduler = False

@@ -899,6 +899,9 @@ def _dune_get(query_id: int) -> Optional[dict]:
             logger.debug("[Dune] Execute failed (%s) for query %s", r.status_code, query_id)
             return None
         execution_id = r.json().get("execution_id")
+        if not execution_id:
+            logger.debug("[Dune] No execution_id returned for query %s", query_id)
+            return None
     except Exception as e:
         logger.debug("[Dune] Execute error for query %s: %s", query_id, e)
         return None

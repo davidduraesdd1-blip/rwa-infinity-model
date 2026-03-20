@@ -10,7 +10,7 @@ import os
 import logging
 from typing import Optional, List, Dict, Any
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -528,11 +528,15 @@ def save_news(items: List[dict]):
     with _write_lock:
         conn = _get_conn()
         try:
+            seen_in_batch: set = set()
             for item in items:
                 headline = item.get("headline")
                 if not headline:
                     continue
-                # Deduplicate by headline — no UNIQUE constraint on table so check manually
+                # Deduplicate within batch first, then against DB
+                if headline in seen_in_batch:
+                    continue
+                seen_in_batch.add(headline)
                 exists = conn.execute(
                     "SELECT 1 FROM news_feed WHERE headline = ? LIMIT 1", (headline,)
                 ).fetchone()
@@ -593,7 +597,6 @@ def save_yield_history(asset_id: str, yield_pct: float, tvl_usd: Optional[float]
 def get_yield_history(asset_id: str, days: int = 30) -> pd.DataFrame:
     conn = _get_conn()
     try:
-        from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return pd.read_sql_query(
             "SELECT * FROM yield_history WHERE asset_id=? AND timestamp >= ? ORDER BY timestamp",

@@ -645,7 +645,12 @@ def evaluate_past_decisions(agent_name: str, lookback_cycles: int = 10):
                 continue
 
             current_yield = (current_snap.get("metrics") or {}).get("weighted_yield_pct", 0)
-            before_json   = row.get("portfolio_before_json") or "{}"
+            raw_json = row.get("portfolio_before_json")
+            before_json = (
+                str(raw_json)
+                if raw_json and not (isinstance(raw_json, float) and math.isnan(raw_json))
+                else "{}"
+            )
             try:
                 before_port = json.loads(before_json)
                 before_yield = (before_port.get("metrics") or {}).get("weighted_yield_pct", 0)

@@ -2896,9 +2896,9 @@ DEFILLAMA_PROTOCOLS = [
 # COINGECKO TOKEN IDS for price feeds
 # ─────────────────────────────────────────────────────────────────────────────
 
-COINGECKO_IDS = [
+COINGECKO_IDS = list(dict.fromkeys(
     a["coingecko_id"] for a in RWA_UNIVERSE if a.get("coingecko_id")
-]
+))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ASSET CATEGORY COLORS
