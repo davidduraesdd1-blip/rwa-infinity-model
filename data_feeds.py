@@ -1488,7 +1488,7 @@ def get_ai_news_brief(headlines: List[str]) -> str:
         return resp.content[0].text.strip()
     except Exception as e:
         logger.debug("[AI News] Brief generation failed: %s", e)
-        return ""
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────

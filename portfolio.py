@@ -396,9 +396,9 @@ def compute_portfolio_metrics(holdings: List[dict], portfolio_value: float,
         return _empty_metrics()
 
     weights   = np.array([h["weight_pct"] / 100 for h in holdings])
-    yields    = np.array([h.get("current_yield_pct", 0) for h in holdings])
-    risks     = np.array([h.get("risk_score", 5) for h in holdings])
-    liq       = np.array([h.get("liquidity_score", 5) for h in holdings])
+    yields    = np.array([h.get("current_yield_pct") or 0 for h in holdings], dtype=float)
+    risks     = np.array([h.get("risk_score") or 5 for h in holdings], dtype=float)
+    liq       = np.array([h.get("liquidity_score") or 5 for h in holdings], dtype=float)
     cats      = [h.get("category", "") for h in holdings]
     n         = len(holdings)
 
@@ -473,7 +473,7 @@ def compute_portfolio_metrics(holdings: List[dict], portfolio_value: float,
     monthly_income_usd = annual_return_usd / 12
 
     # Yield on cost (using current price vs nav)
-    nav_discount = float(np.dot(weights, [h.get("price_vs_nav_pct", 0) for h in holdings]))
+    nav_discount = float(np.dot(weights, [h.get("price_vs_nav_pct") or 0 for h in holdings]))
 
     return {
         "weighted_yield_pct":      round(avg_yield, 3),
@@ -838,8 +838,8 @@ def stress_test_correlations(portfolio: dict, scenario: str = "crisis") -> dict:
     tier             = portfolio.get("tier", 3)
 
     weights      = np.array([h["weight_pct"] / 100 for h in holdings])
-    yields       = np.array([h.get("current_yield_pct", 0) for h in holdings])
-    risks        = np.array([h.get("risk_score", 5) for h in holdings])
+    yields       = np.array([h.get("current_yield_pct") or 0 for h in holdings], dtype=float)
+    risks        = np.array([h.get("risk_score") or 5 for h in holdings], dtype=float)
     n            = len(holdings)
 
     vol_per_asset = np.array([_risk_to_vol(risks[i], holdings[i]) for i in range(n)])
@@ -893,9 +893,9 @@ def stress_test_correlations(portfolio: dict, scenario: str = "crisis") -> dict:
     weighted_avg_vol  = float(np.dot(weights, vol_per_asset))
     diversification_r = weighted_avg_vol / max(stressed_vol, 0.01)
 
-    liq       = np.array([h.get("liquidity_score", 5) for h in holdings])
+    liq       = np.array([h.get("liquidity_score") or 5 for h in holdings], dtype=float)
     avg_liquidity = float(np.dot(weights, liq))
-    nav_discount  = float(np.dot(weights, [h.get("price_vs_nav_pct", 0) for h in holdings]))
+    nav_discount  = float(np.dot(weights, [h.get("price_vs_nav_pct") or 0 for h in holdings]))
 
     stressed_metrics = {
         "weighted_yield_pct":       round(avg_yield, 3),

@@ -617,9 +617,9 @@ def scan_defi_pool_arb() -> List[dict]:
                 f"Net gain: {net_spread:.2f}% per year."
             ),
             "notes": (
-                f"TVL in high-yield pool: ${high['tvl_usd']:,.0f}. "
-                f"TVL in low-yield pool: ${low['tvl_usd']:,.0f}. "
-                f"IL Risk high: {high['il_risk']} | low: {low['il_risk']}."
+                f"TVL in high-yield pool: ${high.get('tvl_usd', 0):,.0f}. "
+                f"TVL in low-yield pool: ${low.get('tvl_usd', 0):,.0f}. "
+                f"IL Risk high: {high.get('il_risk', 'N/A')} | low: {low.get('il_risk', 'N/A')}."
             ),
         }
         opportunities.append(opp)

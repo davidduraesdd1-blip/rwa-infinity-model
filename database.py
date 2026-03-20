@@ -41,7 +41,6 @@ class _PooledConn:
 
     def close(self):
         try:
-            self.__dict__["_c"].execute("PRAGMA optimize")
             self.__dict__["_c"].rollback()
         except Exception:
             pass

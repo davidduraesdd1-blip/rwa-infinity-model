@@ -347,7 +347,7 @@ Respond with ONLY the JSON object, no markdown, no explanation outside JSON."""
             clean_actions.append({
                 "action_type": _sanitize(str(a.get("action_type", "BUY")).upper()),
                 "asset_id":    _sanitize(str(a.get("asset_id", ""))),
-                "size_usd":    float(a.get("size_usd", 0)),
+                "size_usd":    float(a.get("size_usd") or 0),
                 "reason":      _sanitize(str(a.get("reason", ""))),
             })
 
@@ -655,7 +655,7 @@ def evaluate_past_decisions(agent_name: str, lookback_cycles: int = 10):
             if before_yield <= 0:
                 continue
 
-            expected_return = float(row.get("confidence_pct", 50) / 100 * 5)  # rough estimate
+            expected_return = float((row.get("confidence_pct") or 50) / 100 * 5)  # rough estimate
             actual_return   = current_yield - before_yield
             outcome         = "WIN" if actual_return > 0 else ("LOSS" if actual_return < -0.5 else "NEUTRAL")
 
@@ -695,7 +695,7 @@ def get_agent_insights(agent_name: str) -> dict:
         news    = fetch_rwa_news()[:5]
 
         news_text = "\n".join([
-            f"- {_sanitize(n['headline'][:150])}" for n in news
+            f"- {_sanitize((n.get('headline') or '')[:150])}" for n in news
         ])
 
         agent_cfg = AI_AGENTS.get(agent_name, {})

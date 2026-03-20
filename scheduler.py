@@ -49,7 +49,7 @@ def job_full_refresh():
         def progress_cb(pct, task):
             _db.write_scan_status(True, progress=pct, current_task=task)
 
-        assets = refresh_all_assets(progress_callback=progress_cb)
+        assets = refresh_all_assets(progress_callback=progress_cb) or []
         _last_refresh  = datetime.now(timezone.utc).isoformat()
         _refresh_count += 1
 
@@ -78,7 +78,7 @@ def job_news_refresh():
     """News refresh — runs every 30 minutes."""
     try:
         from data_feeds import refresh_news
-        news = refresh_news()
+        news = refresh_news() or []
         logger.info("[Scheduler] News refresh — %d items", len(news))
     except Exception as e:
         logger.warning("[Scheduler] News refresh failed: %s", e)
@@ -88,7 +88,7 @@ def job_arb_scan():
     """Arbitrage scan — runs after each full refresh."""
     try:
         from arbitrage import run_full_arb_scan
-        opps = run_full_arb_scan()
+        opps = run_full_arb_scan() or []
         logger.info("[Scheduler] Arb scan — %d opportunities", len(opps))
     except Exception as e:
         logger.warning("[Scheduler] Arb scan failed: %s", e)

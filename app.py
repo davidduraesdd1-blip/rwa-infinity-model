@@ -147,7 +147,7 @@ st.markdown("""
 .ticker-wrap {
     background: var(--card-bg);
     border-bottom: 1px solid var(--border);
-    padding: 6px 0;
+    padding: 10px 0;
     overflow: hidden;
     white-space: nowrap;
 }
@@ -404,7 +404,7 @@ if not assets_df.empty:
 ticker_text = "  ·  ".join(ticker_items)
 st.markdown(f"""
 <div class="ticker-wrap">
-    <span style="font-size:12px;color:#9CA3AF;letter-spacing:0.03em">{ticker_text}</span>
+    <span style="font-size:15px;color:#9CA3AF;letter-spacing:0.03em">{ticker_text}</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -414,6 +414,29 @@ st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
 # ─────────────────────────────────────────────────────────────────────────────
 # PORTFOLIO TIER SELECTOR
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Portfolio value input + shareable link (above tier selector)
+col_val, col_share, col_empty2 = st.columns([2, 3, 5])
+with col_val:
+    portfolio_value = st.number_input(
+        "Portfolio Value (USD)",
+        min_value=1_000,
+        max_value=1_000_000_000,
+        value=st.session_state["portfolio_value"],
+        step=10_000,
+        format="%d",
+        key="portfolio_value_input",
+        help="The total amount you want to invest. All dollar amounts (Annual Income, USD Value per holding, etc.) are calculated relative to this number",
+    )
+    st.session_state["portfolio_value"] = portfolio_value
+with col_share:
+    _share_url = f"?tier={st.session_state['selected_tier']}&value={portfolio_value}"
+    st.text_input(
+        "🔗 Share Portfolio",
+        value=_share_url,
+        key="share_url_display",
+        help="Copy this URL to share your current portfolio configuration",
+    )
 
 st.markdown('<div class="section-header">Portfolio Strategy</div>', unsafe_allow_html=True)
 
@@ -448,29 +471,6 @@ for i, (tier, (icon, label, color)) in enumerate(tier_labels.items()):
 
 selected_tier = st.session_state["selected_tier"]
 tier_cfg      = PORTFOLIO_TIERS[selected_tier]
-
-# Portfolio value input + shareable link
-col_val, col_share, col_empty2 = st.columns([2, 3, 5])
-with col_val:
-    portfolio_value = st.number_input(
-        "Portfolio Value (USD)",
-        min_value=1_000,
-        max_value=1_000_000_000,
-        value=st.session_state["portfolio_value"],
-        step=10_000,
-        format="%d",
-        key="portfolio_value_input",
-        help="The total amount you want to invest. All dollar amounts (Annual Income, USD Value per holding, etc.) are calculated relative to this number",
-    )
-    st.session_state["portfolio_value"] = portfolio_value
-with col_share:
-    _share_url = f"?tier={st.session_state['selected_tier']}&value={portfolio_value}"
-    st.text_input(
-        "🔗 Share Portfolio",
-        value=_share_url,
-        key="share_url_display",
-        help="Copy this URL to share your current portfolio configuration",
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -613,13 +613,15 @@ with tab_portfolio:
     st.markdown('<div class="section-header">Portfolio Holdings</div>', unsafe_allow_html=True)
     if holdings:
         h_df = pd.DataFrame(holdings)
-        display_cols = ["id", "name", "category", "chain", "weight_pct",
-                        "usd_value", "current_yield_pct", "risk_score",
-                        "liquidity_score", "regulatory_score", "score"]
-
-        display_df = h_df[[c for c in display_cols if c in h_df.columns]].copy()
-        display_df.columns = ["ID", "Name", "Category", "Chain", "Weight %", "USD Value",
-                               "Yield %", "Risk", "Liquidity", "Regulatory", "Score"][:len(display_df.columns)]
+        display_col_map = {
+            "id": "ID", "name": "Name", "category": "Category", "chain": "Chain",
+            "weight_pct": "Weight %", "usd_value": "USD Value",
+            "current_yield_pct": "Yield %", "risk_score": "Risk",
+            "liquidity_score": "Liquidity", "regulatory_score": "Regulatory", "score": "Score",
+        }
+        present_cols = [c for c in display_col_map if c in h_df.columns]
+        display_df = h_df[present_cols].copy()
+        display_df.columns = [display_col_map[c] for c in present_cols]
 
         def _highlight_yield(val):
             try:
@@ -1097,21 +1099,41 @@ with tab_arb:
                 f"Net Spread: {net_spread:.2f}%",
                 expanded=(net_spread >= ARB_STRONG_THRESHOLD_PCT)
             ):
-                ac1, ac2, ac3 = st.columns(3)
-                with ac1:
-                    st.markdown(f'<span class="{sig_class}">{sig_label}</span>', unsafe_allow_html=True)
-                    st.metric("Net Spread", f"{net_spread:.3f}%")
-                with ac2:
-                    st.metric("Yield A", f"{row.get('yield_a_pct', 0):.3f}%")
-                    st.metric("Yield B", f"{row.get('yield_b_pct', 0):.3f}%")
-                with ac3:
-                    st.metric("Gross Spread", f"{row.get('spread_pct', 0):.3f}%")
-                    st.metric("Est. APY", f"{row.get('estimated_apy', 0):.2f}%")
-
+                st.markdown(f'<span class="{sig_class}">{sig_label}</span>', unsafe_allow_html=True)
+                spread_color = "#34D399" if net_spread > 0 else "#EF4444"
+                st.markdown(f"""
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">
+                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
+                        <div style="font-size:10px;color:#9CA3AF">Net Spread</div>
+                        <div style="font-size:13px;font-weight:700;color:{spread_color}">{net_spread:.3f}%</div>
+                    </div>
+                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
+                        <div style="font-size:10px;color:#9CA3AF">Yield A</div>
+                        <div style="font-size:13px;font-weight:700">{row.get('yield_a_pct', 0):.3f}%</div>
+                    </div>
+                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
+                        <div style="font-size:10px;color:#9CA3AF">Yield B</div>
+                        <div style="font-size:13px;font-weight:700">{row.get('yield_b_pct', 0):.3f}%</div>
+                    </div>
+                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
+                        <div style="font-size:10px;color:#9CA3AF">Gross Spread</div>
+                        <div style="font-size:13px;font-weight:700">{row.get('spread_pct', 0):.3f}%</div>
+                    </div>
+                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
+                        <div style="font-size:10px;color:#9CA3AF">Est. APY</div>
+                        <div style="font-size:13px;font-weight:700;color:{spread_color}">{row.get('estimated_apy', 0):.2f}%</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 if row.get("action"):
-                    st.info(f"**Action:** {row['action']}")
+                    st.markdown(
+                        f'<div style="background:#0D1F2D;border-left:3px solid #00D4FF;padding:5px 10px;'
+                        f'font-size:12px;border-radius:0 4px 4px 0;margin:4px 0">'
+                        f'<span style="color:#00D4FF;font-weight:700">Action:</span> {row["action"]}</div>',
+                        unsafe_allow_html=True
+                    )
                 if row.get("notes"):
-                    st.caption(row["notes"])
+                    st.markdown(f'<div style="font-size:11px;color:#6B7280;margin-top:2px">{row["notes"]}</div>', unsafe_allow_html=True)
     else:
         st.info("No arbitrage opportunities found. Click Rescan to update.")
 
@@ -1623,15 +1645,24 @@ with tab_news:
                      help="Uses Claude to synthesize recent headlines into an actionable market brief"):
             from data_feeds import fetch_live_rss_news, get_ai_news_brief
             with st.spinner("Generating AI market intelligence brief..."):
-                live = fetch_live_rss_news()
-                news_df_tmp = _load_news()
-                all_headlines = (
-                    [i["headline"] for i in live] +
-                    (news_df_tmp["headline"].tolist() if not news_df_tmp.empty else [])
-                )
-                brief = get_ai_news_brief(all_headlines[:15])
-                st.session_state["ai_news_brief"] = brief
+                try:
+                    live = fetch_live_rss_news()
+                    news_df_tmp = _load_news()
+                    all_headlines = (
+                        [i["headline"] for i in live] +
+                        (news_df_tmp["headline"].tolist() if not news_df_tmp.empty else [])
+                    )
+                    brief = get_ai_news_brief(all_headlines[:15])
+                    st.session_state["ai_news_brief"] = brief
+                    st.session_state.pop("ai_news_brief_error", None)
+                except Exception as e:
+                    st.session_state["ai_news_brief"] = ""
+                    st.session_state["ai_news_brief_error"] = str(e)
             st.rerun()
+
+    # Show error if brief generation failed
+    if st.session_state.get("ai_news_brief_error"):
+        st.error(f"AI Brief failed: {st.session_state['ai_news_brief_error']}")
 
     # Show AI brief if generated
     if st.session_state.get("ai_news_brief"):
