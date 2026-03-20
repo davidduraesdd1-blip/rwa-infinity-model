@@ -159,16 +159,19 @@ st.markdown("""
 /* Tab styling */
 .stTabs [data-baseweb="tab-list"] {
     background: var(--card-bg);
-    border-radius: 8px;
-    padding: 4px;
-    gap: 2px;
+    border-radius: 10px;
+    padding: 6px;
+    gap: 4px;
     border: 1px solid var(--border);
 }
 .stTabs [data-baseweb="tab"] {
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--muted);
-    font-weight: 600;
-    font-size: 13px;
+    font-weight: 700;
+    font-size: 15px !important;
+    padding: 10px 18px !important;
+    min-height: 46px !important;
+    letter-spacing: 0.01em;
 }
 .stTabs [aria-selected="true"] {
     background: var(--primary) !important;
@@ -207,8 +210,9 @@ def _color_for_value(v, low, high, invert=False):
     if ratio > 0.3: return "#FBBF24"
     return "#EF4444"
 
-def _metric_card(label, value, delta=None, delta_label="", color=None):
+def _metric_card(label, value, delta=None, delta_label="", color=None, tooltip=None):
     color_str = f"color: {color};" if color else ""
+    title_attr = f' title="{tooltip}"' if tooltip else ""
     delta_html = ""
     if delta is not None:
         if isinstance(delta, str):
@@ -219,7 +223,7 @@ def _metric_card(label, value, delta=None, delta_label="", color=None):
             arrow = "▲" if delta > 0 else "▼" if delta < 0 else "●"
             delta_html = f'<div class="metric-delta {cls}">{arrow} {abs(delta):.2f}% {delta_label}</div>'
     st.markdown(f"""
-    <div class="metric-card">
+    <div class="metric-card"{title_attr} style="cursor:{'help' if tooltip else 'default'}">
         <div class="metric-label">{label}</div>
         <div class="metric-value" style="{color_str}">{value}</div>
         {delta_html}
@@ -456,6 +460,7 @@ with col_val:
         step=10_000,
         format="%d",
         key="portfolio_value_input",
+        help="The total amount you want to invest. All dollar amounts (Annual Income, USD Value per holding, etc.) are calculated relative to this number",
     )
     st.session_state["portfolio_value"] = portfolio_value
 with col_share:
@@ -504,22 +509,28 @@ with tab_portfolio:
 
     with k1:
         _metric_card("Portfolio Yield", _fmt_pct(metrics.get("weighted_yield_pct")),
-                     color=tier_cfg["color"])
+                     color=tier_cfg["color"],
+                     tooltip="Weighted average yield across all portfolio holdings at current market rates")
     with k2:
         _metric_card("Annual Income", _fmt_usd(metrics.get("annual_return_usd")),
-                     color="#34D399")
+                     color="#34D399",
+                     tooltip="Projected annual income in dollars at current yields, based on your portfolio value")
     with k3:
         _metric_card("Monthly Income", _fmt_usd(metrics.get("monthly_income_usd")),
-                     color="#34D399")
+                     color="#34D399",
+                     tooltip="Projected monthly income in dollars — annual income divided by 12")
     with k4:
         _metric_card("Sharpe Ratio", f"{metrics.get('sharpe_ratio', 0):.2f}",
-                     color=_color_for_value(metrics.get("sharpe_ratio", 0), 0, 2))
+                     color=_color_for_value(metrics.get("sharpe_ratio", 0), 0, 2),
+                     tooltip="Risk-adjusted return = (portfolio yield − risk-free rate) ÷ volatility. Above 1.0 is good, above 2.0 is excellent")
     with k5:
         _metric_card("Max Drawdown", _fmt_pct(metrics.get("max_drawdown_pct")),
-                     color=_color_for_value(metrics.get("max_drawdown_pct", 0), 0, 30, invert=True))
+                     color=_color_for_value(metrics.get("max_drawdown_pct", 0), 0, 30, invert=True),
+                     tooltip="Largest estimated peak-to-trough portfolio decline under stress conditions. Lower is better. This tier targets ≤" + str(tier_cfg['max_drawdown_pct']) + "%")
     with k6:
         _metric_card("VaR 95%", _fmt_pct(metrics.get("var_95_pct")),
-                     color=_color_for_value(metrics.get("var_95_pct", 0), 0, 20, invert=True))
+                     color=_color_for_value(metrics.get("var_95_pct", 0), 0, 20, invert=True),
+                     tooltip="Value at Risk (95%): estimated maximum portfolio loss on a bad day — this threshold is only exceeded 5% of the time")
 
     st.markdown("<div style='margin:12px 0'></div>", unsafe_allow_html=True)
 
@@ -637,20 +648,26 @@ with tab_portfolio:
     st.markdown('<div class="section-header">Risk Metrics</div>', unsafe_allow_html=True)
     r1, r2, r3, r4, r5 = st.columns(5)
     with r1:
-        _metric_card("Sortino Ratio", f"{metrics.get('sortino_ratio', 0):.2f}")
+        _metric_card("Sortino Ratio", f"{metrics.get('sortino_ratio', 0):.2f}",
+                     tooltip="Like Sharpe but only penalizes downside volatility — better for yield-focused portfolios. Above 1.0 is solid, above 2.0 is strong")
     with r2:
-        _metric_card("Calmar Ratio", f"{metrics.get('calmar_ratio', 0):.2f}")
+        _metric_card("Calmar Ratio", f"{metrics.get('calmar_ratio', 0):.2f}",
+                     tooltip="Annual return ÷ max drawdown. Higher means you are earning more per unit of historical drawdown risk. Above 1.0 is good")
     with r3:
-        _metric_card("VaR 99%", _fmt_pct(metrics.get("var_99_pct")))
+        _metric_card("VaR 99%", _fmt_pct(metrics.get("var_99_pct")),
+                     tooltip="Value at Risk (99%): estimated worst-case daily portfolio loss — only exceeded 1% of the time. More conservative than VaR 95%")
     with r4:
-        _metric_card("CVaR 95%", _fmt_pct(metrics.get("cvar_95_pct")))
+        _metric_card("CVaR 95%", _fmt_pct(metrics.get("cvar_95_pct")),
+                     tooltip="Conditional VaR (Expected Shortfall): the expected average loss when you are already in the worst 5% of outcomes. Best measure of true tail risk")
     with r5:
-        _metric_card("Diversification", f"{metrics.get('diversification_ratio', 0):.2f}x")
+        _metric_card("Diversification", f"{metrics.get('diversification_ratio', 0):.2f}x",
+                     tooltip="Diversification benefit: weighted avg individual volatility ÷ portfolio volatility. Above 1.0x means your asset mix actively reduces overall risk")
 
     # ── Monte Carlo ───────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Monte Carlo Simulation (10,000 scenarios)</div>',
                 unsafe_allow_html=True)
-    if st.button("▶ Run Monte Carlo Simulation", key="btn_mc"):
+    if st.button("▶ Run Monte Carlo Simulation", key="btn_mc",
+                 help="Simulates 10,000 portfolio paths over 1 year using Jump-Diffusion GBM (Merton 1976). Shows the full distribution of outcomes from bear case (5th percentile) to bull case (95th percentile)"):
         st.session_state["show_mc"] = True
 
     if st.session_state.get("show_mc"):
@@ -725,22 +742,26 @@ with tab_portfolio:
                 with d1:
                     _metric_card("Avg Duration",
                                  f"{dur['weighted_avg_duration']:.2f} yrs",
-                                 dur["rate_exposure_label"])
+                                 dur["rate_exposure_label"],
+                                 tooltip="Weighted average duration across all holdings — how many years to recover your investment if yields shift. Lower = less interest rate risk")
                 with d2:
                     _metric_card("DV01 (per $1M)",
                                  f"${dur['dv01_per_million']:,.0f}",
-                                 "$ loss per 1bp rate rise")
+                                 "$ loss per 1bp rate rise",
+                                 tooltip="Dollar Value of 1 Basis Point: how many dollars your $1M position loses if interest rates rise by 0.01%. Multiply by your portfolio size to get full exposure")
                 with d3:
                     zero_pct = dur.get("zero_duration_pct", 0)
                     _metric_card("Zero-Duration Assets",
                                  f"{zero_pct:.1f}%",
-                                 "Commodities / Equity (no rate risk)")
+                                 "Commodities / Equity (no rate risk)",
+                                 tooltip="Percentage of your portfolio in assets with no interest rate sensitivity (gold, commodities, equities) — these act as a natural rate-risk hedge")
                 with d4:
                     curve = fetch_treasury_yield_curve()
                     rf    = curve["yields"].get("3m", 4.32)
                     _metric_card("Live Risk-Free Rate",
                                  f"{rf:.2f}%",
-                                 f"3m T-bill — source: {curve['source']}")
+                                 f"3m T-bill — source: {curve['source']}",
+                                 tooltip="Current 3-month US Treasury bill yield — the baseline risk-free rate used to calculate excess return (Sharpe/Sortino ratios) for your portfolio")
 
                 # Rate scenario table
                 scen_df = pd.DataFrame(dur["scenarios"])
@@ -789,19 +810,23 @@ with tab_portfolio:
                 with l1:
                     _metric_card("Liquidity Score",
                                  f"{liq['portfolio_liquidity_score']:.0f}/100",
-                                 liq["liquidity_label"])
+                                 liq["liquidity_label"],
+                                 tooltip="Composite liquidity score (0–100) based on redemption speed, secondary market depth, and lock-up periods. 80+ = highly liquid, below 40 = illiquid")
                 with l2:
                     _metric_card("Liquid (<3 days)",
                                  f"{liq['liquid_pct']:.1f}%",
-                                 f"{_fmt_usd(portfolio_value * liq['liquid_pct'] / 100)}")
+                                 f"{_fmt_usd(portfolio_value * liq['liquid_pct'] / 100)}",
+                                 tooltip="Percentage of your portfolio that can be fully exited within 3 business days — DEX liquidity, T+1 redemptions, and money market funds")
                 with l3:
                     _metric_card("30-Day Exit",
                                  _fmt_usd(liq["30d_exit_usd"]),
-                                 f"{(liq['liquid_pct'] + liq['semi_liquid_pct']):.1f}% of portfolio")
+                                 f"{(liq['liquid_pct'] + liq['semi_liquid_pct']):.1f}% of portfolio",
+                                 tooltip="Total dollar value you could exit within 30 days — includes liquid assets plus weekly/monthly redemption windows")
                 with l4:
                     _metric_card("Illiquid (>30 days)",
                                  f"{liq['illiquid_pct']:.1f}%",
-                                 f"{_fmt_usd(portfolio_value * liq['illiquid_pct'] / 100)}")
+                                 f"{_fmt_usd(portfolio_value * liq['illiquid_pct'] / 100)}",
+                                 tooltip="Percentage of your portfolio locked up for more than 30 days — private equity, some private credit, and illiquid real estate tokens")
 
                 # Liquidity donut
                 liq_labels = ["Liquid (<3d)", "Semi-Liquid (3-30d)", "Illiquid (>30d)"]
@@ -855,16 +880,20 @@ with tab_universe:
     with f1:
         categories = ["All"] + sorted(assets_df["category"].dropna().unique().tolist()) \
                      if not assets_df.empty else ["All"]
-        sel_cat = st.selectbox("Category", categories, key="filter_cat")
+        sel_cat = st.selectbox("Category", categories, key="filter_cat",
+                               help="Filter by asset class (Government Bonds, Private Credit, Real Estate, Commodities, etc.)")
     with f2:
-        risk_filter = st.slider("Max Risk Score", 1, 10, 10, key="filter_risk")
+        risk_filter = st.slider("Max Risk Score", 1, 10, 10, key="filter_risk",
+                                help="Show only assets with a risk score at or below this value. 1 = safest (overnight T-bills), 10 = highest risk (early-stage equity or illiquid alternatives)")
     with f3:
-        min_yield = st.number_input("Min Yield %", 0.0, 50.0, 0.0, 0.5, key="filter_yield")
+        min_yield = st.number_input("Min Yield %", 0.0, 50.0, 0.0, 0.5, key="filter_yield",
+                                    help="Show only assets with a gross or expected yield at or above this percentage per year")
     with f4:
         sort_by = st.selectbox("Sort By", ["composite_score", "current_yield_pct",
                                             "net_apy_pct", "liq_score_comp",
                                             "tvl_usd", "risk_score", "liquidity_score"],
-                                key="filter_sort")
+                                key="filter_sort",
+                                help="Rank assets by this metric. Composite Score = weighted blend of yield, risk, liquidity, and regulatory quality. Net APY = yield after management fees")
 
     filtered_df = assets_df.copy() if not assets_df.empty else pd.DataFrame()
     if not filtered_df.empty:
@@ -1007,18 +1036,23 @@ with tab_arb:
     a1, a2, a3, a4, a5 = st.columns(5)
     with a1:
         _metric_card("Total Opportunities", str(arb_summary.get("total", 0)),
-                     color="#00D4FF")
+                     color="#00D4FF",
+                     tooltip="Total active arbitrage signals detected across all 8 scanner types: yield spread, price vs NAV, cross-chain, stablecoin yield, DeFi pool, carry trade, tokenized stocks, and institutional credit spread")
     with a2:
         _metric_card("Strong Arb", str(arb_summary.get("strong", 0)),
-                     color="#34D399")
+                     color="#34D399",
+                     tooltip=f"Opportunities with net spread above {ARB_STRONG_THRESHOLD_PCT}% after estimated transaction costs — high-conviction signals worth investigating")
     with a3:
         _metric_card("Extreme Arb", str(arb_summary.get("extreme", 0)),
-                     color="#EF4444")
+                     color="#EF4444",
+                     tooltip="Highest-conviction signals with very large spreads — may indicate significant mispricing, low liquidity, or a time-sensitive opportunity")
     with a4:
         _metric_card("Best Spread", _fmt_pct(arb_summary.get("best_spread_pct", 0)),
-                     color=tier_cfg["color"])
+                     color=tier_cfg["color"],
+                     tooltip="The largest net spread (after estimated costs) found across all current opportunities")
     with a5:
-        _metric_card("Avg Spread", _fmt_pct(arb_summary.get("avg_spread_pct", 0)))
+        _metric_card("Avg Spread", _fmt_pct(arb_summary.get("avg_spread_pct", 0)),
+                     tooltip="Average net spread across all active arbitrage opportunities — a measure of overall market efficiency")
 
     # By type breakdown
     by_type = arb_summary.get("by_type", {})
@@ -1035,7 +1069,8 @@ with tab_arb:
     st.markdown('<div class="section-header">Arbitrage Opportunities</div>',
                 unsafe_allow_html=True)
 
-    if st.button("🔄 Rescan Arbitrage", key="btn_arb_rescan"):
+    if st.button("🔄 Rescan Arbitrage", key="btn_arb_rescan",
+                 help="Runs all 8 arbitrage scanners: yield spread, price vs NAV, cross-chain, stablecoin yield, DeFi pool, carry trade, tokenized stocks, and institutional credit spread"):
         st.cache_data.clear()
         st.rerun()
 
@@ -1214,15 +1249,18 @@ with tab_carry:
             st.markdown('<div class="section-header">All Carry Trade Pairs</div>', unsafe_allow_html=True)
             ct1, ct2, ct3 = st.columns(3)
             with ct1:
-                min_net = st.number_input("Min Net Spread %", -5.0, 20.0, 0.0, 0.25, key="ct_min_spread")
+                min_net = st.number_input("Min Net Spread %", -5.0, 20.0, 0.0, 0.25, key="ct_min_spread",
+                                          help="Filter to pairs where net spread (RWA yield − borrow APY − 0.30% ops cost) exceeds this amount. Set to 0 to see only profitable trades")
             with ct2:
                 ct_borrow = st.selectbox(
                     "Borrow Source",
                     ["All"] + sorted(carry_df["Borrow From"].unique().tolist()),
-                    key="ct_borrow_filter"
+                    key="ct_borrow_filter",
+                    help="Filter by the DeFi lending protocol you would borrow stablecoins from. Different protocols offer different rates depending on market conditions"
                 )
             with ct3:
-                ct_risk = st.selectbox("Risk Level", ["All", "LOW", "MEDIUM", "HIGH"], key="ct_risk")
+                ct_risk = st.selectbox("Risk Level", ["All", "LOW", "MEDIUM", "HIGH"], key="ct_risk",
+                                       help="LOW = Government Bonds only (T-bills, treasuries); MEDIUM = Commodities and Tokenized Equities; HIGH = Private Credit, Real Estate, and other illiquid assets")
 
             show_carry = carry_df[carry_df["Net Spread %"] >= min_net]
             if ct_borrow != "All":
@@ -1254,24 +1292,31 @@ with tab_carry:
             st.markdown('<div class="section-header">Carry Trade Calculator</div>', unsafe_allow_html=True)
             calc1, calc2, calc3 = st.columns(3)
             with calc1:
-                calc_principal = st.number_input("Principal (USD)", 10_000, 10_000_000, 100_000, 10_000, key="ct_principal")
+                calc_principal = st.number_input("Principal (USD)", 10_000, 10_000_000, 100_000, 10_000, key="ct_principal",
+                                                 help="The total capital you would deploy — borrow this amount from DeFi and invest the full amount in the RWA asset")
             with calc2:
-                calc_rwa_yield = st.number_input("RWA Net APY %", 0.0, 30.0, 5.5, 0.1, key="ct_rwa_yield")
+                calc_rwa_yield = st.number_input("RWA Net APY %", 0.0, 30.0, 5.5, 0.1, key="ct_rwa_yield",
+                                                 help="The net yield on the RWA asset after management fees. Use the Net APY % column from the Asset Universe table for the most accurate figure")
             with calc3:
-                calc_borrow   = st.number_input("Borrow APY %", 0.0, 15.0, best_borrow_apy, 0.1, key="ct_borrow")
+                calc_borrow   = st.number_input("Borrow APY %", 0.0, 15.0, best_borrow_apy, 0.1, key="ct_borrow",
+                                                help="The variable borrow rate from your DeFi lending protocol. Check the Available Borrow Sources section above for live rates — these float with market conditions")
 
             net_annual = (calc_rwa_yield - calc_borrow - OPS_COST) / 100 * calc_principal
             net_monthly = net_annual / 12
             net_weekly  = net_annual / 52
             cx1, cx2, cx3, cx4 = st.columns(4)
             with cx1: _metric_card("Net Spread", f"{calc_rwa_yield - calc_borrow - OPS_COST:.2f}%",
-                                    color="#34D399" if net_annual > 0 else "#EF4444")
+                                    color="#34D399" if net_annual > 0 else "#EF4444",
+                                    tooltip="RWA Net APY minus borrow APY minus 0.30% estimated gas and operational costs. This is your actual yield advantage.")
             with cx2: _metric_card("Annual P&L", _fmt_usd(net_annual),
-                                    color="#34D399" if net_annual > 0 else "#EF4444")
+                                    color="#34D399" if net_annual > 0 else "#EF4444",
+                                    tooltip="Estimated annual profit on this carry trade at current rates. Does not account for liquidation risk or rate changes.")
             with cx3: _metric_card("Monthly P&L", _fmt_usd(net_monthly),
-                                    color="#34D399" if net_monthly > 0 else "#EF4444")
+                                    color="#34D399" if net_monthly > 0 else "#EF4444",
+                                    tooltip="Annual P&L divided by 12. Borrow rates are variable — actual monthly income will fluctuate.")
             with cx4: _metric_card("Weekly P&L",  _fmt_usd(net_weekly),
-                                    color="#34D399" if net_weekly > 0 else "#EF4444")
+                                    color="#34D399" if net_weekly > 0 else "#EF4444",
+                                    tooltip="Annual P&L divided by 52. Useful for estimating weekly cash flow from the carry position.")
 
             st.markdown(
                 "<p style='color:#6B7280;font-size:11px;margin-top:8px'>"
@@ -1447,7 +1492,8 @@ with tab_ai:
     with ac2:
         interval = st.selectbox("Cycle Interval", [30, 60, 120, 300, 600],
                                 index=1, key="agent_interval",
-                                format_func=lambda x: f"{x}s" if x < 60 else f"{x//60}m")
+                                format_func=lambda x: f"{x}s" if x < 60 else f"{x//60}m",
+                                help="How often the agent wakes up to analyze market data and make a portfolio decision. Shorter = more reactive but higher API usage. 60s is a good default.")
     with ac3:
         sup_status = _agent.supervisor.status()
         agent_is_running = sup_status.get("running", False)
@@ -1470,7 +1516,8 @@ with tab_ai:
                 st.session_state["agent_running"] = False
                 st.rerun()
     with ac4:
-        if st.button("⚡ Run Now (1 cycle)", use_container_width=True, key="btn_one_cycle"):
+        if st.button("⚡ Run Now (1 cycle)", use_container_width=True, key="btn_one_cycle",
+                     help="Execute one analysis cycle immediately — the agent reads live market data, calls Claude for a decision (HOLD/REBALANCE/DEPLOY/REDUCE), and logs the result. Great for testing without starting the full scheduler."):
             with st.spinner(f"Running {agent_detail['name']} cycle..."):
                 result = _agent.run_agent_cycle(selected_agent, dry_run=dry_run, cycle_number=0)
             st.success(f"Cycle complete: {result.get('claude_decision', 'UNKNOWN')}")
@@ -1908,11 +1955,14 @@ with tab_reg:
 
     rf1, rf2 = st.columns([2, 2])
     with rf1:
-        jur_filter = st.selectbox("Filter by Jurisdiction", ["ALL"] + jurisdictions, key="reg_jur")
+        jur_filter = st.selectbox("Filter by Jurisdiction", ["ALL"] + jurisdictions, key="reg_jur",
+                                  help="Filter events by the regulatory authority's geographic jurisdiction (EU = MiCA/DLT Pilot; USA = SEC/GENIUS Act; UAE = VARA; Global = IOSCO)")
     with rf2:
-        imp_filter = st.selectbox("Filter by Impact", impacts, key="reg_imp")
+        imp_filter = st.selectbox("Filter by Impact", impacts, key="reg_imp",
+                                  help="HIGH = hard compliance deadline or major rule change affecting key RWA protocols; MEDIUM = regulatory guidance, pilot review, or framework extension; LOW = informational update")
 
-    show_past = st.checkbox("Show past events", value=False, key="reg_past")
+    show_past = st.checkbox("Show past events", value=False, key="reg_past",
+                            help="Include regulatory milestones that have already passed — useful for tracking compliance history and understanding how the regulatory landscape has evolved")
 
     events_to_show = REG_EVENTS if show_past else upcoming
     if jur_filter != "ALL":
