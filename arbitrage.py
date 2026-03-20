@@ -82,6 +82,7 @@ GAS_COSTS = {
     "Canton Network": 0.05,  # Goldman Sachs / Digital Asset institutional chain
     "Polymesh":     0.05,    # Regulated securities chain (Polymath)
     "SDX":          0.00,    # SIX Digital Exchange — zero gas, fee handled by CSD
+    "Berachain":    0.003,   # Proof of Liquidity EVM — near-zero gas, EVM-compatible
 }
 
 # Minimum trade size to make arb worthwhile

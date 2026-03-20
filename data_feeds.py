@@ -23,6 +23,7 @@ from config import (
     COINGECKO_API_KEY, COINMARKETCAP_API_KEY,
     NEWSAPI_API_KEY, CRYPTOPANIC_API_KEY,
     BINANCE_API_KEY, BINANCE_API_SECRET,
+    DUNE_API_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -848,4 +849,143 @@ def get_market_summary() -> dict:
         "gold_price_usd":    gold_price,
         "protocol_count":    len(protocols),
         "last_updated":      datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DUNE ANALYTICS — On-chain RWA TVL & Activity
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Dune query IDs for RWA on-chain metrics (public dashboards)
+_DUNE_QUERIES = {
+    "rwa_tvl_by_protocol":  3237755,   # RWA TVL breakdown by protocol (Dune public)
+    "tbill_holders":        3421000,   # Tokenized T-bill unique holder counts
+    "rwa_transfers_30d":    3500000,   # RWA token transfer volume (30-day rolling)
+}
+
+_DUNE_API_BASE = "https://api.dune.com/api/v1"
+
+
+def _dune_get(query_id: int) -> Optional[dict]:
+    """
+    Execute a Dune Analytics query and return results.
+    Requires DUNE_API_KEY in environment. Returns None gracefully if unavailable.
+    """
+    if not DUNE_API_KEY:
+        logger.debug("[Dune] No API key — skipping query %s", query_id)
+        return None
+
+    headers = {"X-Dune-API-Key": DUNE_API_KEY}
+
+    # Trigger execution
+    exec_url = f"{_DUNE_API_BASE}/query/{query_id}/execute"
+    try:
+        r = _session.post(exec_url, headers=headers, timeout=REQUEST_TIMEOUT)
+        if r.status_code != 200:
+            logger.debug("[Dune] Execute failed (%s) for query %s", r.status_code, query_id)
+            return None
+        execution_id = r.json().get("execution_id")
+    except Exception as e:
+        logger.debug("[Dune] Execute error for query %s: %s", query_id, e)
+        return None
+
+    # Poll for results (max 30s)
+    status_url = f"{_DUNE_API_BASE}/execution/{execution_id}/status"
+    result_url  = f"{_DUNE_API_BASE}/execution/{execution_id}/results"
+    for _ in range(6):
+        time.sleep(5)
+        try:
+            st = _session.get(status_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            state = st.json().get("state", "")
+            if state == "QUERY_STATE_COMPLETED":
+                res = _session.get(result_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                return res.json().get("result", {})
+            if state in ("QUERY_STATE_FAILED", "QUERY_STATE_CANCELLED"):
+                logger.debug("[Dune] Query %s %s", query_id, state)
+                return None
+        except Exception as e:
+            logger.debug("[Dune] Poll error for query %s: %s", query_id, e)
+    return None
+
+
+def fetch_dune_rwa_tvl() -> dict:
+    """
+    Fetch RWA TVL by protocol from Dune Analytics.
+
+    Returns dict:
+      {
+        "rows": [ {"protocol": str, "tvl_usd": float, "chain": str}, ... ],
+        "total_tvl_usd": float,
+        "source": "dune" | "unavailable",
+        "timestamp": str,
+      }
+
+    Falls back gracefully when DUNE_API_KEY is not set.
+    """
+    def _fetch():
+        result = _dune_get(_DUNE_QUERIES["rwa_tvl_by_protocol"])
+        if not result:
+            return {"rows": [], "total_tvl_usd": 0.0, "source": "unavailable",
+                    "timestamp": datetime.now(timezone.utc).isoformat()}
+
+        rows = result.get("rows", [])
+        parsed = []
+        total  = 0.0
+        for row in rows:
+            tvl = float(row.get("tvl_usd") or row.get("tvl") or 0)
+            parsed.append({
+                "protocol": row.get("protocol") or row.get("project", ""),
+                "tvl_usd":  tvl,
+                "chain":    row.get("blockchain") or row.get("chain", ""),
+            })
+            total += tvl
+
+        return {
+            "rows":          parsed,
+            "total_tvl_usd": round(total, 2),
+            "source":        "dune",
+            "timestamp":     datetime.now(timezone.utc).isoformat(),
+        }
+
+    return _cached_get("dune_rwa_tvl", CACHE_TTL["tvl"], _fetch) or {
+        "rows": [], "total_tvl_usd": 0.0, "source": "unavailable",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def fetch_dune_tbill_holders() -> dict:
+    """
+    Fetch tokenized T-bill unique holder counts from Dune Analytics.
+
+    Returns dict:
+      {
+        "rows": [ {"token": str, "holders": int, "protocol": str}, ... ],
+        "source": "dune" | "unavailable",
+        "timestamp": str,
+      }
+    """
+    def _fetch():
+        result = _dune_get(_DUNE_QUERIES["tbill_holders"])
+        if not result:
+            return {"rows": [], "source": "unavailable",
+                    "timestamp": datetime.now(timezone.utc).isoformat()}
+
+        rows = result.get("rows", [])
+        parsed = [
+            {
+                "token":    row.get("token_symbol") or row.get("token", ""),
+                "holders":  int(row.get("unique_holders") or row.get("holders") or 0),
+                "protocol": row.get("protocol") or row.get("project", ""),
+            }
+            for row in rows
+        ]
+        return {
+            "rows":      parsed,
+            "source":    "dune",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return _cached_get("dune_tbill_holders", CACHE_TTL["tvl"], _fetch) or {
+        "rows": [], "source": "unavailable",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }

@@ -71,6 +71,7 @@ CHAIN_VOL_PREMIUM: dict = {
     "Canton Network": 0.0,  # Goldman Sachs / Digital Asset private chain — institutional grade
     "Polymesh":     2.0,    # Purpose-built regulated securities chain, permissioned validators
     "SDX":          0.0,    # SIX Digital Exchange — Swiss DLT Act regulated, institutional-only CSD
+    "Berachain":    3.5,    # Proof of Liquidity EVM, very new (2024 mainnet), thin RWA secondary markets
 }
 
 # ─── Category-pair correlation matrix ────────────────────────────────────────
@@ -804,3 +805,122 @@ def portfolio_comparison_df(portfolios: Dict[int, dict]) -> pd.DataFrame:
             "Color":            tier_cfg["color"],
         })
     return pd.DataFrame(rows)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORRELATION STRESS TESTING
+# ─────────────────────────────────────────────────────────────────────────────
+
+def stress_test_correlations(portfolio: dict, scenario: str = "crisis") -> dict:
+    """
+    Re-compute portfolio risk metrics under stressed correlation assumptions.
+
+    Scenarios:
+      "crisis"   — correlations → 1.0 (full contagion, 2008/2020 style)
+      "moderate" — correlations capped at 0.70 (elevated but not full contagion)
+      "normal"   — uses baseline CATEGORY_CORRELATIONS (current model default)
+
+    Returns dict with stressed metrics, delta vs baseline, and scenario label.
+
+    Why this matters:
+      In systemic risk events (March 2020, crypto winter 2022), correlations between
+      normally uncorrelated asset classes spike toward 1.0. A portfolio that looks
+      diversified under normal correlations can suffer far larger drawdowns when all
+      assets fall together. This function quantifies that hidden tail risk.
+    """
+    holdings = portfolio.get("holdings", [])
+    if not holdings:
+        return {}
+
+    baseline_metrics = portfolio.get("metrics", {})
+    portfolio_value  = portfolio.get("portfolio_value_usd", 100_000)
+    tier             = portfolio.get("tier", 3)
+
+    weights      = np.array([h["weight_pct"] / 100 for h in holdings])
+    yields       = np.array([h.get("current_yield_pct", 0) for h in holdings])
+    risks        = np.array([h.get("risk_score", 5) for h in holdings])
+    n            = len(holdings)
+
+    vol_per_asset = np.array([_risk_to_vol(risks[i], holdings[i]) for i in range(n)])
+
+    # Scenario correlation override
+    if scenario == "crisis":
+        corr_value  = 1.0
+        label       = "Full Crisis (ρ=1.0)"
+        description = "Systemic contagion — all assets fall together (2008 / March 2020 style)"
+    elif scenario == "moderate":
+        corr_value  = 0.70
+        label       = "Moderate Stress (ρ=0.70)"
+        description = "Elevated correlation — risk-off environment, partial flight to quality"
+    else:
+        # Normal — just return baseline
+        return {
+            "scenario":     "normal",
+            "label":        "Normal (Baseline)",
+            "description":  "Current CATEGORY_CORRELATIONS model",
+            "metrics":      baseline_metrics,
+            "delta":        {k: 0.0 for k in baseline_metrics},
+        }
+
+    # Build stressed covariance matrix
+    stressed_cov = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                stressed_cov[i, j] = vol_per_asset[i] ** 2
+            else:
+                stressed_cov[i, j] = corr_value * vol_per_asset[i] * vol_per_asset[j]
+
+    stressed_var = float(weights @ stressed_cov @ weights)
+    stressed_vol = math.sqrt(max(stressed_var, 0))
+
+    avg_yield     = float(np.dot(weights, yields))
+    excess_return = avg_yield - RISK_FREE_RATE
+    sharpe        = excess_return / max(stressed_vol, 0.01)
+    downside_vol  = stressed_vol * 0.56
+    sortino       = excess_return / max(downside_vol, 0.01)
+
+    tier_cfg     = PORTFOLIO_TIERS[tier]
+    max_drawdown = min(stressed_vol * 3.0, tier_cfg["max_drawdown_pct"])
+    calmar       = avg_yield / max(max_drawdown, 0.01)
+
+    var_95  = _gaussian_var(avg_yield, stressed_vol, 0.95)
+    var_99  = _gaussian_var(avg_yield, stressed_vol, 0.99)
+    cvar_95 = var_95 * 1.40
+    cvar_99 = var_99 * 1.48
+
+    weighted_avg_vol  = float(np.dot(weights, vol_per_asset))
+    diversification_r = weighted_avg_vol / max(stressed_vol, 0.01)
+
+    stressed_metrics = {
+        "weighted_yield_pct":       round(avg_yield, 3),
+        "annual_return_usd":        round(portfolio_value * avg_yield / 100, 2),
+        "monthly_income_usd":       round(portfolio_value * avg_yield / 100 / 12, 2),
+        "portfolio_volatility_pct": round(stressed_vol, 3),
+        "sharpe_ratio":             round(sharpe, 3),
+        "sortino_ratio":            round(sortino, 3),
+        "calmar_ratio":             round(calmar, 3),
+        "max_drawdown_pct":         round(max_drawdown, 3),
+        "var_95_pct":               round(var_95, 3),
+        "var_99_pct":               round(var_99, 3),
+        "cvar_95_pct":              round(cvar_95, 3),
+        "cvar_99_pct":              round(cvar_99, 3),
+        "diversification_ratio":    round(diversification_r, 3),
+        "excess_return_pct":        round(excess_return, 3),
+    }
+
+    # Delta vs baseline (positive = worse, negative = better)
+    delta = {}
+    for key in stressed_metrics:
+        base_val = baseline_metrics.get(key, 0) or 0
+        stress_val = stressed_metrics[key]
+        delta[key] = round(stress_val - base_val, 3)
+
+    return {
+        "scenario":     scenario,
+        "label":        label,
+        "description":  description,
+        "metrics":      stressed_metrics,
+        "delta":        delta,
+        "correlation":  corr_value,
+    }

@@ -445,7 +445,7 @@ with col_val:
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_compare, tab_ai, tab_news, tab_trades = st.tabs([
+tab_portfolio, tab_universe, tab_arb, tab_compare, tab_ai, tab_news, tab_trades, tab_reg = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
     "⚡ Arbitrage",
@@ -453,6 +453,7 @@ tab_portfolio, tab_universe, tab_arb, tab_compare, tab_ai, tab_news, tab_trades 
     "🤖 AI Agent",
     "📰 News Feed",
     "📋 Trade Log",
+    "🏛️ Regulatory",
 ])
 
 
@@ -1252,6 +1253,231 @@ with tab_trades:
         )
     else:
         st.info("No trades logged yet. Start an AI agent to begin trading.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 8: REGULATORY CALENDAR
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_reg:
+    st.markdown('<div class="section-header">Regulatory Calendar & Compliance Tracker</div>', unsafe_allow_html=True)
+    st.markdown(
+        "<p style='color:#9CA3AF;font-size:13px;margin-bottom:16px'>"
+        "Key upcoming regulatory milestones affecting tokenized Real World Assets globally. "
+        "Dates are best estimates based on published timelines — always verify with primary sources."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    from datetime import date as _date
+
+    today = _date.today()
+
+    # ── Regulatory events ─────────────────────────────────────────────────────
+    REG_EVENTS = [
+        {
+            "date": _date(2025, 4, 1),
+            "jurisdiction": "EU",
+            "framework": "MiCA",
+            "category": "Stablecoins",
+            "title": "MiCA: E-Money Token (EMT) full compliance deadline",
+            "description": (
+                "All Euro-denominated e-money tokens (EMTs) must be fully MiCA-compliant. "
+                "Issuers must hold authorization from an EU NCAs. Affects EURC, EURS, and other EUR stablecoins."
+            ),
+            "impact": "HIGH",
+            "color": "#EF4444",
+        },
+        {
+            "date": _date(2025, 6, 30),
+            "jurisdiction": "USA",
+            "framework": "GENIUS Act",
+            "category": "Stablecoins",
+            "title": "GENIUS Act: Senate vote expected (USD stablecoin regulation)",
+            "description": (
+                "The Guiding and Establishing National Innovation for US Stablecoins Act — "
+                "if passed, creates a federal licensing framework for USD stablecoin issuers. "
+                "Critical for USDC, USDM, USDY, and other yield-bearing stablecoins in the US market."
+            ),
+            "impact": "HIGH",
+            "color": "#EF4444",
+        },
+        {
+            "date": _date(2025, 9, 30),
+            "jurisdiction": "USA",
+            "framework": "SEC",
+            "category": "Tokenized Securities",
+            "title": "SEC: T+1 settlement — DLT pilot for tokenized securities",
+            "description": (
+                "SEC staff expected to issue guidance on DLT-based settlement for tokenized equity and bond "
+                "instruments under the T+1 settlement framework adopted in 2024. Directly affects BUIDL, OUSG, USTB."
+            ),
+            "impact": "MEDIUM",
+            "color": "#F59E0B",
+        },
+        {
+            "date": _date(2026, 1, 1),
+            "jurisdiction": "EU",
+            "framework": "MiCA",
+            "category": "Crypto-Asset Services",
+            "title": "MiCA: CASP full authorization required for EU operations",
+            "description": (
+                "Crypto-Asset Service Providers (CASPs) must hold full MiCA authorization to operate across the EU. "
+                "This gates trading platforms, custody providers, and token issuers including RWA protocols "
+                "serving EU investors."
+            ),
+            "impact": "HIGH",
+            "color": "#EF4444",
+        },
+        {
+            "date": _date(2026, 3, 31),
+            "jurisdiction": "EU",
+            "framework": "DLT Pilot Regime",
+            "category": "Tokenized Securities",
+            "title": "EU DLT Pilot Regime: Review & potential expansion",
+            "description": (
+                "European Commission reviews the DLT Pilot Regime (Reg 2022/858), which allows EU exchanges and CSDs "
+                "to operate DLT-based market infrastructures. A positive review could expand eligible instruments "
+                "and TVL caps — unlocking large-scale tokenized bond markets."
+            ),
+            "impact": "MEDIUM",
+            "color": "#F59E0B",
+        },
+        {
+            "date": _date(2026, 7, 1),
+            "jurisdiction": "EU",
+            "framework": "MiCA",
+            "category": "RWA Tokens",
+            "title": "MiCA: Asset-Referenced Tokens (ART) — full supervisory regime",
+            "description": (
+                "Full supervisory enforcement of MiCA ART rules. Tokenized commodity funds, multi-asset "
+                "basket products, and RWA-backed tokens that reference external assets must be fully compliant. "
+                "Affects mBASIS, gold tokens (PAXG, XAUt), and emerging multi-collateral RWA products."
+            ),
+            "impact": "HIGH",
+            "color": "#EF4444",
+        },
+        {
+            "date": _date(2026, 9, 30),
+            "jurisdiction": "Global",
+            "framework": "IOSCO",
+            "category": "DeFi / RWA",
+            "title": "IOSCO: DeFi policy recommendations final implementation",
+            "description": (
+                "Final implementation deadline for IOSCO's 2023 DeFi policy recommendations by member regulators. "
+                "Covers cross-border RWA token transfers, KYC requirements, and disclosure obligations for "
+                "protocol-issued tokens including ONDO, MAPLE, and Centrifuge instruments."
+            ),
+            "impact": "MEDIUM",
+            "color": "#F59E0B",
+        },
+        {
+            "date": _date(2026, 12, 31),
+            "jurisdiction": "UAE",
+            "framework": "VARA",
+            "category": "Tokenized Securities",
+            "title": "UAE VARA: RWA Token Issuer licensing — full rollout",
+            "description": (
+                "Dubai's Virtual Assets Regulatory Authority (VARA) completes licensing of RWA token issuers "
+                "under the Virtual Assets Law. Affects MANTRA (OM), Libre Protocol, and Middle East-focused "
+                "tokenized fund platforms."
+            ),
+            "impact": "MEDIUM",
+            "color": "#F59E0B",
+        },
+    ]
+
+    # ── Separate past vs upcoming ──────────────────────────────────────────────
+    upcoming = [e for e in REG_EVENTS if e["date"] >= today]
+    past     = [e for e in REG_EVENTS if e["date"] < today]
+
+    # ── Summary metrics ────────────────────────────────────────────────────────
+    high_impact  = sum(1 for e in upcoming if e["impact"] == "HIGH")
+    next_event   = upcoming[0] if upcoming else None
+    days_to_next = (next_event["date"] - today).days if next_event else None
+
+    rc1, rc2, rc3, rc4 = st.columns(4)
+    with rc1:
+        _metric_card("Upcoming Events", str(len(upcoming)))
+    with rc2:
+        _metric_card("High Impact", str(high_impact), color="#EF4444")
+    with rc3:
+        _metric_card("Past Events", str(len(past)), color="#6B7280")
+    with rc4:
+        if days_to_next is not None:
+            _metric_card("Next Event In", f"{days_to_next}d", color="#F59E0B")
+        else:
+            _metric_card("Next Event", "None", color="#34D399")
+
+    st.markdown("<div style='margin:16px 0'></div>", unsafe_allow_html=True)
+
+    # ── Filter ─────────────────────────────────────────────────────────────────
+    jurisdictions = sorted({e["jurisdiction"] for e in REG_EVENTS})
+    impacts       = ["ALL", "HIGH", "MEDIUM", "LOW"]
+
+    rf1, rf2 = st.columns([2, 2])
+    with rf1:
+        jur_filter = st.selectbox("Filter by Jurisdiction", ["ALL"] + jurisdictions, key="reg_jur")
+    with rf2:
+        imp_filter = st.selectbox("Filter by Impact", impacts, key="reg_imp")
+
+    show_past = st.checkbox("Show past events", value=False, key="reg_past")
+
+    events_to_show = REG_EVENTS if show_past else upcoming
+    if jur_filter != "ALL":
+        events_to_show = [e for e in events_to_show if e["jurisdiction"] == jur_filter]
+    if imp_filter != "ALL":
+        events_to_show = [e for e in events_to_show if e["impact"] == imp_filter]
+
+    # ── Event cards ────────────────────────────────────────────────────────────
+    st.markdown("<div style='margin:8px 0'></div>", unsafe_allow_html=True)
+
+    if not events_to_show:
+        st.info("No events match the selected filters.")
+    else:
+        for ev in events_to_show:
+            is_past   = ev["date"] < today
+            days_diff = (ev["date"] - today).days
+            if is_past:
+                days_label = f"<span style='color:#6B7280'>{abs(days_diff)}d ago</span>"
+            elif days_diff == 0:
+                days_label = "<span style='color:#F59E0B'>TODAY</span>"
+            elif days_diff <= 30:
+                days_label = f"<span style='color:#F59E0B'>{days_diff}d away</span>"
+            else:
+                days_label = f"<span style='color:#9CA3AF'>{days_diff}d away</span>"
+
+            impact_bg = {"HIGH": "#7F1D1D", "MEDIUM": "#78350F", "LOW": "#14532D"}.get(ev["impact"], "#1F2937")
+            impact_color = {"HIGH": "#FCA5A5", "MEDIUM": "#FCD34D", "LOW": "#6EE7B7"}.get(ev["impact"], "#9CA3AF")
+
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1F2937;border-left:4px solid {ev['color']};
+            border-radius:8px;padding:16px;margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+    <div>
+      <span style="font-size:11px;color:#9CA3AF">{ev['date'].strftime('%B %d, %Y')}</span>
+      &nbsp;{days_label}
+      &nbsp;·&nbsp;
+      <span style="font-size:11px;color:#60A5FA">{ev['jurisdiction']} · {ev['framework']}</span>
+      &nbsp;·&nbsp;
+      <span style="font-size:11px;color:#A78BFA">{ev['category']}</span>
+    </div>
+    <span style="background:{impact_bg};color:{impact_color};font-size:10px;
+                 font-weight:700;padding:2px 8px;border-radius:4px">{ev['impact']} IMPACT</span>
+  </div>
+  <div style="font-size:14px;font-weight:600;color:#E2E8F0;margin:8px 0 4px">{ev['title']}</div>
+  <div style="font-size:12px;color:#9CA3AF;line-height:1.6">{ev['description']}</div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Disclaimer ─────────────────────────────────────────────────────────────
+    st.markdown(
+        "<p style='color:#4B5563;font-size:11px;margin-top:16px'>"
+        "⚠️ Regulatory timelines are subject to change. Always verify with official regulatory body publications "
+        "(ESMA, SEC EDGAR, VARA, MAS, FCA). This calendar is for informational purposes only."
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

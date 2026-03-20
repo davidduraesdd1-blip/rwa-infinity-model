@@ -361,6 +361,47 @@ RWA_UNIVERSE = [
         "tags": ["institutional", "treasury", "defi-collateral", "matrixdock", "asian-market", "rebasing"],
     },
 
+    {
+        "id": "MTBILL",
+        "name": "Midas mTBILL — Tokenized US T-Bill",
+        "category": "Government Bonds",
+        "subcategory": "US Treasury",
+        "chain": "Ethereum / Base",
+        "protocol": "Midas",
+        "token_symbol": "mTBILL",
+        "coingecko_id": "midas-mtbill",
+        "defillama_slug": "midas-mtbill",
+        "expected_yield_pct": 4.48,
+        "risk_score": 2,
+        "liquidity_score": 8,
+        "regulatory_score": 8,
+        "min_investment_usd": 100_000,
+        "inception_date": "2023-11-01",
+        "tvl_usd": 400_000_000,
+        "description": "Midas tokenized US T-bill fund (~$400M TVL). ERC-20 yield token backed by short-duration US Treasuries. MiCA-compliant, deployed on Ethereum and Base. Redeemable T+1.",
+        "tags": ["institutional", "treasury", "midas", "mica-compliant", "multi-chain"],
+    },
+    {
+        "id": "MBASIS",
+        "name": "Midas mBASIS — Tokenized Basis Trade",
+        "category": "Government Bonds",
+        "subcategory": "Basis Trade",
+        "chain": "Ethereum / Base",
+        "protocol": "Midas",
+        "token_symbol": "mBASIS",
+        "coingecko_id": "midas-mbasis",
+        "defillama_slug": "midas-mbasis",
+        "expected_yield_pct": 15.0,
+        "risk_score": 5,
+        "liquidity_score": 7,
+        "regulatory_score": 7,
+        "min_investment_usd": 100_000,
+        "inception_date": "2024-03-01",
+        "tvl_usd": 50_000_000,
+        "description": "Midas tokenized basis trade — captures the funding rate spread between spot BTC/ETH and perpetual futures. Higher yield than T-bills with moderate market risk. MiCA-compliant EU issuance.",
+        "tags": ["institutional", "basis-trade", "midas", "mica-compliant", "funding-rate"],
+    },
+
     # ── PRIVATE CREDIT / DEBT ────────────────────────────────────────────────
     {
         "id": "MAPLE_USDC",
@@ -2920,6 +2961,7 @@ CHAIN_COLORS = {
     "Canton Network": "#4A90D9",  # Goldman Sachs / Digital Asset institutional blue
     "Polymesh":     "#E5A50A",   # Polymath gold — regulated securities chain
     "SDX":          "#EF4444",   # SIX Digital Exchange red — Swiss DLT Act regulated
+    "Berachain":    "#FFB92F",   # honey amber — Proof of Liquidity EVM chain
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
