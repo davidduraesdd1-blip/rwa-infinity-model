@@ -3,13 +3,163 @@ config.py — RWA Infinity Model v1.0
 Complete Real World Asset universe, risk tiers, API config.
 """
 
-# ─── API Endpoints (all free / public) ────────────────────────────────────────
+import os as _os
+
+# ─────────────────────────────────────────────────────────────────────────────
+# API KEYS  (read from environment variables — set in .env or shell before launch)
+# To activate a key: export RWA_COINGECKO_API_KEY="your_key_here"
+# All keys default to None; the app degrades gracefully to free-tier endpoints.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Price & Market Data ──────────────────────────────────────────────────────
+COINGECKO_API_KEY       = _os.environ.get("RWA_COINGECKO_API_KEY")       # CoinGecko Pro / Demo
+COINMARKETCAP_API_KEY   = _os.environ.get("RWA_COINMARKETCAP_API_KEY")   # coinmarketcap.com
+TIINGO_API_KEY          = _os.environ.get("RWA_TIINGO_API_KEY")          # tiingo.com — stocks/ETFs/crypto
+ALPHA_VANTAGE_API_KEY   = _os.environ.get("RWA_ALPHA_VANTAGE_API_KEY")   # alphavantage.co — stocks/forex
+FRED_API_KEY            = _os.environ.get("RWA_FRED_API_KEY")            # fred.stlouisfed.org — macro/rates
+MESSARI_API_KEY         = _os.environ.get("RWA_MESSARI_API_KEY")         # messari.io — crypto fundamentals
+NANSEN_API_KEY          = _os.environ.get("RWA_NANSEN_API_KEY")          # nansen.ai — on-chain analytics
+DUNE_API_KEY            = _os.environ.get("RWA_DUNE_API_KEY")            # dune.com — on-chain analytics
+MORALIS_API_KEY         = _os.environ.get("RWA_MORALIS_API_KEY")         # moralis.io — cross-chain data
+KAIKO_API_KEY           = _os.environ.get("RWA_KAIKO_API_KEY")           # kaiko.com — institutional market data
+COIN_METRICS_API_KEY    = _os.environ.get("RWA_COIN_METRICS_API_KEY")    # coinmetrics.io — network data
+
+# ── Block Explorers ──────────────────────────────────────────────────────────
+ETHERSCAN_API_KEY       = _os.environ.get("RWA_ETHERSCAN_API_KEY")       # etherscan.io
+POLYGONSCAN_API_KEY     = _os.environ.get("RWA_POLYGONSCAN_API_KEY")     # polygonscan.com
+ARBISCAN_API_KEY        = _os.environ.get("RWA_ARBISCAN_API_KEY")        # arbiscan.io — Arbitrum
+BSCSCAN_API_KEY         = _os.environ.get("RWA_BSCSCAN_API_KEY")         # bscscan.com — BNB Chain
+OPTIMISTIC_API_KEY      = _os.environ.get("RWA_OPTIMISTIC_API_KEY")      # optimistic.etherscan.io
+BASESCAN_API_KEY        = _os.environ.get("RWA_BASESCAN_API_KEY")        # basescan.org — Base
+SNOWTRACE_API_KEY       = _os.environ.get("RWA_SNOWTRACE_API_KEY")       # snowtrace.io — Avalanche
+SOLSCAN_API_KEY         = _os.environ.get("RWA_SOLSCAN_API_KEY")         # solscan.io — Solana
+
+# ── Web3 Node Providers ──────────────────────────────────────────────────────
+ALCHEMY_API_KEY         = _os.environ.get("RWA_ALCHEMY_API_KEY")         # alchemy.com — Ethereum/Polygon/etc.
+INFURA_API_KEY          = _os.environ.get("RWA_INFURA_API_KEY")          # infura.io — Ethereum/IPFS
+HELIUS_API_KEY          = _os.environ.get("RWA_HELIUS_API_KEY")          # helius.dev — Solana RPC
+QUICKNODE_API_KEY       = _os.environ.get("RWA_QUICKNODE_API_KEY")       # quicknode.com — multi-chain RPC
+THE_GRAPH_API_KEY       = _os.environ.get("RWA_THE_GRAPH_API_KEY")       # thegraph.com — DeFi subgraphs
+
+# ── CEX Trading APIs ─────────────────────────────────────────────────────────
+BINANCE_API_KEY         = _os.environ.get("RWA_BINANCE_API_KEY")         # binance.com (read-only)
+BINANCE_API_SECRET      = _os.environ.get("RWA_BINANCE_API_SECRET")
+COINBASE_API_KEY        = _os.environ.get("RWA_COINBASE_API_KEY")        # advanced trade API
+COINBASE_API_SECRET     = _os.environ.get("RWA_COINBASE_API_SECRET")
+KRAKEN_API_KEY          = _os.environ.get("RWA_KRAKEN_API_KEY")
+KRAKEN_API_SECRET       = _os.environ.get("RWA_KRAKEN_API_SECRET")
+OKX_API_KEY             = _os.environ.get("RWA_OKX_API_KEY")
+OKX_API_SECRET          = _os.environ.get("RWA_OKX_API_SECRET")
+BYBIT_API_KEY           = _os.environ.get("RWA_BYBIT_API_KEY")
+BYBIT_API_SECRET        = _os.environ.get("RWA_BYBIT_API_SECRET")
+KUCOIN_API_KEY          = _os.environ.get("RWA_KUCOIN_API_KEY")
+KUCOIN_API_SECRET       = _os.environ.get("RWA_KUCOIN_API_SECRET")
+KUCOIN_API_PASSPHRASE   = _os.environ.get("RWA_KUCOIN_API_PASSPHRASE")
+GATE_IO_API_KEY         = _os.environ.get("RWA_GATE_IO_API_KEY")
+GATE_IO_API_SECRET      = _os.environ.get("RWA_GATE_IO_API_SECRET")
+DERIBIT_API_KEY         = _os.environ.get("RWA_DERIBIT_API_KEY")        # deribit.com — options/futures
+DERIBIT_API_SECRET      = _os.environ.get("RWA_DERIBIT_API_SECRET")
+
+# ── DEX / DeFi Data ──────────────────────────────────────────────────────────
+DYDX_API_KEY            = _os.environ.get("RWA_DYDX_API_KEY")           # dydx.exchange
+DYDX_API_SECRET         = _os.environ.get("RWA_DYDX_API_SECRET")
+DYDX_PASSPHRASE         = _os.environ.get("RWA_DYDX_PASSPHRASE")
+PARASWAP_API_KEY        = _os.environ.get("RWA_PARASWAP_API_KEY")       # paraswap.io DEX aggregator
+ONEINCH_API_KEY         = _os.environ.get("RWA_ONEINCH_API_KEY")        # 1inch.io DEX aggregator
+ZERO_EX_API_KEY         = _os.environ.get("RWA_ZERO_EX_API_KEY")        # 0x.org DEX protocol
+
+# ── RWA-Specific Platform APIs ───────────────────────────────────────────────
+SECURITIZE_API_KEY      = _os.environ.get("RWA_SECURITIZE_API_KEY")     # securitize.io — BUIDL issuer
+CENTRIFUGE_API_KEY      = _os.environ.get("RWA_CENTRIFUGE_API_KEY")     # centrifuge.io — private credit
+MAPLE_API_KEY           = _os.environ.get("RWA_MAPLE_API_KEY")          # maple.finance
+GOLDFINCH_API_KEY       = _os.environ.get("RWA_GOLDFINCH_API_KEY")      # goldfinch.finance
+CREDIX_API_KEY          = _os.environ.get("RWA_CREDIX_API_KEY")         # credix.finance
+ONDO_API_KEY            = _os.environ.get("RWA_ONDO_API_KEY")           # ondo.finance
+PENDLE_API_KEY          = _os.environ.get("RWA_PENDLE_API_KEY")         # pendle.finance
+SUPERSTATE_API_KEY      = _os.environ.get("RWA_SUPERSTATE_API_KEY")     # superstate.co
+BACKED_API_KEY          = _os.environ.get("RWA_BACKED_API_KEY")         # backed.fi — tokenized ETFs
+DINARI_API_KEY          = _os.environ.get("RWA_DINARI_API_KEY")         # dinari.com — dShares
+OPENEDEN_API_KEY        = _os.environ.get("RWA_OPENEDEN_API_KEY")       # openeden.com — TBILL (Moody's A)
+MATRIXDOCK_API_KEY      = _os.environ.get("RWA_MATRIXDOCK_API_KEY")     # matrixdock.com — STBT/XAUm
+HASHNOTE_API_KEY        = _os.environ.get("RWA_HASHNOTE_API_KEY")       # hashnote.com — USYC
+SPIKO_API_KEY           = _os.environ.get("RWA_SPIKO_API_KEY")          # spiko.io — Euro T-bill fund
+LOFTY_API_KEY           = _os.environ.get("RWA_LOFTY_API_KEY")          # lofty.ai — tokenized RE
+REALT_API_KEY           = _os.environ.get("RWA_REALT_API_KEY")          # realt.co — tokenized RE
+PROPY_API_KEY           = _os.environ.get("RWA_PROPY_API_KEY")          # propy.com — RE title/escrow
+MANTRA_API_KEY          = _os.environ.get("RWA_MANTRA_API_KEY")         # mantrachain.io
+PLUME_API_KEY           = _os.environ.get("RWA_PLUME_API_KEY")          # plumenetwork.xyz
+
+# ── News & Sentiment ─────────────────────────────────────────────────────────
+NEWSAPI_API_KEY         = _os.environ.get("RWA_NEWSAPI_API_KEY")        # newsapi.org
+CRYPTOPANIC_API_KEY     = _os.environ.get("RWA_CRYPTOPANIC_API_KEY")    # cryptopanic.com
+TWITTER_BEARER_TOKEN    = _os.environ.get("RWA_TWITTER_BEARER_TOKEN")   # Twitter/X v2 API
+REDDIT_CLIENT_ID        = _os.environ.get("RWA_REDDIT_CLIENT_ID")       # Reddit API
+REDDIT_CLIENT_SECRET    = _os.environ.get("RWA_REDDIT_CLIENT_SECRET")
+LUNARCRUSH_API_KEY      = _os.environ.get("RWA_LUNARCRUSH_API_KEY")     # lunarcrush.com — social analytics
+SANTIMENT_API_KEY       = _os.environ.get("RWA_SANTIMENT_API_KEY")      # santiment.net — on-chain/social
+
+# ── Notifications ────────────────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN      = _os.environ.get("RWA_TELEGRAM_BOT_TOKEN")     # Telegram bot notifications
+TELEGRAM_CHAT_ID        = _os.environ.get("RWA_TELEGRAM_CHAT_ID")       # Target chat/channel ID
+DISCORD_WEBHOOK_URL     = _os.environ.get("RWA_DISCORD_WEBHOOK_URL")    # Discord webhook URL
+SMTP_HOST               = _os.environ.get("RWA_SMTP_HOST", "smtp.gmail.com")
+try:
+    SMTP_PORT           = int(_os.environ.get("RWA_SMTP_PORT", "587"))
+except (ValueError, TypeError):
+    SMTP_PORT           = 587
+SMTP_USER               = _os.environ.get("RWA_SMTP_USER")
+SMTP_PASSWORD           = _os.environ.get("RWA_SMTP_PASSWORD")
+ALERT_EMAIL             = _os.environ.get("RWA_ALERT_EMAIL")            # Destination email for alerts
+
+# ─────────────────────────────────────────────────────────────────────────────
+# API ENDPOINTS  (upgrade to pro when key is present)
+# ─────────────────────────────────────────────────────────────────────────────
+
 DEFILLAMA_BASE      = "https://api.llama.fi"
 DEFILLAMA_YIELDS    = "https://yields.llama.fi"
-COINGECKO_BASE      = "https://api.coingecko.com/api/v3"
+
+# CoinGecko: use Pro endpoint when key available (higher rate limits + extra data)
+COINGECKO_BASE      = (
+    "https://pro-api.coingecko.com/api/v3"
+    if COINGECKO_API_KEY else
+    "https://api.coingecko.com/api/v3"
+)
+
 RWA_XYZ_BASE        = "https://app.rwa.xyz"          # scrape / public data
 ETHERSCAN_BASE      = "https://api.etherscan.io/api"
 POLYGONSCAN_BASE    = "https://api.polygonscan.com/api"
+ARBISCAN_BASE       = "https://api.arbiscan.io/api"
+BSCSCAN_BASE        = "https://api.bscscan.com/api"
+BASESCAN_BASE       = "https://api.basescan.org/api"
+SNOWTRACE_BASE      = "https://api.snowtrace.io/api"
+
+# CEX Public Market Data (read-only, no auth needed for prices)
+BINANCE_BASE        = "https://api.binance.com/api/v3"
+COINBASE_BASE       = "https://api.coinbase.com/v2"
+KRAKEN_BASE         = "https://api.kraken.com/0/public"
+OKX_BASE            = "https://www.okx.com/api/v5"
+BYBIT_BASE          = "https://api.bybit.com/v5"
+KUCOIN_BASE         = "https://api.kucoin.com/api/v1"
+GATE_IO_BASE        = "https://api.gateio.ws/api/v4"
+
+# CoinMarketCap (requires key)
+COINMARKETCAP_BASE  = "https://pro-api.coinmarketcap.com/v1"
+
+# FRED (Federal Reserve — free with key, higher limits)
+FRED_BASE           = "https://api.stlouisfed.org/fred"
+
+# Tiingo (requires key — stocks, ETFs, crypto prices)
+TIINGO_BASE         = "https://api.tiingo.com"
+
+# Alpha Vantage (requires key — stocks, forex, commodities)
+ALPHA_VANTAGE_BASE  = "https://www.alphavantage.co/query"
+
+# Messari (requires key for extended data)
+MESSARI_BASE        = "https://data.messari.io/api/v1"
+
+# News APIs
+NEWSAPI_BASE        = "https://newsapi.org/v2"
+CRYPTOPANIC_BASE    = "https://cryptopanic.com/api/v1"
 
 # ─── HTTP Config ───────────────────────────────────────────────────────────────
 REQUEST_TIMEOUT     = 15   # seconds
@@ -25,7 +175,7 @@ NEWS_INTERVAL_MINUTES    = 30   # news sentiment refresh
 DB_FILE = "rwa_model.db"
 
 # ─── Anthropic ────────────────────────────────────────────────────────────────
-CLAUDE_MODEL    = "claude-3-5-sonnet-20241022"
+CLAUDE_MODEL    = "claude-sonnet-4-6"
 CLAUDE_TIMEOUT  = 45.0
 AI_CACHE_TTL    = 1800   # 30 min
 
@@ -49,7 +199,7 @@ RWA_UNIVERSE = [
         "token_symbol": "BUIDL",
         "coingecko_id": None,
         "defillama_slug": "blackrock-buidl",
-        "expected_yield_pct": 5.10,
+        "expected_yield_pct": 4.450,
         "risk_score": 1,
         "liquidity_score": 7,
         "regulatory_score": 10,
@@ -68,7 +218,7 @@ RWA_UNIVERSE = [
         "token_symbol": "BENJI",
         "coingecko_id": None,
         "defillama_slug": "franklin-benji",
-        "expected_yield_pct": 5.05,
+        "expected_yield_pct": 4.4,
         "risk_score": 1,
         "liquidity_score": 8,
         "regulatory_score": 10,
@@ -87,7 +237,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USTB",
         "coingecko_id": "superstate-short-duration-us-government-securities-fund",
         "defillama_slug": "superstate",
-        "expected_yield_pct": 5.08,
+        "expected_yield_pct": 4.43,
         "risk_score": 1,
         "liquidity_score": 8,
         "regulatory_score": 9,
@@ -106,7 +256,7 @@ RWA_UNIVERSE = [
         "token_symbol": "TBILL",
         "coingecko_id": "openeden-tbill",
         "defillama_slug": "openeden",
-        "expected_yield_pct": 5.12,
+        "expected_yield_pct": 4.47,
         "risk_score": 2,
         "liquidity_score": 9,
         "regulatory_score": 8,
@@ -125,7 +275,7 @@ RWA_UNIVERSE = [
         "token_symbol": "OUSG",
         "coingecko_id": "ondo-us-dollar-yield",
         "defillama_slug": "ondo-finance",
-        "expected_yield_pct": 5.02,
+        "expected_yield_pct": 4.37,
         "risk_score": 2,
         "liquidity_score": 9,
         "regulatory_score": 9,
@@ -144,7 +294,7 @@ RWA_UNIVERSE = [
         "token_symbol": "OMMF",
         "coingecko_id": None,
         "defillama_slug": "ondo-finance",
-        "expected_yield_pct": 4.95,
+        "expected_yield_pct": 4.3,
         "risk_score": 1,
         "liquidity_score": 9,
         "regulatory_score": 9,
@@ -163,7 +313,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USDM",
         "coingecko_id": "usdm",
         "defillama_slug": "mountain-protocol",
-        "expected_yield_pct": 4.90,
+        "expected_yield_pct": 4.250,
         "risk_score": 2,
         "liquidity_score": 10,
         "regulatory_score": 8,
@@ -182,7 +332,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USDY",
         "coingecko_id": "ondo-us-dollar-yield-token",
         "defillama_slug": "ondo-finance",
-        "expected_yield_pct": 5.00,
+        "expected_yield_pct": 4.350,
         "risk_score": 2,
         "liquidity_score": 10,
         "regulatory_score": 8,
@@ -193,22 +343,22 @@ RWA_UNIVERSE = [
     },
     {
         "id": "STBT",
-        "name": "Short-term Treasury Bill Token",
+        "name": "Matrixdock Short-Term Treasury Bill Token",
         "category": "Government Bonds",
         "subcategory": "US Treasury",
         "chain": "Ethereum",
-        "protocol": "Matrixport / Parallel Finance",
+        "protocol": "Matrixdock",
         "token_symbol": "STBT",
         "coingecko_id": "stbt",
-        "defillama_slug": "matrixport",
-        "expected_yield_pct": 4.85,
+        "defillama_slug": "matrixdock-stbt",
+        "expected_yield_pct": 4.2,
         "risk_score": 2,
         "liquidity_score": 7,
         "regulatory_score": 7,
         "min_investment_usd": 100_000,
         "inception_date": "2023-03-01",
-        "description": "6-month T-bill backed token by Matrixport. Used as DeFi collateral on Curve/Crvusd.",
-        "tags": ["institutional", "treasury", "defi-collateral"],
+        "description": "First Asian tokenized short-term T-bill by Matrixdock (Matrixport). Rebases daily to distribute yield. Used as DeFi collateral on Curve. Expanding to precious metals (silver, platinum, palladium) in 2025.",
+        "tags": ["institutional", "treasury", "defi-collateral", "matrixdock", "asian-market", "rebasing"],
     },
 
     # ── PRIVATE CREDIT / DEBT ────────────────────────────────────────────────
@@ -1006,7 +1156,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USYC",
         "coingecko_id": None,
         "defillama_slug": "hashnote",
-        "expected_yield_pct": 5.10,
+        "expected_yield_pct": 4.450,
         "risk_score": 1,
         "liquidity_score": 8,
         "regulatory_score": 9,
@@ -1082,7 +1232,7 @@ RWA_UNIVERSE = [
         "token_symbol": "bIBTA",
         "coingecko_id": None,
         "defillama_slug": "backed-finance",
-        "expected_yield_pct": 4.80,
+        "expected_yield_pct": 4.150,
         "risk_score": 1,
         "liquidity_score": 7,
         "regulatory_score": 8,
@@ -1217,7 +1367,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USKT",
         "coingecko_id": None,
         "defillama_slug": "spiko",
-        "expected_yield_pct": 5.05,
+        "expected_yield_pct": 4.4,
         "risk_score": 1,
         "liquidity_score": 8,
         "regulatory_score": 9,
@@ -1257,7 +1407,7 @@ RWA_UNIVERSE = [
         "token_symbol": "OTK",
         "coingecko_id": None,
         "defillama_slug": "opentrade",
-        "expected_yield_pct": 5.0,
+        "expected_yield_pct": 4.35,
         "risk_score": 2,
         "liquidity_score": 7,
         "regulatory_score": 8,
@@ -1278,7 +1428,7 @@ RWA_UNIVERSE = [
         "token_symbol": "aMMF",
         "coingecko_id": None,
         "defillama_slug": None,
-        "expected_yield_pct": 5.1,
+        "expected_yield_pct": 4.42,
         "risk_score": 1,
         "liquidity_score": 7,
         "regulatory_score": 9,
@@ -1337,7 +1487,7 @@ RWA_UNIVERSE = [
         "token_symbol": "aTBILL",
         "coingecko_id": None,
         "defillama_slug": None,
-        "expected_yield_pct": 5.0,
+        "expected_yield_pct": 4.35,
         "risk_score": 1,
         "liquidity_score": 7,
         "regulatory_score": 9,
@@ -1417,7 +1567,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USDF",
         "coingecko_id": None,
         "defillama_slug": None,
-        "expected_yield_pct": 4.8,
+        "expected_yield_pct": 4.15,
         "risk_score": 1,
         "liquidity_score": 6,
         "regulatory_score": 9,
@@ -1457,7 +1607,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USDY-APT",
         "coingecko_id": None,
         "defillama_slug": "ondo-finance",
-        "expected_yield_pct": 5.0,
+        "expected_yield_pct": 4.35,
         "risk_score": 2,
         "liquidity_score": 7,
         "regulatory_score": 8,
@@ -1550,22 +1700,60 @@ RWA_UNIVERSE = [
     },
     {
         "id": "NASDAQ_TOKENIZED",
-        "name": "NASDAQ x Paxos Institutional Tokenized Equities",
+        "name": "NASDAQ SEC-Approved Tokenized Equities Pilot",
         "category": "Tokenized Equities",
         "subcategory": "Tokenized Stocks",
         "chain": "Multiple",
-        "protocol": "NASDAQ / Paxos",
+        "protocol": "NASDAQ / DTC",
         "token_symbol": "NDAQ-T",
         "coingecko_id": None,
         "defillama_slug": None,
         "expected_yield_pct": 10.0,
-        "risk_score": 3,
+        "risk_score": 2,
+        "liquidity_score": 10,
+        "regulatory_score": 10,
+        "min_investment_usd": 1,
+        "inception_date": "2026-03-18",
+        "description": "SEC approved March 18, 2026 — Russell 1000 stocks + S&P 500/Nasdaq-100 ETFs tokenized via DTC clearing. First token-settled trades targeted Q3 2026. Full T+0 instant settlement, 24/7 markets.",
+        "tags": ["institutional", "equities", "nasdaq", "t0-settlement", "dtc", "tokenized-stocks", "sec-approved", "russell-1000", "sp500", "breaking-2026"],
+    },
+    {
+        "id": "NYSE_TOKENIZED",
+        "name": "NYSE / ICE Tokenized Securities Platform",
+        "category": "Tokenized Equities",
+        "subcategory": "Tokenized Stocks",
+        "chain": "Multiple",
+        "protocol": "NYSE / ICE / Bakkt",
+        "token_symbol": "NYSE-T",
+        "coingecko_id": None,
+        "defillama_slug": None,
+        "expected_yield_pct": 9.5,
+        "risk_score": 2,
         "liquidity_score": 9,
         "regulatory_score": 10,
         "min_investment_usd": 1,
-        "inception_date": "2024-09-01",
-        "description": "NASDAQ's blockchain-native equity settlement with Paxos. T+0 instant settlement for tokenized stocks. SEC-approved framework — the future of equity markets.",
-        "tags": ["institutional", "equities", "nasdaq", "t0-settlement", "paxos", "tokenized-stocks", "sec-approved"],
+        "inception_date": "2026-01-01",
+        "description": "NYSE / Intercontinental Exchange developing tokenized securities platform: 24/7 trading, instant settlement, stablecoin funding. Leverages ICE's existing DTC membership and Bakkt digital asset infrastructure.",
+        "tags": ["institutional", "equities", "nyse", "ice", "bakkt", "t0-settlement", "tokenized-stocks", "stablecoin-settlement", "24-7-trading"],
+    },
+    {
+        "id": "ONDO_GLOBAL_MARKETS",
+        "name": "Ondo Global Markets Tokenized Stocks & ETFs",
+        "category": "Tokenized Equities",
+        "subcategory": "Tokenized Stocks",
+        "chain": "Ethereum / BNB Chain / Solana",
+        "protocol": "Ondo Finance",
+        "token_symbol": "ONDO-GM",
+        "coingecko_id": "ondo-finance",
+        "defillama_slug": "ondo-finance",
+        "expected_yield_pct": 12.0,
+        "risk_score": 3,
+        "liquidity_score": 9,
+        "regulatory_score": 9,
+        "min_investment_usd": 1,
+        "inception_date": "2025-09-01",
+        "description": "#1 tokenized stocks platform. $600M+ TVL, 200+ U.S. stocks & ETFs (TSLA, NVDA, AAPL, MSFT, AMZN, QQQ, SPY), 60% market share. ADGM/Binance approved March 2026. Non-US investors via equity-linked notes. Ethereum/BNB/Solana.",
+        "tags": ["retail", "equities", "ondo", "tokenized-stocks", "multinchain", "adgm", "binance", "metamask", "sp500", "nasdaq100", "ando-finance"],
     },
     {
         "id": "GAINS_TOKENIZED",
@@ -1987,7 +2175,7 @@ RWA_UNIVERSE = [
         "token_symbol": "USDY-COSMOS",
         "coingecko_id": None,
         "defillama_slug": "noble",
-        "expected_yield_pct": 4.90,
+        "expected_yield_pct": 4.250,
         "risk_score": 2,
         "liquidity_score": 7,
         "regulatory_score": 8,
@@ -2067,7 +2255,7 @@ RWA_UNIVERSE = [
         "token_symbol": "UBS-MMF",
         "coingecko_id": None,
         "defillama_slug": None,
-        "expected_yield_pct": 4.80,
+        "expected_yield_pct": 4.150,
         "risk_score": 1,
         "liquidity_score": 6,
         "regulatory_score": 10,
@@ -2075,6 +2263,26 @@ RWA_UNIVERSE = [
         "inception_date": "2024-02-01",
         "description": "UBS Asset Management tokenized MMF on Ethereum using Chainlink CCIP for cross-chain transfers. Part of Project Guardian (MAS Singapore). $3.6T AUM manager.",
         "tags": ["institutional", "money-market", "ubs", "chainlink-ccip", "mas-singapore", "project-guardian", "accredited"],
+    },
+    # ── CANTON NETWORK — Goldman Sachs GS DAP / DTCC Tokenized Treasuries ──────
+    {
+        "id": "CANTON_GS_DAP",
+        "name": "Canton Network GS DAP Tokenized Government Securities",
+        "category": "Government Bonds",
+        "subcategory": "Institutional Repo / MMF",
+        "chain": "Canton Network",
+        "protocol": "Goldman Sachs / Digital Asset",
+        "token_symbol": "GS-DAP",
+        "coingecko_id": None,
+        "defillama_slug": None,
+        "expected_yield_pct": 4.50,
+        "risk_score": 1,
+        "liquidity_score": 5,
+        "regulatory_score": 10,
+        "min_investment_usd": 5_000_000,
+        "inception_date": "2025-06-24",
+        "description": "Goldman Sachs GS DAP on Canton Network — purpose-built institutional privacy blockchain. DTCC tokenizing DTC-custodied US Treasuries on Canton (Dec 2025). BNY Mellon + GS first US tokenized MMF. $135M raised Jun 2025. GS DAP spinning out as independent company by mid-2026.",
+        "tags": ["institutional", "treasury", "goldman-sachs", "canton-network", "dtcc", "bny-mellon", "digital-asset", "privacy-chain", "qualified-purchaser"],
     },
     # ── KINESIS MONEY — Gold + Silver with velocity yield ─────────────────────
     {
@@ -2155,6 +2363,26 @@ RWA_UNIVERSE = [
         "description": "Fixed-rate lending and borrowing on Arbitrum. USDC/DAI/ETH at fixed rates up to 1 year. Leveraged vault strategies for enhanced yield. Paradigm-backed.",
         "tags": ["institutional", "private-credit", "fixed-rate", "lending", "arbitrum", "paradigm-backed"],
     },
+    # ── SDX — SIX Digital Exchange, Switzerland DLT Act ─────────────────────
+    {
+        "id": "SDX_DIGITAL_BOND",
+        "name": "SDX SIX Digital Exchange Tokenized Bonds",
+        "category": "Government Bonds",
+        "subcategory": "Digital Bond",
+        "chain": "SDX",
+        "protocol": "SIX Group / SDX",
+        "token_symbol": "SDX-BOND",
+        "coingecko_id": None,
+        "defillama_slug": None,
+        "expected_yield_pct": 3.80,
+        "risk_score": 1,
+        "liquidity_score": 5,
+        "regulatory_score": 10,
+        "min_investment_usd": 500_000,
+        "inception_date": "2021-11-01",
+        "description": "SIX Digital Exchange — Switzerland DLT Act-regulated institutional bond exchange. UBS CHF 375M digital bond, World Bank digital bonds, T+0 atomic settlement. Integrated with SIX Swiss Exchange CSD. World's most advanced tokenization legal framework.",
+        "tags": ["institutional", "digital-bond", "swiss", "sdx", "six-group", "ubs", "world-bank", "dlt-act", "t0-settlement", "csd", "qualified-purchaser"],
+    },
     # ── SIEMENS DIGITAL BOND — First corporate digital bond on public chain ───
     {
         "id": "SIEMENS_BOND",
@@ -2186,14 +2414,14 @@ RWA_UNIVERSE = [
         "token_symbol": "rTBILL",
         "coingecko_id": None,
         "defillama_slug": "plume",
-        "expected_yield_pct": 5.00,
+        "expected_yield_pct": 4.350,
         "risk_score": 3,
         "liquidity_score": 6,
         "regulatory_score": 7,
         "min_investment_usd": 1,
-        "inception_date": "2024-10-01",
-        "description": "Plume Network is the first purpose-built RWA blockchain with 180+ protocols pre-committed. rTBILL is the native T-bill token. EVM-compatible, compliance-native.",
-        "tags": ["retail", "treasury", "plume", "rwa-chain", "compliance-native", "evm"],
+        "inception_date": "2025-06-05",
+        "description": "Plume Genesis mainnet launched June 5, 2025 with 50+ protocols on day one including Morpho and Curve. First purpose-built RWA L1 blockchain. rTBILL is the native T-bill token. EVM-compatible, compliance-native.",
+        "tags": ["retail", "treasury", "plume", "rwa-chain", "compliance-native", "evm", "morpho", "curve"],
     },
     {
         "id": "PLUME_RE",
@@ -2210,8 +2438,8 @@ RWA_UNIVERSE = [
         "liquidity_score": 5,
         "regulatory_score": 7,
         "min_investment_usd": 100,
-        "inception_date": "2024-10-01",
-        "description": "Real estate tokenization on Plume Network via OpenEden, Nest Credit and other Plume ecosystem protocols. Purpose-built compliance layer reduces legal overhead.",
+        "inception_date": "2025-06-05",
+        "description": "Real estate tokenization on Plume Network (mainnet June 2025) via OpenEden, Nest Credit and other Plume ecosystem protocols. 50+ protocols launched day one. Purpose-built compliance layer reduces legal overhead.",
         "tags": ["retail", "real-estate", "plume", "rwa-chain", "compliance-native"],
     },
     # ── MANTRA CHAIN — Dubai-licensed RWA appchain ─────────────────────────────
@@ -2365,7 +2593,7 @@ RWA_UNIVERSE = [
         "token_symbol": "WTGOVI",
         "coingecko_id": None,
         "defillama_slug": None,
-        "expected_yield_pct": 4.9,
+        "expected_yield_pct": 4.25,
         "risk_score": 1,
         "liquidity_score": 7,
         "regulatory_score": 9,
@@ -2610,10 +2838,18 @@ DEFILLAMA_PROTOCOLS = [
     "mantra",             # Mantra Chain RWA appchain
     "noble",              # Noble Cosmos T-bill infrastructure
     "flowcarbon",         # Carbon credits
-    "openeden",           # OpenEden TBILL vault
+    "openeden",           # OpenEden TBILL vault (Moody's A-rated)
     "swarm",              # Swarm Markets tokenized stocks
     "agrotoken",          # Agricultural commodity tokens
     "kinesis",            # Gold/silver velocity yield tokens
+    "matrixdock-stbt",    # Matrixdock STBT — first Asian T-bill token
+    "lofty",              # Lofty.ai tokenized rental RE
+    "realtoken",          # RealT tokenized RE
+    "propy",              # Propy RE title/escrow
+    "maple-v2",           # Maple Finance v2 ($3.2B TVL)
+    "backed-assets",      # Backed Finance ERC-20 ETFs
+    "archax",             # UK FCA-regulated tokenized funds
+    "spiko",              # Spiko Euro T-bill fund
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2681,6 +2917,9 @@ CHAIN_COLORS = {
     "Mantle":       "#3CB290",   # Mantle teal
     "Kinexys":      "#003087",   # JPMorgan institutional dark blue
     "Centrifuge Chain": "#2E2D2D",
+    "Canton Network": "#4A90D9",  # Goldman Sachs / Digital Asset institutional blue
+    "Polymesh":     "#E5A50A",   # Polymath gold — regulated securities chain
+    "SDX":          "#EF4444",   # SIX Digital Exchange red — Swiss DLT Act regulated
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

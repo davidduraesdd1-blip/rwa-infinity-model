@@ -92,6 +92,7 @@ class AgentState(TypedDict):
     execution_result:   dict
     cycle_notes:        list
     cycle_number:       int
+    is_dry_run:         bool
     error:              Optional[str]
 
 
@@ -678,7 +679,7 @@ Provide 3 concise bullet-point insights (1 sentence each) about:
 
 Format as plain text bullet points, no markdown."""
 
-        client = _anthropic.Anthropic(api_key=api_key, timeout=30.0)
+        client = _anthropic.Anthropic(api_key=api_key, timeout=CLAUDE_TIMEOUT)
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=400,

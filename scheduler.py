@@ -68,7 +68,6 @@ def job_price_refresh():
     """Price-only refresh — runs every 5 minutes."""
     try:
         from data_feeds import fetch_coingecko_prices
-        from config import COINGECKO_IDS
         prices = fetch_coingecko_prices()
         logger.debug("[Scheduler] Price refresh — %d tokens", len(prices))
     except Exception as e:

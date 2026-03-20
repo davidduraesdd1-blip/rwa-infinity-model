@@ -12,6 +12,13 @@ import threading
 import time
 from datetime import datetime, timezone, timedelta
 
+# ─── Load .env file if present (python-dotenv) ─────────────────────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv optional — keys can also be set as shell env vars
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -457,11 +464,11 @@ with tab_portfolio:
     portfolio = _load_portfolio(selected_tier, portfolio_value)
     if not portfolio:
         st.warning("Loading portfolio data... Please wait or click Refresh Now.")
-        st.stop()
-
-    metrics  = portfolio.get("metrics", {})
-    holdings = portfolio.get("holdings", [])
-    cat_sum  = portfolio.get("category_summary", {})
+        metrics, holdings, cat_sum = {}, [], {}
+    else:
+        metrics  = portfolio.get("metrics", {})
+        holdings = portfolio.get("holdings", [])
+        cat_sum  = portfolio.get("category_summary", {})
 
     # ── KPI Row ──────────────────────────────────────────────────────────────
     k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -558,8 +565,8 @@ with tab_portfolio:
             )
             fig_scatter.add_vline(x=5, line_dash="dash", line_color="#374151",
                                   annotation_text="Risk midpoint")
-            fig_scatter.add_hline(y=5.0, line_dash="dash", line_color="#374151",
-                                  annotation_text="Risk-free rate (5%)")
+            fig_scatter.add_hline(y=4.25, line_dash="dash", line_color="#374151",
+                                  annotation_text="Risk-free rate (4.25%)")
             st.plotly_chart(fig_scatter, use_container_width=True)
 
     # ── Holdings Table ────────────────────────────────────────────────────────
