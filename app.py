@@ -1102,38 +1102,38 @@ with tab_arb:
                 st.markdown(f'<span class="{sig_class}">{sig_label}</span>', unsafe_allow_html=True)
                 spread_color = "#34D399" if net_spread > 0 else "#EF4444"
                 st.markdown(f"""
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">
-                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
-                        <div style="font-size:10px;color:#9CA3AF">Net Spread</div>
-                        <div style="font-size:13px;font-weight:700;color:{spread_color}">{net_spread:.3f}%</div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0">
+                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                        <div style="font-size:18px;color:#9CA3AF">Net Spread</div>
+                        <div style="font-size:26px;font-weight:700;color:{spread_color}">{net_spread:.3f}%</div>
                     </div>
-                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
-                        <div style="font-size:10px;color:#9CA3AF">Yield A</div>
-                        <div style="font-size:13px;font-weight:700">{row.get('yield_a_pct', 0):.3f}%</div>
+                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                        <div style="font-size:18px;color:#9CA3AF">Yield A</div>
+                        <div style="font-size:26px;font-weight:700">{row.get('yield_a_pct', 0):.3f}%</div>
                     </div>
-                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
-                        <div style="font-size:10px;color:#9CA3AF">Yield B</div>
-                        <div style="font-size:13px;font-weight:700">{row.get('yield_b_pct', 0):.3f}%</div>
+                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                        <div style="font-size:18px;color:#9CA3AF">Yield B</div>
+                        <div style="font-size:26px;font-weight:700">{row.get('yield_b_pct', 0):.3f}%</div>
                     </div>
-                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
-                        <div style="font-size:10px;color:#9CA3AF">Gross Spread</div>
-                        <div style="font-size:13px;font-weight:700">{row.get('spread_pct', 0):.3f}%</div>
+                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                        <div style="font-size:18px;color:#9CA3AF">Gross Spread</div>
+                        <div style="font-size:26px;font-weight:700">{row.get('spread_pct', 0):.3f}%</div>
                     </div>
-                    <div style="background:#1F2937;padding:4px 10px;border-radius:5px;min-width:90px">
-                        <div style="font-size:10px;color:#9CA3AF">Est. APY</div>
-                        <div style="font-size:13px;font-weight:700;color:{spread_color}">{row.get('estimated_apy', 0):.2f}%</div>
+                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                        <div style="font-size:18px;color:#9CA3AF">Est. APY</div>
+                        <div style="font-size:26px;font-weight:700;color:{spread_color}">{row.get('estimated_apy', 0):.2f}%</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
                 if row.get("action"):
                     st.markdown(
-                        f'<div style="background:#0D1F2D;border-left:3px solid #00D4FF;padding:5px 10px;'
-                        f'font-size:12px;border-radius:0 4px 4px 0;margin:4px 0">'
+                        f'<div style="background:#0D1F2D;border-left:3px solid #00D4FF;padding:10px 18px;'
+                        f'font-size:20px;border-radius:0 4px 4px 0;margin:6px 0">'
                         f'<span style="color:#00D4FF;font-weight:700">Action:</span> {row["action"]}</div>',
                         unsafe_allow_html=True
                     )
                 if row.get("notes"):
-                    st.markdown(f'<div style="font-size:11px;color:#6B7280;margin-top:2px">{row["notes"]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:18px;color:#6B7280;margin-top:4px">{row["notes"]}</div>', unsafe_allow_html=True)
     else:
         st.info("No arbitrage opportunities found. Click Rescan to update.")
 

@@ -175,7 +175,7 @@ NEWS_INTERVAL_MINUTES    = 30   # news sentiment refresh
 DB_FILE = "rwa_model.db"
 
 # ─── Anthropic ────────────────────────────────────────────────────────────────
-CLAUDE_MODEL    = "claude-3-5-sonnet-20241022"
+CLAUDE_MODEL    = "claude-sonnet-4-6"
 CLAUDE_TIMEOUT  = 45.0
 AI_CACHE_TTL    = 1800   # 30 min
 
