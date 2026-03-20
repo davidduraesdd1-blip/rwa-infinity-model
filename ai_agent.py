@@ -632,7 +632,11 @@ def evaluate_past_decisions(agent_name: str, lookback_cycles: int = 10):
         if agent_decisions.empty:
             return
 
+        already_evaluated = _db.get_evaluated_decision_ids()
+
         for _, row in agent_decisions.iterrows():
+            if row.get("id") in already_evaluated:
+                continue
             # Simple outcome evaluation: if DEPLOY/REBALANCE was called,
             # check if portfolio yield improved in subsequent snapshots
             tier = row.get("portfolio_tier", 3)

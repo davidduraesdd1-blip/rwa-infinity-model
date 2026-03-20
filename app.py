@@ -211,9 +211,13 @@ def _metric_card(label, value, delta=None, delta_label="", color=None):
     color_str = f"color: {color};" if color else ""
     delta_html = ""
     if delta is not None:
-        cls   = "delta-up" if delta > 0 else "delta-down" if delta < 0 else "delta-flat"
-        arrow = "▲" if delta > 0 else "▼" if delta < 0 else "●"
-        delta_html = f'<div class="metric-delta {cls}">{arrow} {abs(delta):.2f}% {delta_label}</div>'
+        if isinstance(delta, str):
+            # String delta: render as subtitle caption (no arrow)
+            delta_html = f'<div class="metric-delta delta-flat">{delta}</div>'
+        else:
+            cls   = "delta-up" if delta > 0 else "delta-down" if delta < 0 else "delta-flat"
+            arrow = "▲" if delta > 0 else "▼" if delta < 0 else "●"
+            delta_html = f'<div class="metric-delta {cls}">{arrow} {abs(delta):.2f}% {delta_label}</div>'
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-label">{label}</div>

@@ -659,6 +659,21 @@ def save_protocol_tvl(protocol: str, tvl_usd: float, change_24h_pct: float = Non
 
 # ─── Feedback Log ─────────────────────────────────────────────────────────────
 
+def get_evaluated_decision_ids() -> set:
+    """Return set of decision_ids already logged in ai_feedback (dedup guard)."""
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT decision_id FROM ai_feedback WHERE decision_id IS NOT NULL"
+        ).fetchall()
+        return {row[0] for row in rows}
+    except Exception as e:
+        logger.error("[DB] get_evaluated_decision_ids: %s", e)
+        return set()
+    finally:
+        conn.close()
+
+
 def log_ai_feedback(feedback: dict):
     with _write_lock:
         conn = _get_conn()
