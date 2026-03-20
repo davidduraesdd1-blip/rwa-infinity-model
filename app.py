@@ -25,6 +25,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+try:
+    from streamlit_autorefresh import st_autorefresh as _st_autorefresh
+    _HAS_AUTOREFRESH = True
+except ImportError:
+    _HAS_AUTOREFRESH = False
 
 # ─── Page config (MUST be first Streamlit call) ────────────────────────────────
 st.set_page_config(
@@ -33,6 +38,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ─── Auto-refresh (silent background page rerun) ───────────────────────────────
+_AR_OPTIONS = {"Off": 0, "30s": 30_000, "1 min": 60_000, "2 min": 120_000, "5 min": 300_000}
+_ar_label   = st.session_state.get("ar_select", "1 min")
+_ar_ms      = _AR_OPTIONS.get(_ar_label, 60_000)
+if _HAS_AUTOREFRESH and _ar_ms > 0:
+    _st_autorefresh(interval=_ar_ms, key="page_autorefresh")
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO,
@@ -374,6 +386,14 @@ with col_ctrl:
         _sched.trigger_refresh()
         st.cache_data.clear()
         st.rerun()
+    st.selectbox(
+        "Auto-refresh",
+        list(_AR_OPTIONS.keys()),
+        index=list(_AR_OPTIONS.keys()).index(_ar_label),
+        key="ar_select",
+        label_visibility="collapsed",
+        help="Page auto-refresh interval — set to Off to disable",
+    )
 
 st.markdown('<hr style="border:none;border-top:1px solid #1F2937;margin:8px 0 16px">', unsafe_allow_html=True)
 
