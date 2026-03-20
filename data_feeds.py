@@ -193,7 +193,7 @@ def fetch_defillama_yields() -> List[dict]:
                     "stable_coin":  pool.get("stablecoin", False),
                     "underlying":   pool.get("underlyingTokens", []),
                     "exposure":     pool.get("exposure", "single"),
-                    "predicted_class": pool.get("predictions", {}).get("predictedClass"),
+                    "predicted_class": (pool.get("predictions") or {}).get("predictedClass"),
                 })
         return sorted(results, key=lambda x: x["tvl_usd"], reverse=True)
     return _cached_get("defillama_yields", CACHE_TTL["yields"], _fetch) or []

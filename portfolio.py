@@ -892,6 +892,10 @@ def stress_test_correlations(portfolio: dict, scenario: str = "crisis") -> dict:
     weighted_avg_vol  = float(np.dot(weights, vol_per_asset))
     diversification_r = weighted_avg_vol / max(stressed_vol, 0.01)
 
+    liq       = np.array([h.get("liquidity_score", 5) for h in holdings])
+    avg_liquidity = float(np.dot(weights, liq))
+    nav_discount  = float(np.dot(weights, [h.get("price_vs_nav_pct", 0) for h in holdings]))
+
     stressed_metrics = {
         "weighted_yield_pct":       round(avg_yield, 3),
         "annual_return_usd":        round(portfolio_value * avg_yield / 100, 2),
@@ -906,6 +910,9 @@ def stress_test_correlations(portfolio: dict, scenario: str = "crisis") -> dict:
         "cvar_95_pct":              round(cvar_95, 3),
         "cvar_99_pct":              round(cvar_99, 3),
         "diversification_ratio":    round(diversification_r, 3),
+        "avg_liquidity_score":      round(avg_liquidity, 2),
+        "nav_discount_pct":         round(nav_discount, 4),
+        "n_holdings":               n,
         "excess_return_pct":        round(excess_return, 3),
     }
 

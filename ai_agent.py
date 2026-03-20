@@ -293,8 +293,8 @@ Respond with ONLY the JSON object, no markdown, no explanation outside JSON."""
         parsed = json.loads(raw_text)
         decision   = str(parsed.get("decision", "HOLD")).upper()
         rationale  = _sanitize(parsed.get("rationale", ""), 1000)
-        confidence = float(parsed.get("confidence_pct", 50))
-        actions    = parsed.get("actions", [])
+        confidence = float(parsed.get("confidence_pct") or 50)
+        actions    = parsed.get("actions") or []
 
         # Validate decision is in allowed set
         if decision not in ("REBALANCE", "HOLD", "DEPLOY", "REDUCE"):

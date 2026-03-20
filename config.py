@@ -792,7 +792,7 @@ RWA_UNIVERSE = [
     {
         "id": "BACKED_LQD",
         "name": "Backed iShares USD Corporate Bond ETF",
-        "category": "Equities",
+        "category": "Government Bonds",
         "subcategory": "Bond ETF",
         "chain": "Ethereum",
         "protocol": "Backed Finance",
@@ -2884,13 +2884,12 @@ DEFILLAMA_PROTOCOLS = [
     "agrotoken",          # Agricultural commodity tokens
     "kinesis",            # Gold/silver velocity yield tokens
     "matrixdock-stbt",    # Matrixdock STBT — first Asian T-bill token
-    "lofty",              # Lofty.ai tokenized rental RE
-    "realtoken",          # RealT tokenized RE
     "propy",              # Propy RE title/escrow
     "maple-v2",           # Maple Finance v2 ($3.2B TVL)
     "backed-assets",      # Backed Finance ERC-20 ETFs
     "archax",             # UK FCA-regulated tokenized funds
-    "spiko",              # Spiko Euro T-bill fund
+    "midas-mtbill",       # Midas mTBILL tokenized T-bill
+    "midas-mbasis",       # Midas mBASIS basis trade token
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
