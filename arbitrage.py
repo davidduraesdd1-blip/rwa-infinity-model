@@ -562,7 +562,7 @@ def scan_defi_pool_arb() -> List[dict]:
             "KAU",      # Kinesis Gold
             "KAG",      # Kinesis Silver
             "PT-USDY",  # Pendle PT (fixed-rate T-bill)
-            "rTBILL",   # Plume Network T-bill token
+            "RTBILL",   # Plume Network T-bill token — uppercased to match .upper() comparison
         }
         if sym in rwa_syms and pool.get("apy", 0) > 0:
             by_sym.setdefault(sym, []).append(pool)
