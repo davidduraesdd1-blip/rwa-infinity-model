@@ -239,6 +239,21 @@ _ss("agent_dry_run",    True)
 _ss("show_mc",          False)
 _ss("tab_index",        0)
 _ss("api_key_set",      bool(os.environ.get("ANTHROPIC_API_KEY")))
+_ss("ai_news_brief",    "")
+
+# ── Shareable URL params — read ?tier=X&value=Y on page load ─────────────────
+try:
+    _qp = st.query_params
+    if "tier" in _qp:
+        _t = int(_qp["tier"])
+        if 1 <= _t <= 5:
+            st.session_state["selected_tier"] = _t
+    if "value" in _qp:
+        _v = int(_qp["value"])
+        if 1_000 <= _v <= 1_000_000_000:
+            st.session_state["portfolio_value"] = _v
+except Exception:
+    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -426,8 +441,8 @@ for i, (tier, (icon, label, color)) in enumerate(tier_labels.items()):
 selected_tier = st.session_state["selected_tier"]
 tier_cfg      = PORTFOLIO_TIERS[selected_tier]
 
-# Portfolio value input
-col_val, col_empty = st.columns([2, 8])
+# Portfolio value input + shareable link
+col_val, col_share, col_empty2 = st.columns([2, 3, 5])
 with col_val:
     portfolio_value = st.number_input(
         "Portfolio Value (USD)",
@@ -439,16 +454,25 @@ with col_val:
         key="portfolio_value_input",
     )
     st.session_state["portfolio_value"] = portfolio_value
+with col_share:
+    _share_url = f"?tier={st.session_state['selected_tier']}&value={portfolio_value}"
+    st.text_input(
+        "🔗 Share Portfolio",
+        value=_share_url,
+        key="share_url_display",
+        help="Copy this URL to share your current portfolio configuration",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_compare, tab_ai, tab_news, tab_trades, tab_reg = st.tabs([
+tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
     "⚡ Arbitrage",
+    "💱 Carry Trade",
     "📈 Compare Tiers",
     "🤖 AI Agent",
     "📰 News Feed",
@@ -872,11 +896,11 @@ with tab_universe:
         )
         st.plotly_chart(fig_cats, use_container_width=True)
 
-        # Enrich with Net APY and composite liquidity score
+        # Enrich with Net APY, composite liquidity, exit velocity, trust score
         try:
             from data_feeds import normalize_yield_to_net_apy
             from portfolio import calculate_asset_liquidity_score
-            from config import get_asset_fee_bps
+            from config import get_asset_fee_bps, get_exit_velocity_score, get_asset_trust_score
             def _net_apy(row):
                 gross = row.get("current_yield_pct") or row.get("expected_yield_pct") or 0
                 fee   = get_asset_fee_bps(row.get("id", ""), row.get("category", ""))
@@ -886,12 +910,24 @@ with tab_universe:
                     row.get("id", ""), row.get("category", ""),
                     int(row.get("liquidity_score", 5) or 5)
                 )
+            def _exit_score(row):
+                return get_exit_velocity_score(row.get("id", ""), row.get("category", ""))["score"]
+            def _exit_label(row):
+                return get_exit_velocity_score(row.get("id", ""), row.get("category", ""))["label"]
+            def _trust_score(row):
+                return get_asset_trust_score(row.get("id", ""), row.get("category", ""))["trust_score"]
             filtered_df = filtered_df.copy()
             filtered_df["net_apy_pct"]      = filtered_df.apply(_net_apy, axis=1)
             filtered_df["liq_score_comp"]   = filtered_df.apply(_liq_score, axis=1)
+            filtered_df["exit_velocity"]    = filtered_df.apply(_exit_score, axis=1)
+            filtered_df["exit_label"]       = filtered_df.apply(_exit_label, axis=1)
+            filtered_df["trust_score"]      = filtered_df.apply(_trust_score, axis=1)
         except Exception:
             filtered_df["net_apy_pct"]    = filtered_df.get("current_yield_pct", 0)
             filtered_df["liq_score_comp"] = filtered_df.get("liquidity_score", 5)
+            filtered_df["exit_velocity"]  = 50.0
+            filtered_df["exit_label"]     = "MODERATE"
+            filtered_df["trust_score"]    = 5.0
 
         # Asset table
         show_cols = {
@@ -902,6 +938,9 @@ with tab_universe:
             "tvl_usd": "TVL",
             "risk_score": "Risk",
             "liq_score_comp": "Liq Score",
+            "exit_velocity": "Exit Score",
+            "exit_label": "Exit Speed",
+            "trust_score": "Trust /10",
             "regulatory_score": "Regulatory",
             "composite_score": "Score",
             "min_investment_usd": "Min Investment",
@@ -919,7 +958,8 @@ with tab_universe:
             except Exception: return "—"
 
         fmt_map = {"Gross Yield %": "{:.2f}%", "Net APY %": "{:.2f}%",
-                   "Score": "{:.1f}", "Liq Score": "{:.0f}"}
+                   "Score": "{:.1f}", "Liq Score": "{:.0f}",
+                   "Exit Score": "{:.0f}", "Trust /10": "{:.1f}"}
         for col in ["TVL", "Min Investment"]:
             if col in table_df.columns:
                 fn = _fmt_tvl if col == "TVL" else _fmt_min_inv
@@ -932,6 +972,24 @@ with tab_universe:
             use_container_width=True,
             height=min(600, 55 + 35 * len(table_df)),
         )
+
+        # ── Exit Velocity Legend ──────────────────────────────────────────────
+        with st.expander("📖 Exit Score & Trust Score Guide", expanded=False):
+            st.markdown("""
+**Exit Velocity Score (0–100)** — How quickly you can fully exit this position:
+- **80–100 INSTANT**: Same-day redemption or DEX liquid (USDY, PAXG, Pendle PTs)
+- **60–79 FAST**: T+1 redemption + some secondary market (BUIDL, OUSG, BENJI)
+- **40–59 MODERATE**: Weekly redemption window (Clearpool, Huma, Lofty)
+- **20–39 SLOW**: Monthly lock-up period (Maple, TrueFi, Tangible)
+- **0–19 ILLIQUID**: Quarterly+ lock-up or no exit mechanism (Goldfinch, Propy)
+
+**Trust Score (0–10)** — Issuer transparency and proof-of-reserve quality:
+- **7–10**: Big4 audit + Chainlink PoR + daily NAV + CUSIP/ISIN (BUIDL, BENJI)
+- **5–6**: Mid-tier audit + on-chain reserves or manual attestation (USDY, PAXG)
+- **3–4**: On-chain only, no traditional audit (Maple, Centrifuge, Goldfinch)
+- **0–2**: No public audit, no reserves proof, no CUSIP (STBT, REALT)
+            """)
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1039,7 +1097,194 @@ with tab_arb:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 4: COMPARE TIERS
+# TAB 4: CARRY TRADE OPTIMIZER
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_carry:
+    st.markdown('<div class="section-header">Carry Trade Optimizer</div>', unsafe_allow_html=True)
+    st.markdown(
+        "<p style='color:#9CA3AF;font-size:13px;margin-bottom:16px'>"
+        "Borrow stablecoins cheaply from DeFi lending protocols and invest in higher-yielding RWA assets. "
+        "Net spread = RWA yield − borrow rate − estimated gas/ops cost (0.30%)."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    try:
+        from data_feeds import fetch_lending_borrow_rates, get_normalized_universe
+        from config import get_exit_velocity_score
+
+        borrow_rates = fetch_lending_borrow_rates()
+        rwa_universe = get_normalized_universe()
+
+        # ── Borrow rate summary ───────────────────────────────────────────────
+        st.markdown('<div class="section-header">Available Borrow Sources</div>', unsafe_allow_html=True)
+        if borrow_rates:
+            b_cols = st.columns(min(len(borrow_rates), 4))
+            for i, br in enumerate(borrow_rates[:4]):
+                with b_cols[i]:
+                    _metric_card(
+                        f"{br['protocol']} ({br['chain']})",
+                        f"{br['borrow_apy']:.2f}%",
+                        color="#EF4444",
+                    )
+
+        # ── Build carry trade opportunity table ───────────────────────────────
+        OPS_COST = 0.30   # gas + execution overhead estimate
+        MIN_SPREAD = 0.0  # show all (including negative for awareness)
+
+        best_borrow = min(borrow_rates, key=lambda x: x["borrow_apy"]) if borrow_rates else {"protocol": "Morpho", "borrow_apy": 4.80, "symbol": "USDC", "chain": "Base"}
+        best_borrow_apy = best_borrow["borrow_apy"]
+
+        # Build opportunities: top RWA assets × all borrow sources
+        opportunities = []
+        for asset in rwa_universe:
+            rwa_yield = float(asset.get("net_apy_pct") or asset.get("expected_yield_pct") or 0)
+            if rwa_yield <= 0:
+                continue
+            asset_id  = asset.get("id", "")
+            category  = asset.get("category", "")
+            ev        = get_exit_velocity_score(asset_id, category)
+
+            for br in borrow_rates:
+                gross_spread = rwa_yield - br["borrow_apy"]
+                net_spread   = gross_spread - OPS_COST
+                opportunities.append({
+                    "RWA Asset":     asset_id,
+                    "Category":      category,
+                    "RWA Yield %":   rwa_yield,
+                    "Borrow From":   br["protocol"],
+                    "Borrow Chain":  br["chain"],
+                    "Borrow APY %":  br["borrow_apy"],
+                    "Gross Spread %": round(gross_spread, 2),
+                    "Net Spread %":  round(net_spread, 2),
+                    "Exit Speed":    ev["label"],
+                    "Exit Score":    ev["score"],
+                    "Risk":          "LOW" if category in ("Government Bonds",) else
+                                     "MEDIUM" if category in ("Commodities", "Tokenized Equities") else "HIGH",
+                })
+
+        if opportunities:
+            carry_df = pd.DataFrame(opportunities)
+            carry_df = carry_df.sort_values("Net Spread %", ascending=False).reset_index(drop=True)
+
+            # ── Top opportunities KPI ─────────────────────────────────────────
+            st.markdown('<div class="section-header">Best Carry Trade Opportunities</div>', unsafe_allow_html=True)
+            top5 = carry_df[carry_df["Net Spread %"] > 0].head(5)
+            if not top5.empty:
+                kpi_cols = st.columns(min(len(top5), 5))
+                for i, (_, row) in enumerate(top5.iterrows()):
+                    with kpi_cols[i]:
+                        _metric_card(
+                            f"{row['RWA Asset']} vs {row['Borrow From'][:10]}",
+                            f"+{row['Net Spread %']:.2f}%",
+                            color="#34D399",
+                        )
+
+            # ── Carry trade bar chart ─────────────────────────────────────────
+            top15 = carry_df[carry_df["Borrow From"] == best_borrow["protocol"]].head(15)
+            if not top15.empty:
+                fig_carry = go.Figure()
+                colors = ["#34D399" if v > 0 else "#EF4444" for v in top15["Net Spread %"]]
+                fig_carry.add_trace(go.Bar(
+                    x=top15["RWA Asset"],
+                    y=top15["Net Spread %"],
+                    marker_color=colors,
+                    text=[f"{v:+.2f}%" for v in top15["Net Spread %"]],
+                    textposition="outside",
+                    name="Net Spread",
+                ))
+                fig_carry.add_hline(y=0, line_color="#6B7280", line_dash="dash")
+                fig_carry.update_layout(
+                    title=f"Net Carry Spread vs {best_borrow['protocol']} ({best_borrow_apy:.2f}% borrow)",
+                    paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+                    font_color="#E2E8F0",
+                    xaxis=dict(tickangle=-35, gridcolor="#1F2937"),
+                    yaxis=dict(title="Net Spread %", gridcolor="#1F2937"),
+                    margin=dict(l=50, r=20, t=50, b=100),
+                    height=380,
+                )
+                st.plotly_chart(fig_carry, use_container_width=True)
+
+            # ── Full opportunity table ────────────────────────────────────────
+            st.markdown('<div class="section-header">All Carry Trade Pairs</div>', unsafe_allow_html=True)
+            ct1, ct2, ct3 = st.columns(3)
+            with ct1:
+                min_net = st.number_input("Min Net Spread %", -5.0, 20.0, 0.0, 0.25, key="ct_min_spread")
+            with ct2:
+                ct_borrow = st.selectbox(
+                    "Borrow Source",
+                    ["All"] + sorted(carry_df["Borrow From"].unique().tolist()),
+                    key="ct_borrow_filter"
+                )
+            with ct3:
+                ct_risk = st.selectbox("Risk Level", ["All", "LOW", "MEDIUM", "HIGH"], key="ct_risk")
+
+            show_carry = carry_df[carry_df["Net Spread %"] >= min_net]
+            if ct_borrow != "All":
+                show_carry = show_carry[show_carry["Borrow From"] == ct_borrow]
+            if ct_risk != "All":
+                show_carry = show_carry[show_carry["Risk"] == ct_risk]
+
+            def _spread_color(val):
+                try:
+                    v = float(val)
+                    return "color: #34D399" if v > 0.5 else ("color: #FBBF24" if v > 0 else "color: #EF4444")
+                except Exception:
+                    return ""
+
+            st.dataframe(
+                show_carry[["RWA Asset", "Category", "RWA Yield %", "Borrow From", "Borrow Chain",
+                             "Borrow APY %", "Gross Spread %", "Net Spread %", "Exit Speed", "Risk"]]
+                .head(50)
+                .style
+                .format({"RWA Yield %": "{:.2f}%", "Borrow APY %": "{:.2f}%",
+                         "Gross Spread %": "{:+.2f}%", "Net Spread %": "{:+.2f}%"})
+                .map(_spread_color, subset=["Net Spread %"])
+                .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
+                use_container_width=True,
+                height=min(500, 55 + 35 * len(show_carry.head(50))),
+            )
+
+            # ── Carry trade calculator ────────────────────────────────────────
+            st.markdown('<div class="section-header">Carry Trade Calculator</div>', unsafe_allow_html=True)
+            calc1, calc2, calc3 = st.columns(3)
+            with calc1:
+                calc_principal = st.number_input("Principal (USD)", 10_000, 10_000_000, 100_000, 10_000, key="ct_principal")
+            with calc2:
+                calc_rwa_yield = st.number_input("RWA Net APY %", 0.0, 30.0, 5.5, 0.1, key="ct_rwa_yield")
+            with calc3:
+                calc_borrow   = st.number_input("Borrow APY %", 0.0, 15.0, best_borrow_apy, 0.1, key="ct_borrow")
+
+            net_annual = (calc_rwa_yield - calc_borrow - OPS_COST) / 100 * calc_principal
+            net_monthly = net_annual / 12
+            net_weekly  = net_annual / 52
+            cx1, cx2, cx3, cx4 = st.columns(4)
+            with cx1: _metric_card("Net Spread", f"{calc_rwa_yield - calc_borrow - OPS_COST:.2f}%",
+                                    color="#34D399" if net_annual > 0 else "#EF4444")
+            with cx2: _metric_card("Annual P&L", _fmt_usd(net_annual),
+                                    color="#34D399" if net_annual > 0 else "#EF4444")
+            with cx3: _metric_card("Monthly P&L", _fmt_usd(net_monthly),
+                                    color="#34D399" if net_monthly > 0 else "#EF4444")
+            with cx4: _metric_card("Weekly P&L",  _fmt_usd(net_weekly),
+                                    color="#34D399" if net_weekly > 0 else "#EF4444")
+
+            st.markdown(
+                "<p style='color:#6B7280;font-size:11px;margin-top:8px'>"
+                "⚠️ Carry trades involve smart contract risk, liquidation risk (if using leverage), "
+                "and rate risk (borrow APY floats). Always verify current rates before executing. "
+                "Net spread assumes 0.30% annual ops cost. Not financial advice."
+                "</p>",
+                unsafe_allow_html=True,
+            )
+
+    except Exception as e:
+        st.error(f"Carry Trade Optimizer error: {e}")
+        logger.warning("[UI] Carry Trade tab failed: %s", e)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5: COMPARE TIERS
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_compare:
@@ -1313,42 +1558,84 @@ with tab_ai:
 with tab_news:
     st.markdown('<div class="section-header">RWA News & Sentiment</div>', unsafe_allow_html=True)
 
-    if st.button("🔄 Refresh News", key="btn_news_refresh"):
-        from data_feeds import refresh_news
-        with st.spinner("Fetching latest RWA news..."):
-            refresh_news()
-        st.cache_data.clear()
-        st.rerun()
+    nb1, nb2 = st.columns([1, 1])
+    with nb1:
+        if st.button("🔄 Refresh News", key="btn_news_refresh"):
+            from data_feeds import refresh_news
+            with st.spinner("Fetching latest RWA news..."):
+                refresh_news()
+            st.cache_data.clear()
+            st.session_state["ai_news_brief"] = ""
+            st.rerun()
+    with nb2:
+        if st.button("🧠 Generate AI Market Brief", key="btn_ai_brief",
+                     help="Uses Claude to synthesize recent headlines into an actionable market brief"):
+            from data_feeds import fetch_live_rss_news, get_ai_news_brief
+            with st.spinner("Generating AI market intelligence brief..."):
+                live = fetch_live_rss_news()
+                news_df_tmp = _load_news()
+                all_headlines = (
+                    [i["headline"] for i in live] +
+                    (news_df_tmp["headline"].tolist() if not news_df_tmp.empty else [])
+                )
+                brief = get_ai_news_brief(all_headlines[:15])
+                st.session_state["ai_news_brief"] = brief
+            st.rerun()
+
+    # Show AI brief if generated
+    if st.session_state.get("ai_news_brief"):
+        st.markdown(f"""
+        <div style="background:#0D1F2D;border:1px solid #00D4FF;border-radius:8px;
+                    padding:16px;margin:12px 0">
+            <div style="font-size:11px;font-weight:700;color:#00D4FF;
+                        text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px">
+                🧠 AI Market Brief — Powered by Claude
+            </div>
+            <div style="font-size:13px;color:#E2E8F0;line-height:1.8;white-space:pre-line">
+                {st.session_state["ai_news_brief"]}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     news_df = _load_news()
 
     if not news_df.empty:
-        # Sentiment summary
+        # Sentiment summary + live count
         sentiments = news_df["sentiment"].value_counts()
-        n1, n2, n3 = st.columns(3)
+        live_count = int(news_df.get("is_live", pd.Series(dtype=bool)).sum()) if "is_live" in news_df.columns else 0
+        n1, n2, n3, n4 = st.columns(4)
         with n1:
             _metric_card("Bullish", str(sentiments.get("BULLISH", 0)), color="#34D399")
         with n2:
             _metric_card("Neutral", str(sentiments.get("NEUTRAL", 0)), color="#6B7280")
         with n3:
             _metric_card("Bearish", str(sentiments.get("BEARISH", 0)), color="#EF4444")
+        with n4:
+            _metric_card("Live RSS", str(live_count), color="#00D4FF")
 
         st.markdown("<div style='margin:12px 0'></div>", unsafe_allow_html=True)
 
         # News cards
         for _, row in news_df.iterrows():
-            sentiment = row.get("sentiment", "NEUTRAL")
-            score     = row.get("sentiment_score", 0) or 0
+            sentiment  = row.get("sentiment", "NEUTRAL")
+            score      = row.get("sentiment_score", 0) or 0
+            is_live    = bool(row.get("is_live", False))
             sent_color = {"BULLISH": "#34D399", "BEARISH": "#EF4444", "NEUTRAL": "#6B7280"}.get(sentiment, "#6B7280")
             sent_icon  = {"BULLISH": "▲", "BEARISH": "▼", "NEUTRAL": "●"}.get(sentiment, "●")
-            ts = str(row.get("timestamp", ""))[:16]
+            ts         = str(row.get("timestamp", ""))[:16]
+            live_badge = '<span style="font-size:9px;background:#00D4FF22;color:#00D4FF;padding:1px 5px;border-radius:3px;margin-left:6px">LIVE</span>' if is_live else ""
+            url        = row.get("url", "") or ""
+            headline   = row.get("headline", "")
+            headline_html = f'<a href="{url}" target="_blank" style="color:#E2E8F0;text-decoration:none">{headline}</a>' if url else headline
 
             st.markdown(f"""
             <div class="metric-card" style="padding:12px">
                 <div style="display:flex;justify-content:space-between;align-items:start">
                     <div style="flex:1;margin-right:12px">
-                        <div style="font-size:14px;font-weight:600;color:#E2E8F0;line-height:1.4">{row.get('headline', '')}</div>
-                        <div style="font-size:11px;color:#6B7280;margin-top:4px">{row.get('source','?')} · {ts}</div>
+                        <div style="font-size:14px;font-weight:600;line-height:1.4">{headline_html}</div>
+                        <div style="font-size:11px;color:#6B7280;margin-top:4px">
+                            {row.get('source','?')} · {ts}{live_badge}
+                        </div>
                     </div>
                     <div style="text-align:right;min-width:80px">
                         <div style="font-size:13px;color:{sent_color};font-weight:700">{sent_icon} {sentiment}</div>

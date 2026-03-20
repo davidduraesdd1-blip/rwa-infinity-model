@@ -9,6 +9,8 @@ import time
 import threading
 import json
 import math
+import xml.etree.ElementTree as _ET
+from email.utils import parsedate_to_datetime as _parsedate
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List, Any
 
@@ -477,9 +479,19 @@ def _is_rwa_relevant(headline: str) -> float:
 
 
 def fetch_rwa_news() -> List[dict]:
-    """Aggregate RWA news from multiple sources."""
+    """Aggregate RWA news from multiple sources — live RSS first, synthetic fallback."""
     def _fetch():
         all_news = []
+
+        # ── Try live RSS feeds first ─────────────────────────────────────────
+        live_items = fetch_live_rss_news()
+        all_news.extend(live_items)
+
+        # Only use synthetic if we couldn't get enough live articles
+        if len(live_items) >= 6:
+            # Still add synthetic for guaranteed RWA-specific coverage
+            pass  # synthetic below will still be added, dedup handles it
+
         # Synthetic news items from known real events (fallback for API-unavailable sources)
         synthetic = [
             {
@@ -1361,3 +1373,179 @@ def get_social_signal_for_asset(asset_id: str) -> dict:
     }
     slug = id_to_slug.get(asset_id, "")
     return signals.get(slug, {"social_volume_7d": 0, "dev_activity_30d": 0, "sentiment": 0.0})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 5: LIVE RSS NEWS FEED
+# Real-time RWA news from major crypto media RSS feeds.
+# Falls back gracefully to synthetic items on failure.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RSS_FEED_SOURCES = [
+    {"name": "CoinTelegraph RWA", "url": "https://cointelegraph.com/rss/tag/real-world-assets"},
+    {"name": "CoinDesk",          "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"},
+    {"name": "Blockworks",        "url": "https://blockworks.co/feed"},
+    {"name": "Decrypt",           "url": "https://decrypt.co/feed"},
+    {"name": "DL News",           "url": "https://dlnews.com/arc/outboundfeeds/rss/"},
+]
+
+import re as _re
+
+
+def _parse_rss(xml_text: str, source_name: str) -> List[dict]:
+    """Parse an RSS 2.0 feed and return RWA-relevant news items."""
+    try:
+        root = _ET.fromstring(xml_text)
+        items = root.findall(".//item")
+        result = []
+        for item in items[:25]:
+            title   = (item.findtext("title") or "").strip()
+            link    = (item.findtext("link") or "").strip()
+            pubdate = (item.findtext("pubDate") or "").strip()
+            desc    = _re.sub(r"<[^>]+>", "", item.findtext("description") or "")[:300].strip()
+            if not title or len(title) < 10:
+                continue
+            relevance = _is_rwa_relevant(title + " " + desc[:200])
+            if relevance < 0.15:
+                continue
+            try:
+                ts = _parsedate(pubdate).astimezone(timezone.utc).isoformat()
+            except Exception:
+                ts = datetime.now(timezone.utc).isoformat()
+            sentiment, score = _score_sentiment(title)
+            result.append({
+                "timestamp":       ts,
+                "source":          source_name,
+                "headline":        title,
+                "url":             link,
+                "description":     desc,
+                "sentiment":       sentiment,
+                "sentiment_score": score,
+                "categories":      [],
+                "relevance_score": relevance,
+                "is_live":         True,
+            })
+        return result
+    except Exception as e:
+        logger.debug("[RSS] Parse failed for %s: %s", source_name, e)
+        return []
+
+
+def fetch_live_rss_news() -> List[dict]:
+    """Fetch real-time RWA news from all RSS sources."""
+    def _fetch():
+        all_items: List[dict] = []
+        for src in _RSS_FEED_SOURCES:
+            try:
+                resp = _session.get(
+                    src["url"], timeout=8,
+                    headers={"Accept": "application/rss+xml,application/xml,text/xml,*/*"},
+                )
+                if resp.status_code == 200:
+                    items = _parse_rss(resp.text, src["name"])
+                    all_items.extend(items)
+                    logger.debug("[RSS] %s: %d relevant items", src["name"], len(items))
+            except Exception as e:
+                logger.debug("[RSS] %s failed: %s", src["name"], e)
+        all_items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        return all_items[:40]
+    return _cached_get("live_rss_news", 900, _fetch) or []   # 15-min TTL
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 6: AI NEWS MARKET BRIEF
+# Claude-powered 3-paragraph market intelligence summary from recent headlines.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_ai_news_brief(headlines: List[str]) -> str:
+    """
+    Generate a Claude-powered RWA market brief from recent headlines.
+    Returns empty string gracefully if API key not set or call fails.
+    """
+    import os
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key or not headlines:
+        return ""
+    try:
+        import anthropic
+        from config import CLAUDE_MODEL
+        client = anthropic.Anthropic(api_key=api_key)
+        headlines_text = "\n".join(f"• {h}" for h in headlines[:12])
+        prompt = (
+            "You are an RWA (Real World Asset) market analyst. Based on these recent news headlines, "
+            "write a concise market brief with exactly 3 short paragraphs:\n"
+            "1. Key Developments — what's moving the RWA space right now\n"
+            "2. Risk Signals — what tokenized asset investors should watch\n"
+            "3. Opportunities — 1-2 actionable positioning ideas\n\n"
+            f"Headlines:\n{headlines_text}\n\n"
+            "Market Brief (150 words max, be specific and data-driven):"
+        )
+        resp = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=350,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return resp.content[0].text.strip()
+    except Exception as e:
+        logger.debug("[AI News] Brief generation failed: %s", e)
+        return ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 7: LENDING / BORROWING RATES FOR CARRY TRADE OPTIMIZER
+# Fetches USDC/USDT borrow rates from major DeFi lending protocols.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BORROW_RATE_FALLBACKS = [
+    {"protocol": "Morpho (Base)",    "chain": "Base",     "symbol": "USDC", "borrow_apy": 4.80, "tvl_usd": 2_000_000_000},
+    {"protocol": "Sky (MakerDAO)",   "chain": "Ethereum", "symbol": "DAI",  "borrow_apy": 4.50, "tvl_usd": 5_000_000_000},
+    {"protocol": "Spark",            "chain": "Ethereum", "symbol": "DAI",  "borrow_apy": 4.75, "tvl_usd": 2_500_000_000},
+    {"protocol": "Aave v3",          "chain": "Ethereum", "symbol": "USDC", "borrow_apy": 5.20, "tvl_usd": 8_000_000_000},
+    {"protocol": "Aave v3",          "chain": "Arbitrum", "symbol": "USDC", "borrow_apy": 4.90, "tvl_usd": 1_500_000_000},
+    {"protocol": "Compound v3",      "chain": "Ethereum", "symbol": "USDC", "borrow_apy": 5.40, "tvl_usd": 3_000_000_000},
+    {"protocol": "Euler v2",         "chain": "Ethereum", "symbol": "USDC", "borrow_apy": 5.10, "tvl_usd": 800_000_000},
+    {"protocol": "Kamino",           "chain": "Solana",   "symbol": "USDC", "borrow_apy": 5.60, "tvl_usd": 600_000_000},
+]
+
+_BORROW_PROTOCOLS = {
+    "aave-v3", "aave-v2", "compound-v3", "compound-v2",
+    "morpho", "morpho-blue", "euler", "spark", "venus",
+    "radiant", "kamino", "marginfi",
+}
+_BORROW_SYMBOLS = {"USDC", "USDT", "DAI", "USDS"}
+
+
+def fetch_lending_borrow_rates() -> List[dict]:
+    """
+    Fetch live USDC/USDT/DAI borrowing APY from major DeFi lending protocols.
+    Returns list sorted by borrow_apy ascending.
+    Falls back to hardcoded values when DeFiLlama is unavailable.
+    """
+    def _fetch():
+        data = _get(f"{DEFILLAMA_YIELDS}/pools")
+        if not data or "data" not in data:
+            return _BORROW_RATE_FALLBACKS
+        results = []
+        for pool in data["data"]:
+            proj       = (pool.get("project") or "").lower()
+            sym        = (pool.get("symbol") or "").upper()
+            apy_borrow = pool.get("apyBorrow")
+            if proj in _BORROW_PROTOCOLS and sym in _BORROW_SYMBOLS and apy_borrow:
+                results.append({
+                    "protocol":   pool.get("project", proj),
+                    "chain":      pool.get("chain", ""),
+                    "symbol":     sym,
+                    "borrow_apy": round(float(apy_borrow), 2),
+                    "tvl_usd":    float(pool.get("tvlUsd") or 0),
+                })
+        if not results:
+            return _BORROW_RATE_FALLBACKS
+        # Keep best rate (lowest borrow APY) per protocol+chain
+        seen: dict = {}
+        for r in sorted(results, key=lambda x: x["borrow_apy"]):
+            key = f"{r['protocol']}|{r['chain']}"
+            if key not in seen:
+                seen[key] = r
+        return sorted(seen.values(), key=lambda x: x["borrow_apy"])
+
+    return _cached_get("lending_borrow_rates", CACHE_TTL["yields"], _fetch) or _BORROW_RATE_FALLBACKS

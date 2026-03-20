@@ -3261,3 +3261,258 @@ def get_asset_liquidity_meta(asset_id: str, category: str = "") -> dict:
 KAITO_API_KEY    = os.environ.get("KAITO_API_KEY", "")
 SANTIMENT_API_KEY= os.environ.get("SANTIMENT_API_KEY", "")
 FRED_API_KEY     = os.environ.get("FRED_API_KEY", "")   # free at fred.stlouisfed.org
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXIT VELOCITY METADATA
+# Captures lock-up terms, OTC availability, minimum exit size, and partial-exit
+# capability per asset. Used to compute the Exit Velocity Score (0-100).
+# ─────────────────────────────────────────────────────────────────────────────
+
+ASSET_EXIT_VELOCITY_META: dict = {
+    # Government Bonds
+    "BUIDL":         {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 250_000, "partial_exit": False},
+    "BENJI":         {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "OUSG":          {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 100_000,  "partial_exit": True},
+    "USDY":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "USTB":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100_000,  "partial_exit": True},
+    "USDM":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "STBT":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1_000,    "partial_exit": True},
+    "TBILL":         {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1_000,    "partial_exit": True},
+    "USYC":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100_000,  "partial_exit": True},
+    "USCC":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100_000,  "partial_exit": True},
+    "rTBILL":        {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1_000,    "partial_exit": True},
+    "PT-USDY":       {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "PT-USDM":       {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "mTBILL":        {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1_000,    "partial_exit": True},
+    "NOBLE-TBILL":   {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1_000,    "partial_exit": True},
+    # Private Credit
+    "MPL":           {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 100_000,  "partial_exit": False},
+    "CLPOOL":        {"lockup_days": 7,   "otc_available": False, "min_exit_usd": 10_000,   "partial_exit": True},
+    "GFI":           {"lockup_days": 90,  "otc_available": False, "min_exit_usd": 10_000,   "partial_exit": False},
+    "TRU":           {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 10_000,   "partial_exit": False},
+    "CFG":           {"lockup_days": 90,  "otc_available": True,  "min_exit_usd": 10_000,   "partial_exit": False},
+    "HUMA":          {"lockup_days": 7,   "otc_available": False, "min_exit_usd": 1_000,    "partial_exit": True},
+    "CREDIX":        {"lockup_days": 90,  "otc_available": False, "min_exit_usd": 50_000,   "partial_exit": False},
+    "POLYTRADE":     {"lockup_days": 7,   "otc_available": False, "min_exit_usd": 5_000,    "partial_exit": True},
+    "MORPHO-RE7":    {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "MORPHO-STEAK":  {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    # Real Estate
+    "REALT":         {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 50,       "partial_exit": True},
+    "LOFTY":         {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 50,       "partial_exit": True},
+    "PARCL":         {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "PROPY":         {"lockup_days": 180, "otc_available": False, "min_exit_usd": 10_000,   "partial_exit": False},
+    "TANGIBLE":      {"lockup_days": 30,  "otc_available": True,  "min_exit_usd": 1_000,    "partial_exit": True},
+    "MANTRA-RE":     {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 5_000,    "partial_exit": True},
+    "PLUME-RE":      {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 5_000,    "partial_exit": True},
+    # Commodities
+    "PAXG":          {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,        "partial_exit": True},
+    "XAUT":          {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,        "partial_exit": True},
+    "KAU":           {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,        "partial_exit": True},
+    "KAG":           {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,        "partial_exit": True},
+    "MCO2":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "BCT":           {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    # Tokenized Equities
+    "ONDO-GM":       {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100,      "partial_exit": True},
+    "DSHARES":       {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "BACKED-CSPX":   {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 5_000,    "partial_exit": True},
+    "BACKED-NASDAQ": {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 5_000,    "partial_exit": True},
+    "SWARM-TSLA":    {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "SWARM-AAPL":    {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "SWARM-MSFT":    {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "SWARM-NVDA":    {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+    "ROBINHOOD-RWA": {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,        "partial_exit": True},
+}
+
+_CATEGORY_EXIT_VELOCITY_DEFAULT: dict = {
+    "Government Bonds":   {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": True},
+    "Private Credit":     {"lockup_days": 60,  "otc_available": False, "min_exit_usd": 50_000,  "partial_exit": False},
+    "Real Estate":        {"lockup_days": 90,  "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
+    "Commodities":        {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
+    "Tokenized Equities": {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100,     "partial_exit": True},
+    "Carbon Credits":     {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
+    "Trade Finance":      {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
+    "Infrastructure":     {"lockup_days": 365, "otc_available": False, "min_exit_usd": 100_000, "partial_exit": False},
+    "Stablecoins":        {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
+}
+
+
+def get_exit_velocity_score(asset_id: str, category: str = "") -> dict:
+    """
+    Compute Exit Velocity Score (0-100) — how quickly can you exit this position?
+
+    Components:
+      - Redemption speed (50%): 0d=100, T+1=90, 3d=80, weekly=65, monthly=40, quarterly=20, annual=5
+      - Secondary market depth (25%): none=0, low=40, medium=75, high=100
+      - Lock-up penalty (15%): none=100, 7d=70, 30d=40, 90d=20, 365d=5
+      - Access options (10%): OTC + partial exit availability
+
+    Returns dict with score, label, days_to_exit, and component breakdown.
+    """
+    liq_meta = get_asset_liquidity_meta(asset_id, category)
+    ev_meta  = ASSET_EXIT_VELOCITY_META.get(
+        asset_id,
+        _CATEGORY_EXIT_VELOCITY_DEFAULT.get(
+            category,
+            {"lockup_days": 30, "otc_available": False, "min_exit_usd": 10_000, "partial_exit": False}
+        )
+    )
+
+    red_days = liq_meta.get("redemption_days", 30)
+    if red_days == 0:    red_score = 100
+    elif red_days == 1:  red_score = 90
+    elif red_days <= 3:  red_score = 80
+    elif red_days <= 7:  red_score = 65
+    elif red_days <= 30: red_score = 40
+    elif red_days <= 90: red_score = 20
+    else:                red_score = 5
+
+    sec_depth = liq_meta.get("secondary_depth", 0)
+    sec_score = {0: 0, 1: 40, 2: 75, 3: 100}.get(sec_depth, 0)
+
+    lockup = ev_meta.get("lockup_days", 0)
+    if lockup == 0:        lockup_score = 100
+    elif lockup <= 7:      lockup_score = 70
+    elif lockup <= 30:     lockup_score = 40
+    elif lockup <= 90:     lockup_score = 20
+    else:                  lockup_score = 5
+
+    otc     = ev_meta.get("otc_available", False)
+    partial = ev_meta.get("partial_exit", False)
+    access_score = 50 + (30 if otc else 0) + (20 if partial else 0)
+
+    composite = round(
+        red_score * 0.50 + sec_score * 0.25 + lockup_score * 0.15 + access_score * 0.10, 1
+    )
+    composite = min(composite, 100.0)
+
+    if composite >= 80:   label = "INSTANT"
+    elif composite >= 60: label = "FAST"
+    elif composite >= 40: label = "MODERATE"
+    elif composite >= 20: label = "SLOW"
+    else:                 label = "ILLIQUID"
+
+    return {
+        "score":         composite,
+        "label":         label,
+        "days_to_exit":  max(red_days, lockup),
+        "lockup_days":   lockup,
+        "otc_available": otc,
+        "partial_exit":  partial,
+        "min_exit_usd":  ev_meta.get("min_exit_usd", 0),
+        "components": {
+            "redemption_speed": red_score,
+            "secondary_market": sec_score,
+            "lockup_penalty":   lockup_score,
+            "access_options":   access_score,
+        },
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ISSUER TRUST SCORECARD
+# Transparency and trust metadata per asset: auditor, custodian,
+# proof-of-reserve mechanism, NAV update frequency, CUSIP/ISIN.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ASSET_TRUST_META: dict = {
+    # Government Bonds — highest transparency
+    "BUIDL":         {"auditor": "Deloitte",      "custodian": "BNY Mellon",       "proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "US09260C1099", "jurisdiction": "USA"},
+    "BENJI":         {"auditor": "PwC",            "custodian": "BNY Mellon",       "proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "US35473P1012", "jurisdiction": "USA"},
+    "OUSG":          {"auditor": "Deloitte",       "custodian": "Coinbase Custody", "proof_of_reserve": "chainlink",          "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "USA"},
+    "USDY":          {"auditor": "Withum",         "custodian": "Multiple",         "proof_of_reserve": "chainlink",          "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    "USTB":          {"auditor": "Hassman",        "custodian": "Anchorage Digital","proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "USA"},
+    "USDM":          {"auditor": "Grant Thornton", "custodian": "Multiple",         "proof_of_reserve": "chainlink",          "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "BVI"},
+    "STBT":          {"auditor": "None public",    "custodian": "Multiple",         "proof_of_reserve": "none",               "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "Cayman"},
+    "TBILL":         {"auditor": "None public",    "custodian": "Bank of China",    "proof_of_reserve": "none",               "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "Hong Kong"},
+    "USYC":          {"auditor": "Deloitte",       "custodian": "Copper.co",        "proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "USA"},
+    "rTBILL":        {"auditor": "None public",    "custodian": "Multiple",         "proof_of_reserve": "chainlink",          "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "BVI"},
+    "mTBILL":        {"auditor": "Grant Thornton", "custodian": "Multiple",         "proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "Luxembourg"},
+    "PT-USDY":       {"auditor": "Withum",         "custodian": "Pendle SC",        "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    # Private Credit — on-chain transparency but no traditional audits
+    "MPL":           {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    "CLPOOL":        {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Cayman"},
+    "GFI":           {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Cayman"},
+    "TRU":           {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    "CFG":           {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    "HUMA":          {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    "MORPHO-RE7":    {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Decentralized"},
+    "MORPHO-STEAK":  {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Decentralized"},
+    # Commodities
+    "PAXG":          {"auditor": "Withum",         "custodian": "Brinks",           "proof_of_reserve": "chainlink",          "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    "XAUT":          {"auditor": "Armanino",       "custodian": "Tether Vault",     "proof_of_reserve": "manual_attestation", "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "BVI"},
+    "KAU":           {"auditor": "BDO",            "custodian": "Kinesis Vault",    "proof_of_reserve": "manual_attestation", "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Australia"},
+    "KAG":           {"auditor": "BDO",            "custodian": "Kinesis Vault",    "proof_of_reserve": "manual_attestation", "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Australia"},
+    "MCO2":          {"auditor": "South Pole",     "custodian": "Registry",         "proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "USA"},
+    "BCT":           {"auditor": "Verra",          "custodian": "Registry",         "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Decentralized"},
+    # Real Estate
+    "REALT":         {"auditor": "None public",    "custodian": "RealT LLC",        "proof_of_reserve": "none",               "nav_update_freq": "monthly",   "cusip_isin": "",             "jurisdiction": "USA"},
+    "LOFTY":         {"auditor": "None public",    "custodian": "Lofty.ai",         "proof_of_reserve": "none",               "nav_update_freq": "monthly",   "cusip_isin": "",             "jurisdiction": "USA"},
+    "PARCL":         {"auditor": "None public",    "custodian": "Smart contracts",  "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Decentralized"},
+    "TANGIBLE":      {"auditor": "None public",    "custodian": "Tangible Trust",   "proof_of_reserve": "manual_attestation", "nav_update_freq": "monthly",   "cusip_isin": "",             "jurisdiction": "UK"},
+    # Tokenized Equities
+    "ONDO-GM":       {"auditor": "Deloitte",       "custodian": "Coinbase Custody", "proof_of_reserve": "chainlink",          "nav_update_freq": "daily",     "cusip_isin": "",             "jurisdiction": "USA"},
+    "DSHARES":       {"auditor": "None public",    "custodian": "Dinari",           "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "USA"},
+    "BACKED-CSPX":   {"auditor": "PwC",            "custodian": "Backed Assets",    "proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "CH1148653601", "jurisdiction": "Switzerland"},
+    "BACKED-NASDAQ": {"auditor": "PwC",            "custodian": "Backed Assets",    "proof_of_reserve": "manual_attestation", "nav_update_freq": "daily",     "cusip_isin": "CH1148653619", "jurisdiction": "Switzerland"},
+    "SWARM-TSLA":    {"auditor": "None public",    "custodian": "Swarm",            "proof_of_reserve": "on_chain",           "nav_update_freq": "real_time", "cusip_isin": "",             "jurisdiction": "Germany"},
+}
+
+_TRUST_TOP_AUDITORS = {"Deloitte", "PwC", "Ernst & Young", "KPMG", "Grant Thornton"}
+_TRUST_MID_AUDITORS = {"Withum", "Armanino", "Hassman", "Mazars", "BDO", "South Pole", "Verra"}
+
+
+def get_asset_trust_score(asset_id: str, category: str = "") -> dict:
+    """
+    Compute a 0-10 trust/transparency score for an RWA asset.
+
+    Components:
+      - Auditor quality   (0-3): Big4/GT=3, mid-tier=2, other known=1, none=0
+      - Proof of reserve  (0-3): chainlink=3, on_chain=2.5, manual_attestation=1.5, none=0
+      - NAV update freq   (0-2): real_time=2, daily=1.5, weekly=1, monthly=0.5
+      - CUSIP/ISIN bonus  (0-1): 1 if regulated instrument identifier present
+
+    Returns dict with trust_score (0-10) and full breakdown.
+    """
+    meta = ASSET_TRUST_META.get(asset_id, {})
+
+    auditor      = meta.get("auditor", "None public")
+    custodian    = meta.get("custodian", "Unknown")
+    por          = meta.get("proof_of_reserve", "none")
+    nav_freq     = meta.get("nav_update_freq", "monthly")
+    cusip        = meta.get("cusip_isin", "")
+    jurisdiction = meta.get("jurisdiction", "Unknown")
+
+    if auditor in _TRUST_TOP_AUDITORS:   auditor_score = 3.0
+    elif auditor in _TRUST_MID_AUDITORS: auditor_score = 2.0
+    elif auditor != "None public":       auditor_score = 1.0
+    else:                                auditor_score = 0.0
+
+    por_score  = {"chainlink": 3.0, "on_chain": 2.5, "manual_attestation": 1.5, "none": 0.0}.get(por, 0.0)
+    nav_score  = {"real_time": 2.0, "daily": 1.5, "weekly": 1.0, "monthly": 0.5}.get(nav_freq, 0.5)
+    cusip_score= 1.0 if cusip else 0.0
+
+    score = round(min(auditor_score + por_score + nav_score + cusip_score, 10.0), 1)
+
+    if score >= 7:    trust_label = "EXCELLENT"
+    elif score >= 5:  trust_label = "GOOD"
+    elif score >= 3:  trust_label = "FAIR"
+    elif score >= 1:  trust_label = "WEAK"
+    else:             trust_label = "OPAQUE"
+
+    return {
+        "trust_score":      score,
+        "trust_label":      trust_label,
+        "auditor":          auditor,
+        "custodian":        custodian,
+        "proof_of_reserve": por,
+        "nav_update_freq":  nav_freq,
+        "cusip_isin":       cusip,
+        "jurisdiction":     jurisdiction,
+        "components": {
+            "auditor":          auditor_score,
+            "proof_of_reserve": por_score,
+            "nav_frequency":    nav_score,
+            "cusip_isin":       cusip_score,
+        },
+    }
