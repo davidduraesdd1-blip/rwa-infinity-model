@@ -30,7 +30,6 @@ def _make_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA cache_size=-65536")
     conn.execute("PRAGMA mmap_size=268435456")
     conn.execute("PRAGMA temp_store=MEMORY")
-    conn.execute("PRAGMA optimize")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -42,6 +41,7 @@ class _PooledConn:
 
     def close(self):
         try:
+            self.__dict__["_c"].execute("PRAGMA optimize")
             self.__dict__["_c"].rollback()
         except Exception:
             pass
@@ -372,6 +372,19 @@ def get_active_arb_opportunities(limit: int = 50) -> pd.DataFrame:
         return pd.DataFrame()
     finally:
         conn.close()
+
+
+def clear_active_arb_opportunities():
+    """Mark all active arb opportunities as inactive (called before a fresh scan)."""
+    with _write_lock:
+        conn = _get_conn()
+        try:
+            conn.execute("UPDATE arb_opportunities SET is_active=0 WHERE is_active=1")
+            conn.commit()
+        except Exception as e:
+            logger.error("[DB] clear_active_arb_opportunities: %s", e)
+        finally:
+            conn.close()
 
 
 # ─── Portfolio Operations ──────────────────────────────────────────────────────

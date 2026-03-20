@@ -188,7 +188,7 @@ def score_asset(asset: dict) -> float:
     if isinstance(tags, str):
         import json as _json
         try: tags = _json.loads(tags)
-        except: tags = []
+        except (ValueError, TypeError): tags = []
     institutional_tags = {"blackrock", "kkr", "apollo", "hamilton-lane", "franklin-templeton",
                           "wisdomtree", "axa", "societe-generale", "jpmorgan", "hsbc", "ubs",
                           "citi", "state-street", "bny-mellon", "deutsche-bank", "securitize"}

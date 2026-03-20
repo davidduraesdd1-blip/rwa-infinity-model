@@ -1540,7 +1540,7 @@ with tab_ai:
     perf_df = _db.get_agent_performance()
     if not perf_df.empty:
         perf_df["Win Rate %"] = (
-            perf_df["wins"] / perf_df["total_decisions"] * 100
+            perf_df["wins"] / perf_df["total_decisions"].replace(0, 1) * 100
         ).round(1)
         st.dataframe(
             perf_df.style.format({"avg_return_pct": "{:.2f}%", "Win Rate %": "{:.1f}%"})
@@ -1625,8 +1625,10 @@ with tab_news:
             ts         = str(row.get("timestamp", ""))[:16]
             live_badge = '<span style="font-size:9px;background:#00D4FF22;color:#00D4FF;padding:1px 5px;border-radius:3px;margin-left:6px">LIVE</span>' if is_live else ""
             url        = row.get("url", "") or ""
+            # Only allow http/https URLs to prevent javascript: injection
+            safe_url   = url if url.startswith(("http://", "https://")) else ""
             headline   = row.get("headline", "")
-            headline_html = f'<a href="{url}" target="_blank" style="color:#E2E8F0;text-decoration:none">{headline}</a>' if url else headline
+            headline_html = f'<a href="{safe_url}" target="_blank" style="color:#E2E8F0;text-decoration:none">{headline}</a>' if safe_url else headline
 
             st.markdown(f"""
             <div class="metric-card" style="padding:12px">

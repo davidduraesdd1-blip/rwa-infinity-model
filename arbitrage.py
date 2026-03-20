@@ -22,7 +22,7 @@ from config import (
     ARB_STRONG_THRESHOLD_PCT, ARB_EXTREME_THRESHOLD_PCT,
     ARB_MIN_PRICE_SPREAD_PCT
 )
-from data_feeds import fetch_defillama_yields, fetch_coingecko_prices
+from data_feeds import fetch_defillama_yields, fetch_coingecko_prices, fetch_lending_borrow_rates
 
 logger = logging.getLogger(__name__)
 
@@ -639,14 +639,8 @@ def scan_carry_trades(assets: List[dict]) -> List[dict]:
     opportunities = []
     now = datetime.now(timezone.utc).isoformat()
 
-    # Current borrowing rates on major DeFi platforms (approximate)
-    borrow_rates = {
-        "USDC on Aave":    5.20,
-        "USDC on Compound":5.10,
-        "USDT on Aave":    5.15,
-        "DAI on MakerDAO": 5.00,
-        "ETH on Aave":     2.80,
-    }
+    # Live borrowing rates from DeFi lending protocols via DeFiLlama
+    live_borrow_rates = fetch_lending_borrow_rates()
 
     # Filter high-yield RWA assets
     high_yield_assets = sorted(
@@ -660,10 +654,12 @@ def scan_carry_trades(assets: List[dict]) -> List[dict]:
     for asset in high_yield_assets:
         asset_yield = asset.get("current_yield_pct") or asset.get("expected_yield_pct") or 0
 
-        for borrow_source, borrow_rate in borrow_rates.items():
-            carry_spread = asset_yield - borrow_rate
-            tx_cost      = TX_COSTS.get(asset.get("category", ""), 0.5)
-            net_carry    = carry_spread - tx_cost
+        for br in live_borrow_rates:
+            borrow_rate   = br["borrow_apy"]
+            borrow_source = f"{br['protocol']} ({br['symbol']} on {br['chain']})"
+            carry_spread  = asset_yield - borrow_rate
+            tx_cost       = TX_COSTS.get(asset.get("category", ""), 0.5)
+            net_carry     = carry_spread - tx_cost
 
             if net_carry < 1.0:  # minimum 1% net carry
                 continue
@@ -676,13 +672,13 @@ def scan_carry_trades(assets: List[dict]) -> List[dict]:
                 "timestamp":     now,
                 "type":          "carry_trade",
                 "asset_a_id":    asset["id"],
-                "asset_b_id":    borrow_source.replace(" ", "_").upper(),
+                "asset_b_id":    f"{br['protocol']}_{br['chain']}_{br['symbol']}".upper().replace(" ", "_"),
                 "asset_a_name":  f"INVEST: {asset['name']}",
                 "asset_b_name":  f"BORROW: {borrow_source}",
                 "protocol_a":    asset.get("protocol", ""),
-                "protocol_b":    borrow_source,
+                "protocol_b":    br["protocol"],
                 "chain_a":       asset.get("chain", ""),
-                "chain_b":       "Ethereum",
+                "chain_b":       br["chain"],
                 "yield_a_pct":   round(asset_yield, 4),
                 "yield_b_pct":   round(borrow_rate, 4),
                 "spread_pct":    round(carry_spread, 4),
@@ -692,7 +688,7 @@ def scan_carry_trades(assets: List[dict]) -> List[dict]:
                 "tx_cost_pct":   tx_cost,
                 "signal":        signal,
                 "action": (
-                    f"CARRY: Borrow {borrow_source.split(' ')[0]} @ {borrow_rate:.2f}%, "
+                    f"CARRY: Borrow {br['symbol']} @ {borrow_rate:.2f}% via {br['protocol']} ({br['chain']}), "
                     f"invest in {asset['id']} @ {asset_yield:.2f}%. "
                     f"Net carry: {net_carry:.2f}% per year."
                 ),
@@ -1123,10 +1119,7 @@ def run_full_arb_scan(assets: List[dict] = None) -> List[dict]:
 
     # Mark old opportunities as inactive
     try:
-        with _db._write_lock:
-            conn = _db._get_conn()
-            conn.execute("UPDATE arb_opportunities SET is_active=0 WHERE is_active=1")
-            conn.commit()
+        _db.clear_active_arb_opportunities()
     except Exception as e:
         logger.warning("[Arb] Failed to clear old opportunities: %s", e)
 

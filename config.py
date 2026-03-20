@@ -3258,9 +3258,7 @@ def get_asset_liquidity_meta(asset_id: str, category: str = "") -> dict:
     )
 
 # Optional API keys for new data sources
-KAITO_API_KEY    = os.environ.get("KAITO_API_KEY", "")
-SANTIMENT_API_KEY= os.environ.get("SANTIMENT_API_KEY", "")
-FRED_API_KEY     = os.environ.get("FRED_API_KEY", "")   # free at fred.stlouisfed.org
+KAITO_API_KEY    = _os.environ.get("RWA_KAITO_API_KEY")  # kaito.ai — social/narrative analytics
 
 
 # ─────────────────────────────────────────────────────────────────────────────
