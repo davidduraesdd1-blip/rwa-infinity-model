@@ -779,10 +779,10 @@ with tab_portfolio:
                                  tooltip="Percentage of your portfolio in assets with no interest rate sensitivity (gold, commodities, equities) — these act as a natural rate-risk hedge")
                 with d4:
                     curve = fetch_treasury_yield_curve()
-                    rf    = curve["yields"].get("3m", 4.32)
+                    rf    = curve.get("yields", {}).get("3m", 4.32)
                     _metric_card("Live Risk-Free Rate",
                                  f"{rf:.2f}%",
-                                 f"3m T-bill — source: {curve['source']}",
+                                 f"3m T-bill — source: {curve.get('source', 'N/A')}",
                                  tooltip="Current 3-month US Treasury bill yield — the baseline risk-free rate used to calculate excess return (Sharpe/Sortino ratios) for your portfolio")
 
                 # Rate scenario table

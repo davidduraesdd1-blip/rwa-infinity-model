@@ -418,6 +418,8 @@ def calibrate_alert_thresholds() -> dict:
     except Exception as e:
         logger.warning(f"Calibration DB read failed: {e}")
         return {"calibrated": False, "reason": str(e), "samples": 0}
+    finally:
+        conn.close()
 
     # Extract yield expectations from notes JSON or numeric fields
     accurate_yields = []
