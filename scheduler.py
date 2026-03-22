@@ -10,8 +10,12 @@ Jobs:
 """
 
 import logging
+import logging.handlers
+import sys
+import time
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -181,12 +185,23 @@ def job_portfolio_snapshot():
 
 def start():
     """Initialize and start the background scheduler."""
-    global _scheduler
+    global _scheduler, _last_refresh, _refresh_count
 
     with _scheduler_lock:
         if _scheduler and _scheduler.running:
             logger.info("[Scheduler] Already running")
             return
+
+        # ── Graceful resume from DB ───────────────────────────────────────────
+        try:
+            _st = _db.read_scan_status()
+            if _st.get("timestamp"):
+                _last_refresh = _st["timestamp"]
+                logger.info("[Scheduler] Resumed — last refresh: %s", _last_refresh)
+            else:
+                logger.info("[Scheduler] No prior scan found — starting fresh.")
+        except Exception as _re:
+            logger.debug("[Scheduler] Resume check failed (non-critical): %s", _re)
 
         if not _APScheduler:
             logger.warning("[Scheduler] APScheduler not available — background jobs disabled")
@@ -291,3 +306,42 @@ def get_status() -> dict:
         "jobs":          jobs,
         "scan_status":   scan_status,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STANDALONE ENTRY POINT
+# Run: python scheduler.py
+# The BackgroundScheduler runs in daemon threads, so we block with a sleep loop.
+# ─────────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass  # python-dotenv optional
+
+    # File + console logging
+    _log_path = Path(__file__).parent / "scheduler.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.handlers.RotatingFileHandler(
+                _log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+            ),
+        ],
+    )
+
+    logger.info("[Scheduler] Starting RWA Infinity Model standalone scheduler...")
+    start()
+    logger.info("[Scheduler] Running. Press Ctrl+C to stop.")
+
+    try:
+        while True:
+            time.sleep(60)
+    except (KeyboardInterrupt, SystemExit):
+        stop()
+        logger.info("[Scheduler] Shutdown complete.")

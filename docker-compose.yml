@@ -1,0 +1,52 @@
+# RWA Infinity Model — docker-compose.yml
+#
+# Starts two services:
+#   scheduler — runs scheduler.py 24/7, collects data continuously
+#   ui        — runs Streamlit dashboard, reads from shared SQLite
+#
+# Usage on VPS:
+#   git clone <your-repo>
+#   cp .env.example .env   # fill in your API keys
+#   docker compose up -d
+#
+# Update code without losing data:
+#   git pull && docker compose up -d --build
+
+services:
+  scheduler:
+    build: .
+    command: python scheduler.py
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - .:/app          # bind mount: code + SQLite DB share same directory
+    working_dir: /app
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ui:
+    build: .
+    command: >
+      streamlit run app.py
+      --server.port=8501
+      --server.address=0.0.0.0
+      --server.headless=true
+      --server.enableCORS=false
+      --server.enableXsrfProtection=false
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app          # same bind mount — reads DB written by scheduler
+    working_dir: /app
+    depends_on:
+      - scheduler
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
