@@ -1852,7 +1852,7 @@ with tab_reg:
             for col, (label, tenor) in zip([rc1, rc2, rc3, rc4, rc5], rate_kpis):
                 with col:
                     _metric_card(label, f"{curve_ylds.get(tenor, 'N/A')}%",
-                                 f"Source: {curve_data['source']}")
+                                 f"Source: {curve_data.get('source', 'N/A')}")
         else:
             st.info("Yield curve data unavailable — check connection")
     except Exception as e:
