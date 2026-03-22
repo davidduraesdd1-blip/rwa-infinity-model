@@ -378,7 +378,7 @@ def _node_load_state(state: AgentState) -> AgentState:
     """Load authoritative portfolio state from DB."""
     try:
         from portfolio import build_portfolio
-        from arbitrage import run_full_arb_scan, get_arb_summary
+        from arbitrage import run_full_arb_scan
 
         tier      = state["agent_cfg"]["risk_tier"]
         portfolio = build_portfolio(tier)

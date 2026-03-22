@@ -80,28 +80,70 @@ def job_news_refresh():
         from data_feeds import refresh_news
         news = refresh_news() or []
         logger.info("[Scheduler] News refresh — %d items", len(news))
+        # Invalidate sentiment cache so next call re-scores fresh headlines
+        try:
+            from news_sentiment import invalidate_cache
+            invalidate_cache()
+        except Exception:
+            pass
     except Exception as e:
         logger.warning("[Scheduler] News refresh failed: %s", e)
 
 
 def job_arb_scan():
-    """Arbitrage scan — runs after each full refresh."""
+    """Arbitrage scan — runs after each full refresh, then fires alerts."""
     try:
         from arbitrage import run_full_arb_scan
         opps = run_full_arb_scan() or []
         logger.info("[Scheduler] Arb scan — %d opportunities", len(opps))
+        # Fire alerts for any high-signal arb opportunities
+        job_send_alerts(arb_opportunities=opps)
     except Exception as e:
         logger.warning("[Scheduler] Arb scan failed: %s", e)
 
 
+def job_send_alerts(arb_opportunities=None, portfolio_results=None, ai_decisions=None):
+    """Check thresholds and send email/Telegram/Discord alerts if triggered."""
+    try:
+        from alerts import check_and_send_alerts
+        check_and_send_alerts(
+            arb_opportunities=arb_opportunities,
+            portfolio_results=portfolio_results,
+            ai_decisions=ai_decisions,
+        )
+    except Exception as e:
+        logger.warning("[Scheduler] Alert delivery failed: %s", e)
+
+
+def job_alert_calibration():
+    """Auto-calibrate alert thresholds every 6 hours based on AI decision history."""
+    try:
+        from alerts import calibrate_alert_thresholds
+        result = calibrate_alert_thresholds()
+        if result.get("calibrated"):
+            logger.info(
+                "[Scheduler] Alert calibration: threshold %s → %.1f%% (n=%d)",
+                result.get("direction", "updated"),
+                result.get("new_threshold", 0),
+                result.get("samples", 0),
+            )
+        else:
+            logger.debug("[Scheduler] Alert calibration skipped: %s", result.get("reason"))
+    except Exception as e:
+        logger.warning("[Scheduler] Alert calibration failed: %s", e)
+
+
 def job_ai_feedback():
-    """AI feedback loop — runs every 6 hours."""
+    """AI feedback loop — runs every 6 hours. Evaluates decisions and updates model weights."""
     try:
         from ai_agent import evaluate_past_decisions
+        from ai_feedback import update_model_weights
         from config import AI_AGENTS
         for agent_name in AI_AGENTS:
             evaluate_past_decisions(agent_name)
-        logger.info("[Scheduler] AI feedback loop complete")
+        # Update confidence multipliers based on latest win rates
+        weights = update_model_weights()
+        logger.info("[Scheduler] AI feedback loop complete — weights: %s", weights)
     except Exception as e:
         logger.warning("[Scheduler] AI feedback failed: %s", e)
 
@@ -190,6 +232,13 @@ def start():
             hours=6,
             id="ai_feedback",
             name="AI Feedback Loop",
+        )
+        _scheduler.add_job(
+            job_alert_calibration, "interval",
+            hours=6,
+            id="alert_calibration",
+            name="Alert Threshold Calibration",
+            start_date=datetime.now(timezone.utc) + timedelta(hours=1),
         )
 
         # Error listener
