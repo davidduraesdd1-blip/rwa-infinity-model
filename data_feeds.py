@@ -165,6 +165,10 @@ def fetch_defillama_yields() -> List[dict]:
             "gains-network", "synthetix", "enzyme", "lofty", "spiko",
             "hashnote", "flowcarbon", "agrotoken", "bucket-protocol", "thala",
             "plume", "mantra",
+            # Liquid Staking (new 2026)
+            "eigenlayer", "lido", "jito", "lombard-finance",
+            # DeFi Yield / PayFi (new 2026)
+            "aave-v3", "falcon-finance",
         }
         results = []
         for pool in pools:
@@ -180,6 +184,9 @@ def fetch_defillama_yields() -> List[dict]:
                 "GNS", "DSHR", "USD0", "AUSD", "USDS", "SUSDE", "USDE",
                 "KAU", "KAG", "PT-USDY", "YT-USDY", "PT-USDM", "RTBILL",
                 "STEAKUSDC", "RE7USDC", "KUSDC", "SNX", "NOTE",
+                # Liquid Staking / DeFi Yield / PayFi (new 2026)
+                "WSTETH", "JITOSOL", "EIGEN", "LBTC", "PENDLE", "MORPHO",
+                "CPUSD", "USDF", "JITOSOL",
             }
             if proj in rwa_projects or sym in rwa_syms or "rwa" in proj:
                 apy = pool.get("apy") or 0
@@ -201,6 +208,43 @@ def fetch_defillama_yields() -> List[dict]:
                 })
         return sorted(results, key=lambda x: x["tvl_usd"], reverse=True)
     return _cached_get("defillama_yields", CACHE_TTL["yields"], _fetch) or []
+
+
+def fetch_defillama_yields_for_rwa() -> List[dict]:
+    """Fetch yield data for RWA-adjacent protocols from DeFiLlama free API.
+
+    Covers liquid staking (EigenLayer, Lido, Jito, Lombard), DeFi yield
+    (Pendle, Morpho, Ethena), PayFi (Clearpool, Falcon), and all existing
+    RWA protocols. Returns up to 50 top pools sorted by TVL.
+    """
+    def _fetch():
+        import requests as _req
+        try:
+            resp = _req.get("https://yields.llama.fi/pools", timeout=15)
+            if resp.status_code != 200:
+                return []
+            pools = resp.json().get("data", [])
+            rwa_keywords = [
+                # Core RWA
+                "ondo", "maple", "centrifuge", "goldfinch", "truefi",
+                "clearpool", "morpho", "pendle", "ethena", "aave",
+                # Liquid Staking
+                "eigenlayer", "lido", "jito", "lombard",
+                # PayFi / Stablecoin Yield
+                "falcon", "agora", "huma",
+                # Additional RWA
+                "superstate", "openeden", "hashnote", "usual",
+                "mountain-protocol", "sky", "backed",
+            ]
+            rwa_pools = [
+                p for p in pools
+                if any(k in (p.get("project") or "").lower() for k in rwa_keywords)
+            ]
+            return sorted(rwa_pools, key=lambda x: x.get("tvlUsd") or 0, reverse=True)[:50]
+        except Exception as e:
+            logger.warning("[DataFeeds] fetch_defillama_yields_for_rwa failed: %s", e)
+            return []
+    return _cached_get("defillama_yields_rwa_extended", CACHE_TTL["yields"], _fetch) or []
 
 
 def fetch_protocol_tvl(slug: str) -> Optional[dict]:

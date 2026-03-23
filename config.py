@@ -2643,6 +2643,286 @@ RWA_UNIVERSE = [
         "description": "WisdomTree's tokenized short-term government bond fund on Stellar and Ethereum. Daily yield accrual via WisdomTree Prime app.",
         "tags": ["retail", "treasury", "stellar", "wisdomtree", "sec-reviewed", "daily-yield"],
     },
+
+    # ── LIQUID STAKING ────────────────────────────────────────────────────────
+    {
+        "id": "EIGENLAYER",
+        "name": "EigenLayer Restaking Protocol",
+        "category": "Liquid Staking",
+        "subcategory": "Restaking",
+        "chain": "Ethereum",
+        "protocol": "EigenLayer",
+        "token_symbol": "EIGEN",
+        "coingecko_id": "eigenlayer",
+        "defillama_slug": "eigenlayer",
+        "expected_yield_pct": 7.50,
+        "risk_score": 5,
+        "liquidity_score": 7,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2023-06-01",
+        "tvl_usd": 15_000_000_000,
+        "description": "EigenLayer restaking protocol with $15B+ TVL. Stake ETH or LSTs to secure Actively Validated Services (AVS). EIGEN token staking incentives provide 3.8–12% APY on top of base staking yield.",
+        "tags": ["retail", "liquid-staking", "restaking", "ethereum", "eigenlayer", "avs", "defi-native"],
+    },
+    {
+        "id": "LIDO_WSTETH",
+        "name": "Lido Wrapped Staked ETH (wstETH)",
+        "category": "Liquid Staking",
+        "subcategory": "Ethereum LST",
+        "chain": "Ethereum / Arbitrum / Optimism / Polygon",
+        "protocol": "Lido Finance",
+        "token_symbol": "wstETH",
+        "coingecko_id": "wrapped-steth",
+        "defillama_slug": "lido",
+        "expected_yield_pct": 3.50,
+        "risk_score": 3,
+        "liquidity_score": 10,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2020-12-01",
+        "tvl_usd": 33_000_000_000,
+        "description": "Lido's wrapped staked ETH token — largest liquid staking protocol with $33B+ TVL. wstETH is non-rebasing, cross-chain via Chainlink CCIP, and used as collateral across DeFi. ~3-4% base ETH staking APY.",
+        "tags": ["retail", "liquid-staking", "ethereum", "lido", "cross-chain", "ccip", "defi-collateral"],
+    },
+    {
+        "id": "JITO_JITOSOL",
+        "name": "Jito jitoSOL — Solana MEV-Enhanced Liquid Staking",
+        "category": "Liquid Staking",
+        "subcategory": "Solana LST",
+        "chain": "Solana",
+        "protocol": "Jito",
+        "token_symbol": "jitoSOL",
+        "coingecko_id": "jito-staked-sol",
+        "defillama_slug": "jito",
+        "expected_yield_pct": 11.80,
+        "risk_score": 4,
+        "liquidity_score": 9,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2022-11-01",
+        "tvl_usd": 2_400_000_000,
+        "description": "Jito's jitoSOL holds 15.1M SOL staked and delivers ~11.8% APY including MEV (Maximal Extractable Value) tips distributed to stakers. Leading Solana LST by MEV yield. JTO governance token.",
+        "tags": ["retail", "liquid-staking", "solana", "jito", "mev", "jto-governance", "defi-native"],
+    },
+    {
+        "id": "LOMBARD_LBTC",
+        "name": "Lombard Finance LBTC — Bitcoin Liquid Staking Token",
+        "category": "Liquid Staking",
+        "subcategory": "Bitcoin LST",
+        "chain": "Ethereum / Babylon",
+        "protocol": "Lombard Finance / Babylon",
+        "token_symbol": "LBTC",
+        "coingecko_id": "lombard-staked-btc",
+        "defillama_slug": "lombard-finance",
+        "expected_yield_pct": 5.00,
+        "risk_score": 4,
+        "liquidity_score": 7,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2024-07-01",
+        "description": "LBTC is a Bitcoin liquid staking token built on Babylon's Bitcoin staking protocol. Holders earn ~5% APY from Bitcoin security provision to Proof-of-Stake chains. LBTC is DeFi-compatible on Ethereum.",
+        "tags": ["retail", "liquid-staking", "bitcoin", "babylon", "lombard", "btc-yield", "defi-native"],
+    },
+
+    # ── DEFI YIELD PROTOCOLS ──────────────────────────────────────────────────
+    {
+        "id": "PENDLE_FINANCE",
+        "name": "Pendle Finance — Yield Tokenization Platform",
+        "category": "DeFi Yield",
+        "subcategory": "Yield Tokenization",
+        "chain": "Ethereum / Arbitrum / Optimism / BNB Chain",
+        "protocol": "Pendle Finance",
+        "token_symbol": "PENDLE",
+        "coingecko_id": "pendle",
+        "defillama_slug": "pendle",
+        "expected_yield_pct": 12.00,
+        "risk_score": 4,
+        "liquidity_score": 8,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2021-06-01",
+        "tvl_usd": 5_700_000_000,
+        "description": "Pendle Finance tokenizes yield-bearing assets into Principal Tokens (PT) and Yield Tokens (YT). PT gives fixed rates of 2–19% APY on RWA assets (USDY, USDM, sUSDe, wstETH). $5.7B avg TVL. Leading yield-stripping protocol.",
+        "tags": ["retail", "defi-yield", "yield-tokenization", "fixed-rate", "pendle", "pt", "yt", "rwa-native", "multi-chain"],
+    },
+    {
+        "id": "MORPHO_METAMORPHO",
+        "name": "Morpho MetaMorpho Curated Lending Vaults",
+        "category": "DeFi Yield",
+        "subcategory": "Curated Lending",
+        "chain": "Ethereum / Base",
+        "protocol": "Morpho",
+        "token_symbol": "MORPHO",
+        "coingecko_id": "morpho",
+        "defillama_slug": "morpho",
+        "expected_yield_pct": 18.00,
+        "risk_score": 4,
+        "liquidity_score": 8,
+        "regulatory_score": 7,
+        "min_investment_usd": 1,
+        "inception_date": "2024-01-01",
+        "description": "Morpho MetaMorpho vaults are curator-managed lending pools on Morpho Blue. Top vaults (Re7, Steakhouse, Gauntlet) reach up to 30.36% APR by optimizing across Morpho markets. Permissionless, non-custodial.",
+        "tags": ["institutional", "defi-yield", "lending", "morpho", "metamorpho", "curated-vaults", "re7", "steakhouse", "multi-chain"],
+    },
+    {
+        "id": "ETHENA_USDE",
+        "name": "Ethena USDe / sUSDe — Delta-Neutral Synthetic Dollar",
+        "category": "DeFi Yield",
+        "subcategory": "Synthetic Dollar",
+        "chain": "Ethereum / Arbitrum / Mantle",
+        "protocol": "Ethena",
+        "token_symbol": "sUSDe",
+        "coingecko_id": "ethena-staked-usde",
+        "defillama_slug": "ethena",
+        "expected_yield_pct": 7.50,
+        "risk_score": 5,
+        "liquidity_score": 9,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2024-02-01",
+        "tvl_usd": 12_000_000_000,
+        "description": "Ethena's USDe is a delta-neutral synthetic dollar with $12B supply. sUSDe earns 4.72–10% APY from ETH staking + perpetual funding rates. Non-custodial, no bank counterparty risk. The 'internet bond' alternative.",
+        "tags": ["retail", "defi-yield", "synthetic-dollar", "delta-neutral", "ethena", "susde", "funding-rate", "internet-bond"],
+    },
+
+    # ── INSTITUTIONAL RWA (NEW ADDITIONS) ────────────────────────────────────
+    {
+        "id": "AAVE_HORIZON",
+        "name": "Aave Horizon — Permissioned RWA Lending",
+        "category": "Private Credit",
+        "subcategory": "Institutional RWA Vaults",
+        "chain": "Ethereum",
+        "protocol": "Aave / Horizon",
+        "token_symbol": "AAVE-HORIZON",
+        "coingecko_id": "aave",
+        "defillama_slug": "aave-v3",
+        "expected_yield_pct": 6.50,
+        "risk_score": 3,
+        "liquidity_score": 7,
+        "regulatory_score": 9,
+        "min_investment_usd": 100_000,
+        "inception_date": "2025-01-01",
+        "tvl_usd": 580_000_000,
+        "description": "Aave Horizon is a permissioned lending market for institutions using tokenized RWAs as collateral (T-bills, BUIDL). $580M net deposits. KYC-gated, WhiteListed borrowers borrow against T-bill collateral at institutional rates.",
+        "tags": ["institutional", "private-credit", "aave", "permissioned", "tbill-collateral", "kyc-gated", "rwa-lending"],
+    },
+    {
+        "id": "ONDO_NEXUS",
+        "name": "Ondo Nexus — Tokenized US Stocks + ETFs on Solana",
+        "category": "Tokenized Equities",
+        "subcategory": "Tokenized Stocks",
+        "chain": "Solana / Ethereum",
+        "protocol": "Ondo Finance",
+        "token_symbol": "ONDO",
+        "coingecko_id": "ondo-finance",
+        "defillama_slug": "ondo-finance",
+        "expected_yield_pct": 10.50,
+        "risk_score": 3,
+        "liquidity_score": 9,
+        "regulatory_score": 9,
+        "min_investment_usd": 1,
+        "inception_date": "2025-03-01",
+        "description": "Ondo Nexus brings tokenized US equities and ETFs natively to Solana's high-speed ecosystem. Part of Ondo's L1 blockchain for tokenized assets vision. Integrates with Jupiter, Kamino, and other Solana DeFi protocols.",
+        "tags": ["retail", "equities", "tokenized-stocks", "solana", "ondo", "ondo-nexus", "l1-vision", "defi-native"],
+    },
+    {
+        "id": "PLUME_NETWORK",
+        "name": "Plume Network — RWA-Native Blockchain with Leverage Vaults",
+        "category": "Private Credit",
+        "subcategory": "RWA Chain",
+        "chain": "Plume",
+        "protocol": "Plume Network",
+        "token_symbol": "PLUME",
+        "coingecko_id": "plume-network",
+        "defillama_slug": "plume",
+        "expected_yield_pct": 14.00,
+        "risk_score": 6,
+        "liquidity_score": 6,
+        "regulatory_score": 7,
+        "min_investment_usd": 1,
+        "inception_date": "2025-06-05",
+        "description": "Plume Network is the first RWA-native L1 with compliance natively embedded. Features leverage looping vaults for RWA strategies: deposit T-bills, borrow stablecoins, rebuy T-bills — achieving 14%+ leveraged yield. 50+ protocols on launch.",
+        "tags": ["institutional", "private-credit", "plume", "rwa-chain", "leverage-looping", "compliance-native", "evm"],
+    },
+    {
+        "id": "APOLLO_ACRED",
+        "name": "Apollo ACRED — Tokenized Credit Fund with DeFi Looping",
+        "category": "Private Credit",
+        "subcategory": "Diversified Credit",
+        "chain": "Avalanche / Ethereum",
+        "protocol": "Apollo Global / Securitize",
+        "token_symbol": "ACRED",
+        "coingecko_id": None,
+        "defillama_slug": None,
+        "expected_yield_pct": 17.50,
+        "risk_score": 6,
+        "liquidity_score": 5,
+        "regulatory_score": 9,
+        "min_investment_usd": 10_000,
+        "inception_date": "2024-01-01",
+        "description": "Apollo ACRED tokenizes Apollo's diversified credit fund. Used in DeFi looping strategies (deposit ACRED → borrow USDC → rebuy ACRED) achieving 15–20% leveraged yield. Morpho and Euler Finance integration.",
+        "tags": ["institutional", "private-credit", "apollo", "acred", "leverage-looping", "morpho", "avalanche", "securitize", "accredited"],
+    },
+
+    # ── PAYFI / STABLECOIN YIELD ──────────────────────────────────────────────
+    {
+        "id": "CLEARPOOL_CPUSD",
+        "name": "Clearpool cpUSD — PayFi Yield-Bearing Stablecoin",
+        "category": "PayFi",
+        "subcategory": "PayFi Stablecoin",
+        "chain": "Ethereum / Arbitrum / Optimism",
+        "protocol": "Clearpool",
+        "token_symbol": "cpUSD",
+        "coingecko_id": None,
+        "defillama_slug": "clearpool",
+        "expected_yield_pct": 11.50,
+        "risk_score": 5,
+        "liquidity_score": 7,
+        "regulatory_score": 7,
+        "min_investment_usd": 100,
+        "inception_date": "2024-09-01",
+        "description": "Clearpool's cpUSD is a yield-bearing stablecoin backed by PayFi vaults (real payment flows — cross-border payments, merchant financing). 8–15% APR from real-economy payment activity. Non-custodial, multi-chain.",
+        "tags": ["retail", "payfi", "stablecoin", "yield-bearing", "clearpool", "payment-flows", "multi-chain"],
+    },
+    {
+        "id": "FALCON_USDF",
+        "name": "Falcon Finance USDf — RWA-Backed Synthetic Dollar",
+        "category": "PayFi",
+        "subcategory": "Synthetic Dollar",
+        "chain": "Ethereum",
+        "protocol": "Falcon Finance",
+        "token_symbol": "USDf",
+        "coingecko_id": None,
+        "defillama_slug": None,
+        "expected_yield_pct": 10.00,
+        "risk_score": 5,
+        "liquidity_score": 7,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2024-10-01",
+        "description": "Falcon Finance's USDf is a synthetic dollar backed by a combination of crypto collateral and tokenized RWAs. 8–12% APY from diversified backing strategy. Offers higher collateral diversity than Ethena.",
+        "tags": ["retail", "payfi", "synthetic-dollar", "rwa-backed", "falcon", "stablecoin", "defi-native"],
+    },
+    {
+        "id": "AGORA_AUSD_PAYFI",
+        "name": "Agora Finance AUSD — Institutional Yield-Bearing Stablecoin",
+        "category": "PayFi",
+        "subcategory": "Yield Stablecoin",
+        "chain": "Ethereum",
+        "protocol": "Agora Finance",
+        "token_symbol": "AUSD",
+        "coingecko_id": None,
+        "defillama_slug": "agora-finance",
+        "expected_yield_pct": 4.80,
+        "risk_score": 2,
+        "liquidity_score": 8,
+        "regulatory_score": 8,
+        "min_investment_usd": 1,
+        "inception_date": "2024-06-01",
+        "description": "Agora's AUSD is a regulated, institutional-grade yield-bearing stablecoin backed by US Treasuries and overnight repos. Dragonfly + White Star capital-backed. Distributed to DeFi protocols and neobanks as productive cash alternative.",
+        "tags": ["retail", "payfi", "stablecoin", "yield-bearing", "agora", "treasury-backed", "institutional"],
+    },
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2890,6 +3170,15 @@ DEFILLAMA_PROTOCOLS = [
     "archax",             # UK FCA-regulated tokenized funds
     "midas-mtbill",       # Midas mTBILL tokenized T-bill
     "midas-mbasis",       # Midas mBASIS basis trade token
+    # ── Liquid Staking (new) ──────────────────────────────────────────────────
+    "eigenlayer",         # EigenLayer restaking — $15B+ TVL
+    "lido",               # Lido wstETH — $33B+ TVL
+    "jito",               # Jito jitoSOL — Solana MEV LST
+    "lombard-finance",    # Lombard LBTC — Bitcoin LST on Babylon
+    # ── DeFi Yield (new) ──────────────────────────────────────────────────────
+    "aave-v3",            # Aave Horizon permissioned RWA lending
+    # PayFi (new)
+    "falcon-finance",     # Falcon USDf synthetic dollar
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2918,6 +3207,9 @@ CATEGORY_COLORS = {
     "Insurance":            "#6366F1",
     "Trade Finance":        "#14B8A6",
     "Tokenized Equities":   "#FF6B35",   # NASDAQ / Robinhood / DEX tokenized stocks
+    "Liquid Staking":       "#7C3AED",   # deep violet — ETH/SOL/BTC liquid staking
+    "DeFi Yield":           "#0EA5E9",   # sky blue — Pendle, Morpho, Ethena yield
+    "PayFi":                "#F59E0B",   # amber — payment finance stablecoins
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3072,6 +3364,9 @@ _CATEGORY_FEE_BPS_DEFAULT: dict = {
     "Infrastructure":      100,
     "Insurance":           100,
     "Trade Finance":        80,
+    "Liquid Staking":       10,   # protocol fee on staking rewards (~0.1%)
+    "DeFi Yield":           30,   # Pendle/Morpho protocol fees (~0.3%)
+    "PayFi":                25,   # payment processing overhead (~0.25%)
 }
 
 def get_asset_fee_bps(asset_id: str, category: str = "") -> int:
@@ -3142,6 +3437,24 @@ ASSET_DURATION_YEARS: dict = {
     "DSHARES":      5.00,
     "BACKED-CSPX":  5.00,
     "BACKED-NASDAQ":5.00,
+    # Liquid Staking — effectively perpetual, very short rate duration
+    "EIGEN":        0.01,   # EigenLayer restaking — no fixed term
+    "wstETH":       0.01,   # Lido wstETH — perpetual LST
+    "jitoSOL":      0.01,   # Jito jitoSOL — perpetual SOL LST
+    "LBTC":         0.01,   # Lombard LBTC — perpetual BTC LST
+    # DeFi Yield Protocols — maturity-based for PTs, perpetual for vaults
+    "PENDLE":       0.50,   # Pendle avg PT maturity ~6 months
+    "MORPHO":       0.00,   # Morpho MetaMorpho — perpetual rolling vaults
+    "sUSDe":        0.00,   # Ethena sUSDe — perpetual delta-neutral
+    # Institutional RWA additions
+    "AAVE-HORIZON": 0.25,   # Aave Horizon — short-term RWA collateral
+    "ONDO":         5.00,   # Ondo Nexus equities — equity-like duration
+    "PLUME":        0.50,   # Plume leverage vaults — rolling short positions
+    "ACRED":        3.00,   # Apollo ACRED — private credit 3yr avg tenor
+    # PayFi / Stablecoin Yield
+    "cpUSD":        0.08,   # Clearpool cpUSD — payment flows, very short
+    "USDf":         0.00,   # Falcon USDf — perpetual synthetic
+    "AUSD":         0.08,   # Agora AUSD — T-bill backed, short duration
 }
 
 # Default durations by category
@@ -3159,6 +3472,9 @@ _CATEGORY_DURATION_DEFAULT: dict = {
     "Infrastructure":        8.00,   # long-duration infra assets
     "Insurance":             2.00,
     "Trade Finance":         0.25,   # short receivables
+    "Liquid Staking":        0.01,   # perpetual, no fixed term
+    "DeFi Yield":            0.25,   # avg Pendle PT maturity
+    "PayFi":                 0.08,   # payment flows, very short
 }
 
 def get_asset_duration(asset_id: str, category: str = "") -> float:
@@ -3231,6 +3547,24 @@ ASSET_LIQUIDITY_META: dict = {
     "SWARM-MSFT":   {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
     "SWARM-NVDA":   {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
     "ROBINHOOD-RWA":{"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    # Liquid Staking — instant DEX exit via LST pools
+    "EIGEN":        {"redemption_days": 7,   "has_secondary": True,  "secondary_depth": 2},  # 7d unbonding
+    "wstETH":       {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 3},  # deep Curve/Uniswap pools
+    "jitoSOL":      {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},  # Solana DEX pools
+    "LBTC":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},  # Ethereum DEX
+    # DeFi Yield
+    "PENDLE":       {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},  # Pendle AMM
+    "MORPHO":       {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},  # daily redemption
+    "sUSDe":        {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 3},  # deep DEX pools
+    # Institutional RWA
+    "AAVE-HORIZON": {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
+    "ONDO":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "PLUME":        {"redemption_days": 7,   "has_secondary": True,  "secondary_depth": 1},
+    "ACRED":        {"redemption_days": 30,  "has_secondary": False, "secondary_depth": 0},
+    # PayFi / Stablecoin Yield
+    "cpUSD":        {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
+    "USDf":         {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 1},
+    "AUSD":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
 }
 
 # Default liquidity by category
@@ -3248,6 +3582,9 @@ _CATEGORY_LIQUIDITY_DEFAULT: dict = {
     "Infrastructure":        {"redemption_days": 365, "has_secondary": False, "secondary_depth": 0},
     "Insurance":             {"redemption_days": 90,  "has_secondary": False, "secondary_depth": 0},
     "Trade Finance":         {"redemption_days": 30,  "has_secondary": False, "secondary_depth": 0},
+    "Liquid Staking":        {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    "DeFi Yield":            {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    "PayFi":                 {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
 }
 
 def get_asset_liquidity_meta(asset_id: str, category: str = "") -> dict:

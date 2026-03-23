@@ -693,7 +693,7 @@ with tab_portfolio:
         st.session_state["show_mc"] = True
 
     if st.session_state.get("show_mc"):
-        with st.spinner("Simulating 10,000 portfolio paths..."):
+        with st.spinner("Simulating 10,000 portfolio paths...", show_time=True):
             from portfolio import run_monte_carlo
             mc = run_monte_carlo(portfolio)
 
@@ -1434,7 +1434,7 @@ with tab_compare:
     st.markdown('<div class="section-header">Efficient Frontier</div>', unsafe_allow_html=True)
     if not assets_df.empty:
         if st.button("📐 Compute Efficient Frontier", key="btn_frontier"):
-            with st.spinner("Computing efficient frontier..."):
+            with st.spinner("Computing efficient frontier...", show_time=True):
                 from portfolio import compute_efficient_frontier
                 ef = compute_efficient_frontier(assets_df.to_dict("records"))
 
@@ -1560,7 +1560,7 @@ with tab_ai:
     with ac4:
         if st.button("⚡ Run Now (1 cycle)", use_container_width=True, key="btn_one_cycle",
                      help="Execute one analysis cycle immediately — the agent reads live market data, calls Claude for a decision (HOLD/REBALANCE/DEPLOY/REDUCE), and logs the result. Great for testing without starting the full scheduler."):
-            with st.spinner(f"Running {agent_detail['name']} cycle..."):
+            with st.spinner(f"Running {agent_detail['name']} cycle...", show_time=True):
                 result = _agent.run_agent_cycle(selected_agent, dry_run=dry_run, cycle_number=0)
             st.success(f"Cycle complete: {result.get('claude_decision', 'UNKNOWN')}")
             st.rerun()
@@ -1601,7 +1601,7 @@ with tab_ai:
     # AI Insights
     st.markdown('<div class="section-header">AI Market Insights</div>', unsafe_allow_html=True)
     if st.button(f"🧠 Generate {agent_detail['name']} Insights", key="btn_insights"):
-        with st.spinner("Analyzing RWA market with Claude claude-sonnet-4-6..."):
+        with st.spinner("Analyzing RWA market with Claude claude-sonnet-4-6...", show_time=True):
             insights = _agent.get_agent_insights(selected_agent)
         st.markdown(f"""
         <div class="metric-card">
@@ -1655,7 +1655,7 @@ with tab_news:
     with nb1:
         if st.button("🔄 Refresh News", key="btn_news_refresh"):
             from data_feeds import refresh_news
-            with st.spinner("Fetching latest RWA news..."):
+            with st.spinner("Fetching latest RWA news...", show_time=True):
                 refresh_news()
             st.cache_data.clear()
             st.session_state["ai_news_brief"] = ""
@@ -1664,7 +1664,7 @@ with tab_news:
         if st.button("🧠 Generate AI Market Brief", key="btn_ai_brief",
                      help="Uses Claude to synthesize recent headlines into an actionable market brief"):
             from data_feeds import fetch_live_rss_news, get_ai_news_brief
-            with st.spinner("Generating AI market intelligence brief..."):
+            with st.spinner("Generating AI market intelligence brief...", show_time=True):
                 try:
                     live = fetch_live_rss_news()
                     news_df_tmp = _load_news()
@@ -2082,6 +2082,7 @@ st.markdown("""
         ♾️ RWA INFINITY MODEL v1.0 &nbsp;·&nbsp;
         Powered by Claude claude-sonnet-4-6 &nbsp;·&nbsp;
         Data: DeFiLlama · CoinGecko &nbsp;·&nbsp;
+        Protocols: Ondo · BlackRock · Pendle · Morpho · Ethena · EigenLayer · Lido · Jito · Lombard · Aave Horizon · Plume · Apollo · Clearpool · Falcon · Agora &nbsp;·&nbsp;
         ⚠️ For informational purposes only — not financial advice &nbsp;·&nbsp;
         Auto-refresh: every 60 minutes
     </span>
