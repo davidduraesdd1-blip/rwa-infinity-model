@@ -404,6 +404,7 @@ def calibrate_alert_thresholds() -> dict:
     """
     import database as db
 
+    conn = None
     try:
         conn = db._get_conn()
         rows = conn.execute(
@@ -419,7 +420,8 @@ def calibrate_alert_thresholds() -> dict:
         logger.warning(f"Calibration DB read failed: {e}")
         return {"calibrated": False, "reason": str(e), "samples": 0}
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     # Extract yield expectations from notes JSON or numeric fields
     accurate_yields = []
