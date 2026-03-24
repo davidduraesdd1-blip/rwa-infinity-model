@@ -1958,3 +1958,289 @@ def get_macro_regime() -> dict:
             "bias": "MODERATE", "signals": {},
             "description": "Regime classifier unavailable — using neutral defaults.",
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TIER 2 — ON-CHAIN SIGNALS + MULTI-TIMEFRAME SCREENER  (Upgrades 6, 7, 8)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BINANCE_FUTURES_BASE = "https://fapi.binance.com/fapi/v1"
+
+_SCREENER_SYMBOLS: List[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+_SCREENER_LABELS: Dict[str, str] = {
+    "BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum",
+    "SOLUSDT": "Solana",  "XRPUSDT": "XRP",
+}
+
+# Per-function TTL caches (avoids polluting the shared _cache dict)
+_funding_cache: Dict[str, Any] = {}
+_oi_cache: Dict[str, Any] = {}
+_ohlcv_cache: Dict[str, Any] = {}
+_screener_cache: Dict[str, Any] = {}
+_screener_lock = threading.Lock()
+
+
+def fetch_binance_funding_rates(symbols: Optional[List[str]] = None) -> Dict[str, float]:
+    """Return latest perpetual funding rate (%) per symbol from Binance.
+
+    Upgrade 7 — uses fapi.binance.com/premiumIndex, no auth required. TTL 5 min.
+    """
+    if symbols is None:
+        symbols = _SCREENER_SYMBOLS
+    cache_key = ",".join(sorted(symbols))
+    now = time.time()
+    cached = _funding_cache.get(cache_key)
+    if cached and now - cached[1] < 300:
+        return cached[0]
+
+    result: Dict[str, float] = {}
+    for sym in symbols:
+        try:
+            url  = f"{_BINANCE_FUTURES_BASE}/premiumIndex?symbol={sym}"
+            data = _get(url)
+            if isinstance(data, dict) and "lastFundingRate" in data:
+                result[sym] = float(data["lastFundingRate"]) * 100  # fraction → %
+        except Exception as e:
+            logger.warning("[FundingRates] %s: %s", sym, e)
+
+    _funding_cache[cache_key] = (result, now)
+    return result
+
+
+def fetch_binance_open_interest(symbols: Optional[List[str]] = None) -> Dict[str, float]:
+    """Return current open interest (coin units) per symbol from Binance futures.
+
+    Upgrade 7 — uses fapi.binance.com/openInterest, no auth required. TTL 5 min.
+    Multiply by price to get USD notional.
+    """
+    if symbols is None:
+        symbols = _SCREENER_SYMBOLS
+    cache_key = ",".join(sorted(symbols))
+    now = time.time()
+    cached = _oi_cache.get(cache_key)
+    if cached and now - cached[1] < 300:
+        return cached[0]
+
+    result: Dict[str, float] = {}
+    for sym in symbols:
+        try:
+            url  = f"{_BINANCE_FUTURES_BASE}/openInterest?symbol={sym}"
+            data = _get(url)
+            if isinstance(data, dict) and "openInterest" in data:
+                result[sym] = float(data["openInterest"])
+        except Exception as e:
+            logger.warning("[OpenInterest] %s: %s", sym, e)
+
+    _oi_cache[cache_key] = (result, now)
+    return result
+
+
+def fetch_binance_ohlcv(symbol: str, interval: str, limit: int = 200) -> List[dict]:
+    """Return OHLCV bars from Binance spot klines endpoint.
+
+    interval: '1h', '4h', '1d', '1w'.
+    TTL: 1 h for daily/weekly bars; 5 min for intraday.
+    Upgrade 6 + 8.
+    """
+    cache_key = f"{symbol}_{interval}_{limit}"
+    now = time.time()
+    ttl = 3600 if interval in ("1d", "1w") else 300
+    cached = _ohlcv_cache.get(cache_key)
+    if cached and now - cached[1] < ttl:
+        return cached[0]
+
+    bars: List[dict] = []
+    try:
+        url = f"{BINANCE_BASE}/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        raw = _get(url)
+        if isinstance(raw, list):
+            for b in raw:
+                bars.append({
+                    "t": int(b[0]),     # open-time ms
+                    "o": float(b[1]),
+                    "h": float(b[2]),
+                    "l": float(b[3]),
+                    "c": float(b[4]),
+                    "v": float(b[5]),
+                })
+    except Exception as e:
+        logger.warning("[OHLCV] %s/%s: %s", symbol, interval, e)
+
+    _ohlcv_cache[cache_key] = (bars, now)
+    return bars
+
+
+def compute_rsi(closes: List[float], period: int = 14) -> float:
+    """Compute Wilder RSI for a list of closing prices.
+
+    Returns value 0–100, or 50.0 when there is insufficient data.
+    Upgrade 6 + 8.
+    """
+    if len(closes) < period + 1:
+        return 50.0
+    recent = closes[-(period + 1):]
+    gains  = [max(0.0, recent[i] - recent[i - 1]) for i in range(1, len(recent))]
+    losses = [max(0.0, recent[i - 1] - recent[i]) for i in range(1, len(recent))]
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def compute_screener_signals(symbol: str) -> Dict[str, Any]:
+    """Compute multi-timeframe signals + on-chain data for a single Binance symbol.
+
+    Returns a dict with: price, 24h change, RSI-14, EMA 20/50/200 stack,
+    volume anomaly, 30D BTC correlation, funding rate, open interest (USD),
+    per-TF confidence scores and weighted MTF confidence, overall signal.
+
+    Weights — Crypto: 1H 10% · 4H 20% · 1D 35% · 1W 35%.
+    TTL: 5 min.  Upgrade 6 + 8.
+    """
+    with _screener_lock:
+        cached = _screener_cache.get(symbol)
+        if cached and time.time() - cached[1] < 300:
+            return cached[0]
+
+    result: Dict[str, Any] = {
+        "symbol": symbol,
+        "label":  _SCREENER_LABELS.get(symbol, symbol),
+        "price": None, "change_24h_pct": None,
+        "rsi_14": None,
+        "ema20": None, "ema50": None, "ema200": None, "ema_stack": "UNKNOWN",
+        "volume_anomaly": None,
+        "btc_corr_30d": None,
+        "funding_rate_pct": None,
+        "open_interest_usd": None,
+        "mtf_confidence": None,
+        "mtf_breakdown": {},
+        "signal": "HOLD",
+        "error": None,
+    }
+
+    try:
+        # ── Fetch OHLCV across all timeframes ─────────────────────────────────
+        bars_1h = fetch_binance_ohlcv(symbol, "1h",   60)
+        bars_4h = fetch_binance_ohlcv(symbol, "4h",   60)
+        bars_1d = fetch_binance_ohlcv(symbol, "1d",  220)
+        bars_1w = fetch_binance_ohlcv(symbol, "1w",   60)
+
+        # ── Price + 24h change (from daily bars) ──────────────────────────────
+        if len(bars_1d) >= 2:
+            result["price"]          = bars_1d[-1]["c"]
+            result["change_24h_pct"] = (bars_1d[-1]["c"] / bars_1d[-2]["c"] - 1.0) * 100.0
+
+        # ── EMA helper (standard EMA, no pandas dependency) ───────────────────
+        def _ema(closes: List[float], period: int) -> float:
+            if len(closes) < period:
+                return closes[-1] if closes else 0.0
+            k   = 2.0 / (period + 1)
+            val = sum(closes[:period]) / period
+            for c in closes[period:]:
+                val = c * k + val * (1.0 - k)
+            return val
+
+        # ── Daily indicators: EMA 20/50/200, RSI-14, volume anomaly ──────────
+        if bars_1d:
+            closes_1d = [b["c"] for b in bars_1d]
+            vols_1d   = [b["v"] for b in bars_1d]
+            result["rsi_14"] = compute_rsi(closes_1d, 14)
+            result["ema20"]  = _ema(closes_1d, 20)
+            result["ema50"]  = _ema(closes_1d, 50)
+            result["ema200"] = _ema(closes_1d, 200)
+            price = closes_1d[-1]
+            e20, e50, e200 = result["ema20"], result["ema50"], result["ema200"]
+            if price > e20 > e50 > e200:
+                result["ema_stack"] = "BULLISH"
+            elif price < e20 < e50 < e200:
+                result["ema_stack"] = "BEARISH"
+            else:
+                result["ema_stack"] = "MIXED"
+            # Volume anomaly: latest bar vs 20-bar rolling average
+            if len(vols_1d) >= 21:
+                avg_vol = sum(vols_1d[-21:-1]) / 20
+                result["volume_anomaly"] = vols_1d[-1] / avg_vol if avg_vol > 0 else 1.0
+
+        # ── BTC 30-day return correlation ─────────────────────────────────────
+        if symbol == "BTCUSDT":
+            result["btc_corr_30d"] = 1.0
+        else:
+            btc_bars = fetch_binance_ohlcv("BTCUSDT", "1d", 35)
+            if len(btc_bars) >= 31 and len(bars_1d) >= 31:
+                sym_rets = [
+                    bars_1d[-(31 - i)]["c"] / bars_1d[-(32 - i)]["c"] - 1.0
+                    for i in range(30)
+                ]
+                btc_rets = [
+                    btc_bars[-(31 - i)]["c"] / btc_bars[-(32 - i)]["c"] - 1.0
+                    for i in range(30)
+                ]
+                n      = len(sym_rets)
+                mean_s = sum(sym_rets) / n
+                mean_b = sum(btc_rets) / n
+                cov    = sum((sym_rets[i] - mean_s) * (btc_rets[i] - mean_b) for i in range(n))
+                std_s  = sum((r - mean_s) ** 2 for r in sym_rets) ** 0.5
+                std_b  = sum((r - mean_b) ** 2 for r in btc_rets) ** 0.5
+                if std_s > 0 and std_b > 0:
+                    result["btc_corr_30d"] = round(cov / (std_s * std_b), 3)
+
+        # ── Funding rate + open interest (USD notional) ───────────────────────
+        funding = fetch_binance_funding_rates([symbol])
+        oi_raw  = fetch_binance_open_interest([symbol])
+        result["funding_rate_pct"] = funding.get(symbol)
+        # Convert OI coin units → USD using latest price
+        oi_coins = oi_raw.get(symbol)
+        if oi_coins is not None and result["price"]:
+            result["open_interest_usd"] = oi_coins * result["price"]
+
+        # ── Per-TF confidence score (0–1) ─────────────────────────────────────
+        def _tf_score(bars: List[dict], ema_fast: int, ema_slow: int) -> float:
+            """Score 0–1 based on RSI position + EMA trend alignment."""
+            if len(bars) < max(ema_slow, 15):
+                return 0.5
+            closes = [b["c"] for b in bars]
+            rsi    = compute_rsi(closes, 14)
+            ef     = _ema(closes, ema_fast)
+            es     = _ema(closes, ema_slow)
+            price  = closes[-1]
+            # RSI component: linear 0→1 from RSI 30→70
+            rsi_score = max(0.0, min(1.0, (rsi - 30.0) / 40.0))
+            # EMA trend component
+            if price > ef > es:
+                ema_score = 1.0
+            elif price > es:
+                ema_score = 0.6
+            elif price > ef:
+                ema_score = 0.5
+            else:
+                ema_score = 0.0
+            return (rsi_score + ema_score) / 2.0
+
+        TF_WEIGHTS = {"1H": 0.10, "4H": 0.20, "1D": 0.35, "1W": 0.35}
+        tf_scores = {
+            "1H": _tf_score(bars_1h, 20,  50),
+            "4H": _tf_score(bars_4h, 20,  50),
+            "1D": _tf_score(bars_1d, 50, 200),
+            "1W": _tf_score(bars_1w, 20,  50),
+        }
+        mtf = sum(tf_scores[tf] * TF_WEIGHTS[tf] for tf in TF_WEIGHTS)
+        result["mtf_breakdown"]  = {k: round(v, 3) for k, v in tf_scores.items()}
+        result["mtf_confidence"] = round(mtf, 3)
+
+        # ── Overall signal ────────────────────────────────────────────────────
+        if mtf >= 0.65:
+            result["signal"] = "BUY"
+        elif mtf <= 0.35:
+            result["signal"] = "SELL"
+        else:
+            result["signal"] = "HOLD"
+
+    except Exception as e:
+        logger.warning("[ScreenerSignals] %s: %s", symbol, e)
+        result["error"] = str(e)
+
+    with _screener_lock:
+        _screener_cache[symbol] = (result, time.time())
+    return result

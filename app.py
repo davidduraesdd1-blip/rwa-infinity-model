@@ -571,7 +571,7 @@ tier_cfg      = PORTFOLIO_TIERS[selected_tier]
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg = st.tabs([
+tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
     "⚡ Arbitrage",
@@ -581,6 +581,7 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
     "📰 News Feed",
     "📋 Trade Log",
     "🏛️ Regulatory",
+    "🔍 Screener",
 ])
 
 
@@ -2146,6 +2147,156 @@ with tab_reg:
     )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 10: CRYPTO SCREENER  (Upgrade 8)
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_screener:
+    from data_feeds import compute_screener_signals
+
+    _SCR_SYMS  = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+    _SCR_NAMES = {"BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana", "XRPUSDT": "XRP"}
+    _SCR_ICONS = {"BTCUSDT": "₿", "ETHUSDT": "Ξ", "SOLUSDT": "◎", "XRPUSDT": "✕"}
+
+    st.markdown("### 🔍 Crypto Screener")
+    st.markdown(
+        "<p style='color:#6B7280;font-size:13px;margin-top:-8px'>"
+        "Multi-timeframe signals for BTC · ETH · SOL · XRP — "
+        "RSI · EMA stack · Volume anomaly · Funding rate · Open interest · MTF confidence"
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    _scr_refresh = st.button("⟳ Refresh Screener", key="btn_scr_refresh")
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _load_screener_signals():
+        return {sym: compute_screener_signals(sym) for sym in _SCR_SYMS}
+
+    if _scr_refresh:
+        _load_screener_signals.clear()
+
+    with st.spinner("Fetching Binance data…"):
+        sig_data = _load_screener_signals()
+
+    # ── Signal cards ─────────────────────────────────────────────────────────
+    cols = st.columns(4)
+    for idx, sym in enumerate(_SCR_SYMS):
+        s = sig_data.get(sym, {})
+        with cols[idx]:
+            signal    = s.get("signal", "HOLD")
+            sig_color = {"BUY": "#34D399", "SELL": "#EF4444", "HOLD": "#FBBF24"}.get(signal, "#9CA3AF")
+            sig_bg    = {"BUY": "#064E3B", "SELL": "#7F1D1D", "HOLD": "#78350F"}.get(signal, "#1F2937")
+
+            price     = s.get("price") or 0.0
+            chg       = s.get("change_24h_pct")
+            chg_str   = f"{chg:+.2f}%" if chg is not None else "—"
+            chg_color = "#34D399" if (chg or 0) >= 0 else "#EF4444"
+
+            rsi       = s.get("rsi_14")
+            rsi_str   = f"{rsi:.1f}" if rsi is not None else "—"
+            rsi_color = ("#EF4444" if (rsi or 50) >= 70
+                         else "#34D399" if (rsi or 50) <= 30 else "#E2E8F0")
+
+            stack       = s.get("ema_stack", "UNKNOWN")
+            stack_color = {"BULLISH": "#34D399", "BEARISH": "#EF4444", "MIXED": "#FBBF24"}.get(stack, "#9CA3AF")
+
+            vol_anom  = s.get("volume_anomaly")
+            vol_str   = f"{vol_anom:.2f}×" if vol_anom is not None else "—"
+            vol_color = "#FBBF24" if (vol_anom or 1.0) >= 1.5 else "#9CA3AF"
+
+            fr        = s.get("funding_rate_pct")
+            fr_str    = f"{fr:+.4f}%" if fr is not None else "—"
+            fr_color  = ("#EF4444" if (fr or 0) > 0.05
+                         else "#34D399" if (fr or 0) < -0.01 else "#9CA3AF")
+
+            oi_usd    = s.get("open_interest_usd")
+            oi_str    = f"${oi_usd / 1e9:.2f}B" if oi_usd is not None else "—"
+
+            corr      = s.get("btc_corr_30d")
+            corr_str  = f"{corr:.2f}" if corr is not None else "—"
+
+            mtf       = s.get("mtf_confidence")
+            mtf_str   = f"{mtf * 100:.1f}%" if mtf is not None else "—"
+            mtf_color = ("#34D399" if (mtf or 0) >= 0.65
+                         else "#EF4444" if (mtf or 0) <= 0.35 else "#FBBF24")
+
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1F2937;border-top:3px solid {sig_color};
+            border-radius:10px;padding:16px;margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-size:18px;font-weight:700;color:#E2E8F0">
+      {_SCR_ICONS[sym]}&nbsp;{_SCR_NAMES[sym]}
+    </span>
+    <span style="background:{sig_bg};color:{sig_color};font-size:11px;font-weight:700;
+                 padding:3px 10px;border-radius:6px">{signal}</span>
+  </div>
+  <div style="font-size:22px;font-weight:700;color:#E2E8F0">${price:,.2f}</div>
+  <div style="font-size:13px;color:{chg_color};margin-bottom:12px">{chg_str} (24 h)</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">RSI (14)</td>
+      <td style="color:{rsi_color};text-align:right;font-weight:600">{rsi_str}</td>
+    </tr>
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">EMA Stack</td>
+      <td style="color:{stack_color};text-align:right;font-weight:600">{stack}</td>
+    </tr>
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">Volume</td>
+      <td style="color:{vol_color};text-align:right">{vol_str} vs avg</td>
+    </tr>
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">Funding Rate</td>
+      <td style="color:{fr_color};text-align:right">{fr_str}</td>
+    </tr>
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">Open Interest</td>
+      <td style="color:#9CA3AF;text-align:right">{oi_str}</td>
+    </tr>
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">BTC Corr (30 D)</td>
+      <td style="color:#9CA3AF;text-align:right">{corr_str}</td>
+    </tr>
+    <tr style="border-top:1px solid #1F2937">
+      <td style="color:#6B7280;padding:5px 0 3px"><b>MTF Confidence</b></td>
+      <td style="color:{mtf_color};text-align:right;font-weight:700;font-size:14px">{mtf_str}</td>
+    </tr>
+  </table>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── MTF breakdown table ───────────────────────────────────────────────────
+    st.markdown("#### Timeframe Breakdown")
+    tf_rows = []
+    for sym in _SCR_SYMS:
+        s  = sig_data.get(sym, {})
+        bd = s.get("mtf_breakdown", {})
+        row = {"Asset": _SCR_NAMES[sym]}
+        for tf in ("1H", "4H", "1D", "1W"):
+            v = bd.get(tf)
+            row[tf] = f"{v * 100:.1f}%" if v is not None else "—"
+        mtf = s.get("mtf_confidence")
+        row["MTF Score"] = f"{mtf * 100:.1f}%" if mtf is not None else "—"
+        row["Signal"]    = s.get("signal", "HOLD")
+        tf_rows.append(row)
+
+    st.dataframe(
+        pd.DataFrame(tf_rows).set_index("Asset"),
+        use_container_width=True,
+    )
+
+    st.markdown(
+        "<p style='color:#4B5563;font-size:11px;margin-top:8px'>"
+        "Weights: 1H 10% · 4H 20% · 1D 35% · 1W 35%. "
+        "Score ≥ 65% → BUY · ≤ 35% → SELL · else HOLD. "
+        "Data: Binance spot + perpetuals. Refreshes every 5 min. "
+        "Not financial advice."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FOOTER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2163,8 +2314,15 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Auto-rerun for live status updates ───────────────────────────────────────
-# Only rerun while scan is running (to show progress)
-if is_running or scan_status.get("running", 0):
-    time.sleep(3)
-    st.rerun()
+# ─── Live scan progress fragment (Upgrade 9) ─────────────────────────────────
+# @st.fragment(run_every=3) polls only this fragment every 3 s while a scan is
+# running, avoiding costly full-page reruns.
+@st.fragment(run_every=3)
+def _scan_live_progress():
+    status = _db.read_scan_status()
+    if status.get("running", 0):
+        pct  = status.get("progress_pct", 0)
+        task = (status.get("current_task") or "Processing…")[:50]
+        st.progress(pct / 100, text=f"⚡ Scan in progress — {pct}%  ·  {task}")
+
+_scan_live_progress()
