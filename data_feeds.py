@@ -2307,20 +2307,9 @@ def fetch_xrpl_rlusd_orderbook() -> Dict[str, Any]:
         client = JsonRpcClient(XRPL_NODE_URL)
         rlusd  = IssuedCurrency(currency="RLUSD", issuer=XRPL_RLUSD_ISSUER)
 
-        def _parse_offer_bid(offer: dict) -> Optional[dict]:
-            """taker_gets=RLUSD, taker_pays=XRP  → buyer offering XRP for RLUSD."""
-            try:
-                xrp_drops = float(offer.get("TakerPays", 0))
-                rlusd_amt = float((offer.get("TakerGets") or {}).get("value", 0))
-                if rlusd_amt <= 0:
-                    return None
-                return {"xrp_per_rlusd": round(xrp_drops / 1_000_000 / rlusd_amt, 6),
-                        "rlusd_amount":  round(rlusd_amt, 4)}
-            except Exception:
-                return None
-
-        def _parse_offer_ask(offer: dict) -> Optional[dict]:
-            """taker_gets=XRP, taker_pays=RLUSD  → seller of RLUSD, receiving XRP."""
+        def _parse_bid(offer: dict) -> Optional[dict]:
+            """BID side: maker has XRP (TakerGets=XRP drops), wants RLUSD (TakerPays).
+            BookOffers(taker_gets=XRP, taker_pays=RLUSD) returns these."""
             try:
                 xrp_drops = float(offer.get("TakerGets", 0))
                 rlusd_amt = float((offer.get("TakerPays") or {}).get("value", 0))
@@ -2331,22 +2320,35 @@ def fetch_xrpl_rlusd_orderbook() -> Dict[str, Any]:
             except Exception:
                 return None
 
-        # ── Bids (taker_gets=RLUSD, taker_pays=XRP) ───────────────────────────
+        def _parse_ask(offer: dict) -> Optional[dict]:
+            """ASK side: maker has RLUSD (TakerGets), wants XRP drops (TakerPays).
+            BookOffers(taker_gets=RLUSD, taker_pays=XRP) returns these."""
+            try:
+                rlusd_amt = float((offer.get("TakerGets") or {}).get("value", 0))
+                xrp_drops = float(offer.get("TakerPays", 0))
+                if rlusd_amt <= 0:
+                    return None
+                return {"xrp_per_rlusd": round(xrp_drops / 1_000_000 / rlusd_amt, 6),
+                        "rlusd_amount":  round(rlusd_amt, 4)}
+            except Exception:
+                return None
+
+        # ── Bids: buyers of RLUSD offering XRP (taker_gets=XRP, taker_pays=RLUSD)
         bid_resp = client.request(BookOffers(
-            taker_gets=rlusd, taker_pays=_XRP(), limit=5
+            taker_gets=_XRP(), taker_pays=rlusd, limit=5
         ))
         raw_bids = (bid_resp.result or {}).get("offers", [])
-        bids = [p for o in raw_bids if (p := _parse_offer_bid(o)) is not None]
+        bids = [p for o in raw_bids if (p := _parse_bid(o)) is not None]
         if bids:
             result["best_bid_xrp"] = bids[0]["xrp_per_rlusd"]
             result["bids"] = bids
 
-        # ── Asks (taker_gets=XRP, taker_pays=RLUSD) ───────────────────────────
+        # ── Asks: sellers of RLUSD wanting XRP (taker_gets=RLUSD, taker_pays=XRP)
         ask_resp = client.request(BookOffers(
-            taker_gets=_XRP(), taker_pays=rlusd, limit=5
+            taker_gets=rlusd, taker_pays=_XRP(), limit=5
         ))
         raw_asks = (ask_resp.result or {}).get("offers", [])
-        asks = [p for o in raw_asks if (p := _parse_offer_ask(o)) is not None]
+        asks = [p for o in raw_asks if (p := _parse_ask(o)) is not None]
         if asks:
             result["best_ask_xrp"] = asks[0]["xrp_per_rlusd"]
             result["asks"] = asks
