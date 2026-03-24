@@ -1703,6 +1703,111 @@ with tab_ai:
     else:
         st.info("No agent decisions yet. Start an agent or run a manual cycle above.")
 
+    # ── XRPL Intelligence + Tier 3 Status (Upgrades 10, 11, 12) ─────────────────
+    st.markdown('<div class="section-header">XRPL Intelligence</div>', unsafe_allow_html=True)
+
+    with st.expander("🔗 XRPL · RLUSD · Soil Protocol · XLS-81", expanded=False):
+        from data_feeds import fetch_xrpl_stats
+
+        @st.cache_data(ttl=120, show_spinner=False)
+        def _load_xrpl_stats():
+            return fetch_xrpl_stats()
+
+        if st.button("⟳ Refresh XRPL", key="btn_xrpl_refresh"):
+            _load_xrpl_stats.clear()
+
+        with st.spinner("Fetching XRPL data…"):
+            xrpl_d = _load_xrpl_stats()
+
+        rlusd_d = xrpl_d.get("rlusd", {})
+        bid     = rlusd_d.get("best_bid_xrp")
+        ask     = rlusd_d.get("best_ask_xrp")
+        spread  = rlusd_d.get("spread_pct")
+        ob_err  = rlusd_d.get("orderbook_error")
+
+        xc1, xc2, xc3, xc4 = st.columns(4)
+        with xc1:
+            st.metric("RLUSD Circulating", f"${rlusd_d.get('circulating_bn', 1.5):.1f}B")
+        with xc2:
+            st.metric("Best Bid (XRP)", f"{bid:.6f}" if bid else "—")
+        with xc3:
+            st.metric("Best Ask (XRP)", f"{ask:.6f}" if ask else "—")
+        with xc4:
+            st.metric("DEX Spread", f"{spread:.4f}%" if spread else "—")
+
+        if ob_err:
+            st.caption(f"Orderbook: {ob_err}")
+
+        xrpl_rva, xrpl_rvb = st.columns(2)
+        with xrpl_rva:
+            st.markdown("**📊 RLUSD/XRP Bids (top 5)**")
+            bids = rlusd_d.get("bids", [])
+            if bids:
+                st.dataframe(pd.DataFrame(bids), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No bids available" if not ob_err else f"Error: {ob_err}")
+        with xrpl_rvb:
+            st.markdown("**📊 RLUSD/XRP Asks (top 5)**")
+            asks = rlusd_d.get("asks", [])
+            if asks:
+                st.dataframe(pd.DataFrame(asks), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No asks available" if not ob_err else f"Error: {ob_err}")
+
+        st.markdown("**🌱 Soil Protocol — RLUSD Yield Vaults (XRPL)**")
+        vaults = xrpl_d.get("soil_vaults", [])
+        if vaults:
+            vault_df = pd.DataFrame(vaults)
+            st.dataframe(vault_df, use_container_width=True, hide_index=True)
+
+        xls = xrpl_d.get("xls81", {})
+        tvl = xrpl_d.get("xrpl_rwa_tvl_bn", 2.3)
+        st.markdown(
+            f"**XLS-81 Permissioned DEX:** `{xls.get('status', '—')}` — "
+            f"activated {xls.get('activated', '—')} &nbsp;·&nbsp; "
+            f"**Total XRPL RWA TVL:** ${tvl:.1f}B",
+            unsafe_allow_html=False,
+        )
+
+    # ── Coinbase AgentKit status (Upgrade 11) ─────────────────────────────────
+    with st.expander("🤖 Coinbase AgentKit — On-Chain Execution", expanded=False):
+        ak_status = _agent.get_agentkit_status()
+        if ak_status["available"]:
+            st.success(
+                f"✅ AgentKit ready — wallet `{ak_status.get('address', '?')}` "
+                f"on **{ak_status.get('network', '?')}**"
+            )
+            st.caption(
+                "AgentKit executes approved trades on Base mainnet when Dry Run is OFF. "
+                "Supports USDC transfers, Aave/Morpho/Compound, and Pyth price feeds."
+            )
+        else:
+            st.info(
+                f"AgentKit inactive — {ak_status['reason']}. "
+                "Set RWA_CDP_API_KEY_ID, RWA_CDP_API_KEY_SECRET, RWA_CDP_WALLET_SECRET "
+                "to enable on-chain execution."
+            )
+
+    # ── x402 micropayment rail status (Upgrade 10) ────────────────────────────
+    with st.expander("⚡ x402 Micropayment Rail", expanded=False):
+        try:
+            import x402  # noqa: F401
+            x402_available = True
+        except ImportError:
+            x402_available = False
+
+        if x402_available:
+            st.success(
+                "✅ x402 payment protocol available — "
+                "HTTP 402 data services can be accessed via USDC micropayments."
+            )
+            st.caption(
+                f"T54 XRPL facilitator: `https://xrpl-facilitator-mainnet.t54.ai` "
+                "(RLUSD/XRP settlement). Coinbase facilitator: Base + Polygon + Solana."
+            )
+        else:
+            st.info("x402 not installed — run `pip install x402` to enable micropayment rail.")
+
     # Performance feedback loop
     st.markdown('<div class="section-header">AI Feedback Loop</div>', unsafe_allow_html=True)
     perf_df = _db.get_agent_performance()

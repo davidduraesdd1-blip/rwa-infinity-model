@@ -27,6 +27,7 @@ from config import (
     BINANCE_API_KEY, BINANCE_API_SECRET,
     DUNE_API_KEY,
     SANTIMENT_API_KEY, FRED_API_KEY,
+    XRPL_NODE_URL, XRPL_RLUSD_ISSUER,
     get_asset_fee_bps,
 )
 
@@ -2244,3 +2245,174 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
     with _screener_lock:
         _screener_cache[symbol] = (result, time.time())
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TIER 3 — XRPL / RLUSD / SOIL PROTOCOL  (Upgrade 12)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_xrpl_cache: Dict[str, Any] = {}
+_XRPL_TTL = 120   # 2-minute cache for orderbook data (XRPL ledger closes ~3-4 s)
+
+# Soil Protocol vaults — rates from official docs (no public API as of March 2026)
+_SOIL_VAULTS: List[Dict[str, Any]] = [
+    {
+        "name":     "Liquid Vault",
+        "token":    "RLUSD",
+        "apy_pct":  5.0,
+        "backing":  "T-Bills + Money Market Funds",
+        "risk":     "LOW",
+        "launched": "2026-02-19",
+    },
+    {
+        "name":     "Credit Vault",
+        "token":    "RLUSD",
+        "apy_pct":  7.0,
+        "backing":  "Private Credit",
+        "risk":     "MEDIUM",
+        "launched": "2026-02-19",
+    },
+]
+
+
+def fetch_xrpl_rlusd_orderbook() -> Dict[str, Any]:
+    """Fetch live RLUSD/XRP orderbook from the XRPL DEX via xrpl-py.
+
+    Returns best bid (XRP per RLUSD), best ask, spread %, and top-5 offers
+    on each side.  TTL 2 min.  Upgrade 12.
+
+    Requires: pip install xrpl-py>=4.0.0
+    Falls back gracefully if xrpl-py is not installed.
+    """
+    now = time.time()
+    cached = _xrpl_cache.get("rlusd_orderbook")
+    if cached and now - cached[1] < _XRPL_TTL:
+        return cached[0]
+
+    result: Dict[str, Any] = {
+        "best_bid_xrp":  None,
+        "best_ask_xrp":  None,
+        "spread_pct":    None,
+        "bids":          [],
+        "asks":          [],
+        "error":         None,
+        "timestamp":     datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        from xrpl.clients import JsonRpcClient
+        from xrpl.models.requests import BookOffers
+        from xrpl.models.currencies import XRP as _XRP, IssuedCurrency
+
+        client = JsonRpcClient(XRPL_NODE_URL)
+        rlusd  = IssuedCurrency(currency="RLUSD", issuer=XRPL_RLUSD_ISSUER)
+
+        def _parse_offer_bid(offer: dict) -> Optional[dict]:
+            """taker_gets=RLUSD, taker_pays=XRP  → buyer offering XRP for RLUSD."""
+            try:
+                xrp_drops = float(offer.get("TakerPays", 0))
+                rlusd_amt = float((offer.get("TakerGets") or {}).get("value", 0))
+                if rlusd_amt <= 0:
+                    return None
+                return {"xrp_per_rlusd": round(xrp_drops / 1_000_000 / rlusd_amt, 6),
+                        "rlusd_amount":  round(rlusd_amt, 4)}
+            except Exception:
+                return None
+
+        def _parse_offer_ask(offer: dict) -> Optional[dict]:
+            """taker_gets=XRP, taker_pays=RLUSD  → seller of RLUSD, receiving XRP."""
+            try:
+                xrp_drops = float(offer.get("TakerGets", 0))
+                rlusd_amt = float((offer.get("TakerPays") or {}).get("value", 0))
+                if rlusd_amt <= 0:
+                    return None
+                return {"xrp_per_rlusd": round(xrp_drops / 1_000_000 / rlusd_amt, 6),
+                        "rlusd_amount":  round(rlusd_amt, 4)}
+            except Exception:
+                return None
+
+        # ── Bids (taker_gets=RLUSD, taker_pays=XRP) ───────────────────────────
+        bid_resp = client.request(BookOffers(
+            taker_gets=rlusd, taker_pays=_XRP(), limit=5
+        ))
+        raw_bids = (bid_resp.result or {}).get("offers", [])
+        bids = [p for o in raw_bids if (p := _parse_offer_bid(o)) is not None]
+        if bids:
+            result["best_bid_xrp"] = bids[0]["xrp_per_rlusd"]
+            result["bids"] = bids
+
+        # ── Asks (taker_gets=XRP, taker_pays=RLUSD) ───────────────────────────
+        ask_resp = client.request(BookOffers(
+            taker_gets=_XRP(), taker_pays=rlusd, limit=5
+        ))
+        raw_asks = (ask_resp.result or {}).get("offers", [])
+        asks = [p for o in raw_asks if (p := _parse_offer_ask(o)) is not None]
+        if asks:
+            result["best_ask_xrp"] = asks[0]["xrp_per_rlusd"]
+            result["asks"] = asks
+
+        # ── Spread ─────────────────────────────────────────────────────────────
+        bid = result["best_bid_xrp"]
+        ask = result["best_ask_xrp"]
+        if bid and ask and bid > 0:
+            result["spread_pct"] = round((ask - bid) / bid * 100, 4)
+
+    except ImportError:
+        result["error"] = "xrpl-py not installed (pip install xrpl-py>=4.0.0)"
+        logger.info("[XRPL] xrpl-py not installed — skipping orderbook")
+    except Exception as e:
+        result["error"] = str(e)
+        logger.warning("[XRPL] Orderbook fetch failed: %s", e)
+
+    _xrpl_cache["rlusd_orderbook"] = (result, time.time())
+    return result
+
+
+def fetch_xrpl_soil_vaults() -> List[Dict[str, Any]]:
+    """Return Soil Protocol RLUSD yield vault data (XRPL).
+
+    Rates are from official Soil Finance documentation.
+    No public API exists as of March 2026.  Upgrade 12.
+    """
+    return _SOIL_VAULTS
+
+
+def fetch_xrpl_stats() -> Dict[str, Any]:
+    """Aggregate XRPL intelligence: RLUSD orderbook + Soil vault rates + XLS-81 status.
+
+    Used by the AI agent prompt (richer Claude context) and displayed in the AI Agent tab.
+    TTL 2 min.  Upgrade 12.
+    """
+    now = time.time()
+    cached = _xrpl_cache.get("xrpl_stats")
+    if cached and now - cached[1] < _XRPL_TTL:
+        return cached[0]
+
+    orderbook = fetch_xrpl_rlusd_orderbook()
+    vaults    = fetch_xrpl_soil_vaults()
+
+    stats: Dict[str, Any] = {
+        "rlusd": {
+            "circulating_bn":   1.5,   # $1.5B circulating as of March 2026
+            "best_bid_xrp":     orderbook.get("best_bid_xrp"),
+            "best_ask_xrp":     orderbook.get("best_ask_xrp"),
+            "spread_pct":       orderbook.get("spread_pct"),
+            "bids":             orderbook.get("bids", []),
+            "asks":             orderbook.get("asks", []),
+            "orderbook_error":  orderbook.get("error"),
+        },
+        "soil_vaults":  vaults,
+        "xls81": {
+            "status":      "ACTIVE",
+            "activated":   "2026-02-18",
+            "description": (
+                "Permissioned DEX on XRPL — KYC/AML-gated trading venues for "
+                "regulated institutions. Operates on native XRPL DEX mechanics."
+            ),
+        },
+        "xrpl_rwa_tvl_bn": 2.3,   # $2.3B total XRPL RWA TVL (grew 2200% in 2025)
+        "timestamp":       datetime.now(timezone.utc).isoformat(),
+    }
+
+    _xrpl_cache["xrpl_stats"] = (stats, time.time())
+    return stats

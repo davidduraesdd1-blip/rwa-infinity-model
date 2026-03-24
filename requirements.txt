@@ -12,3 +12,8 @@ aiohttp>=3.9.0
 httpx>=0.27.0
 openpyxl>=3.1.0
 reportlab>=4.0.0
+# ── Tier 3 optional integrations (graceful fallback if not installed) ─────────
+xrpl-py>=4.0.0                    # XRPL DEX + RLUSD orderbook (Upgrade 12)
+x402>=2.5.0                       # HTTP 402 micropayment rail (Upgrade 10)
+coinbase-agentkit>=0.7.0          # Coinbase AgentKit on-chain execution (Upgrade 11)
+coinbase-agentkit-langchain>=0.7.0  # LangGraph adapter for AgentKit (Upgrade 11)

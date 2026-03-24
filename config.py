@@ -46,6 +46,12 @@ BINANCE_API_KEY         = _os.environ.get("RWA_BINANCE_API_KEY")         # binan
 BINANCE_API_SECRET      = _os.environ.get("RWA_BINANCE_API_SECRET")
 COINBASE_API_KEY        = _os.environ.get("RWA_COINBASE_API_KEY")        # advanced trade API
 COINBASE_API_SECRET     = _os.environ.get("RWA_COINBASE_API_SECRET")
+
+# ── Coinbase Developer Platform — AgentKit / x402 (Tier 3) ───────────────────
+CDP_API_KEY_ID          = _os.environ.get("RWA_CDP_API_KEY_ID")         # CDP portal key ID
+CDP_API_KEY_SECRET      = _os.environ.get("RWA_CDP_API_KEY_SECRET")     # CDP portal key secret
+CDP_WALLET_SECRET       = _os.environ.get("RWA_CDP_WALLET_SECRET")      # AgentKit MPC wallet secret
+CDP_NETWORK_ID          = _os.environ.get("RWA_CDP_NETWORK_ID", "base-mainnet")  # target EVM network
 KRAKEN_API_KEY          = _os.environ.get("RWA_KRAKEN_API_KEY")
 KRAKEN_API_SECRET       = _os.environ.get("RWA_KRAKEN_API_SECRET")
 OKX_API_KEY             = _os.environ.get("RWA_OKX_API_KEY")
@@ -146,6 +152,11 @@ GATE_IO_BASE        = "https://api.gateio.ws/api/v4"
 COINMARKETCAP_BASE  = "https://pro-api.coinmarketcap.com/v1"
 
 # FRED (Federal Reserve — free with key, higher limits)
+# ── XRPL + T54 Labs (Tier 3) ─────────────────────────────────────────────────
+XRPL_NODE_URL           = "https://s1.ripple.com:51234"                 # public XRPL mainnet JSON-RPC
+XRPL_RLUSD_ISSUER       = "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De"         # Ripple RLUSD issuer (mainnet)
+X402_T54_FACILITATOR    = "https://xrpl-facilitator-mainnet.t54.ai"     # T54 XRPL x402 facilitator
+
 FRED_BASE           = "https://api.stlouisfed.org/fred"
 
 # Tiingo (requires key — stocks, ETFs, crypto prices)
