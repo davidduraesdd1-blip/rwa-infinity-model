@@ -2168,7 +2168,7 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
             result["btc_corr_30d"] = 1.0
         else:
             btc_bars = fetch_binance_ohlcv("BTCUSDT", "1d", 35)
-            if len(btc_bars) >= 31 and len(bars_1d) >= 31:
+            if len(btc_bars) >= 32 and len(bars_1d) >= 32:
                 sym_rets = [
                     bars_1d[-(31 - i)]["c"] / bars_1d[-(32 - i)]["c"] - 1.0
                     for i in range(30)
