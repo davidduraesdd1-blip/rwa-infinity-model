@@ -226,17 +226,61 @@ Current Portfolio (Tier {portfolio.get('tier')}: {_sanitize(portfolio.get('tier_
         for o in arb_opps[:3]
     ])
 
-    # Fetch live yield curve and social signals for richer AI context
+    # Fetch live macro intelligence for richer AI context
     yield_curve_text = ""
     social_text      = ""
+    fg_text          = ""
+    macro_text       = ""
+    regime_text      = ""
     try:
-        from data_feeds import fetch_treasury_yield_curve, fetch_social_signals, get_private_credit_warnings
+        from data_feeds import (
+            fetch_treasury_yield_curve, fetch_social_signals,
+            get_private_credit_warnings, fetch_fear_greed_index,
+            fetch_macro_indicators, fetch_stablecoin_supply, get_macro_regime,
+        )
+        # Yield curve
         curve = fetch_treasury_yield_curve()
         ylds  = curve.get("yields", {})
+        spread = round(ylds.get("10y", 4.25) - ylds.get("2y", 4.05), 3)
         yield_curve_text = (
             f"  3m: {ylds.get('3m', 'N/A')}%  |  1y: {ylds.get('1y', 'N/A')}%  |  "
-            f"2y: {ylds.get('2y', 'N/A')}%  |  10y: {ylds.get('10y', 'N/A')}%"
+            f"2y: {ylds.get('2y', 'N/A')}%  |  10y: {ylds.get('10y', 'N/A')}%  |  "
+            f"Spread 10y-2y: {spread:+.2f}%  ({'NORMAL' if spread >= 0 else 'INVERTED'})"
         )
+        # Fear & Greed
+        fg = fetch_fear_greed_index()
+        fg_val   = fg["current"]["value"]
+        fg_label = fg["current"]["label"]
+        fg_signal = fg["signal"]
+        # Build 7-day history summary
+        hist = fg.get("history", [])[:7]
+        hist_vals = [str(h["value"]) for h in hist]
+        fg_text = (
+            f"  Current: {fg_val}/100 ({fg_label}) → Signal: {fg_signal}\n"
+            f"  7-day history: {' → '.join(hist_vals)}\n"
+            f"  CONTEXT: Values ≤20 = Extreme Fear. Historical data shows +62% avg 90-day "
+            f"return when F&G < 20. Prolonged extreme fear (>30 days) has preceded every "
+            f"major crypto bull run since 2019."
+        )
+        # Macro indicators
+        macro = fetch_macro_indicators()
+        stable = fetch_stablecoin_supply()
+        macro_text = (
+            f"  M2 Money Supply: ${macro.get('m2_supply_bn', 0):,.0f}B\n"
+            f"  Fed Balance Sheet: ${macro.get('fed_balance_bn', 0):,.0f}B\n"
+            f"  WTI Crude Oil: ${macro.get('wti_crude', 0):.1f}/bbl\n"
+            f"  DXY (USD Index): {macro.get('dxy', 0):.1f}\n"
+            f"  Stablecoin Dry Powder: ${stable.get('total_bn', 0):.1f}B "
+            f"(USDT ${stable.get('usdt_bn', 0):.1f}B + USDC ${stable.get('usdc_bn', 0):.1f}B)"
+        )
+        # Macro regime
+        regime = get_macro_regime()
+        regime_text = (
+            f"  Regime: {regime['regime']} (confidence: {regime['confidence']*100:.0f}%)\n"
+            f"  Portfolio Bias: {regime['bias']}\n"
+            f"  {regime['description']}"
+        )
+        # Social signals
         signals = fetch_social_signals()
         if signals.get("source") == "santiment":
             top_signal = max(
@@ -280,10 +324,19 @@ TOP ARBITRAGE OPPORTUNITIES:
 US TREASURY YIELD CURVE (live):
 {yield_curve_text if yield_curve_text else "  Unavailable"}
 
+CRYPTO FEAR & GREED INDEX (live):
+{fg_text if fg_text else "  Unavailable"}
+
+MACRO INDICATORS (FRED live):
+{macro_text if macro_text else "  Unavailable"}
+
+MACRO REGIME CLASSIFICATION:
+{regime_text if regime_text else "  Unavailable"}
+
 MARKET INTELLIGENCE:
 {social_text if social_text else "  No social or credit warning signals available"}
 
-TASK: Analyze the above and provide EXACTLY ONE decision in JSON format:
+TASK: Analyze the above — especially the Fear & Greed context, macro regime, and yield curve — and provide EXACTLY ONE decision in JSON format:
 
 {{
   "decision": "REBALANCE" | "HOLD" | "DEPLOY" | "REDUCE",

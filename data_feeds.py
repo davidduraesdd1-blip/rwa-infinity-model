@@ -889,7 +889,7 @@ def get_total_rwa_tvl() -> float:
 
 
 def get_market_summary() -> dict:
-    """Return a high-level market summary dict."""
+    """Return a high-level market summary dict including macro intelligence."""
     protocols   = fetch_defillama_protocols()
     yield_pools = fetch_defillama_yields()
     total_tvl   = sum(p.get("tvl", 0) or 0 for p in protocols)
@@ -900,13 +900,30 @@ def get_market_summary() -> dict:
     )
     gold_price   = fetch_gold_price()
 
+    # New macro intelligence signals
+    fg           = fetch_fear_greed_index()
+    stable       = fetch_stablecoin_supply()
+    regime       = get_macro_regime()
+
     return {
-        "total_rwa_tvl_usd": total_tvl,
-        "active_pools":      active_pools,
-        "avg_rwa_yield_pct": round(avg_yield, 2),
-        "gold_price_usd":    gold_price,
-        "protocol_count":    len(protocols),
-        "last_updated":      datetime.now(timezone.utc).isoformat(),
+        "total_rwa_tvl_usd":     total_tvl,
+        "active_pools":          active_pools,
+        "avg_rwa_yield_pct":     round(avg_yield, 2),
+        "gold_price_usd":        gold_price,
+        "protocol_count":        len(protocols),
+        # Fear & Greed
+        "fear_greed_value":      fg["current"]["value"],
+        "fear_greed_label":      fg["current"]["label"],
+        "fear_greed_signal":     fg["signal"],
+        # Stablecoin dry powder
+        "stablecoin_total_bn":   stable["total_bn"],
+        "usdt_supply_bn":        stable["usdt_bn"],
+        "usdc_supply_bn":        stable["usdc_bn"],
+        # Macro regime
+        "macro_regime":          regime["regime"],
+        "macro_bias":            regime["bias"],
+        "macro_description":     regime["description"],
+        "last_updated":          datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -1596,3 +1613,348 @@ def fetch_lending_borrow_rates() -> List[dict]:
         return sorted(seen.values(), key=lambda x: x["borrow_apy"])
 
     return _cached_get("lending_borrow_rates", CACHE_TTL["yields"], _fetch) or _BORROW_RATE_FALLBACKS
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 8: FEAR & GREED INDEX
+# Alternative.me free API — no key required, 60 req/min, permanently free.
+# Historical note: Index at 8–11 for 46 days (March 2026) = longest extreme-fear
+# streak since FTX collapse (Nov 2022 cycle bottom before BTC $16K→$73K).
+# 90-day avg return when F&G < 20: +62% (crypto historical data).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fg_signal(value: int) -> str:
+    if value <= 20:
+        return "STRONG_BUY"
+    if value <= 40:
+        return "BUY"
+    if value <= 60:
+        return "NEUTRAL"
+    if value <= 80:
+        return "SELL"
+    return "STRONG_SELL"
+
+
+def fetch_fear_greed_index(limit: int = 30) -> dict:
+    """
+    Fetch the Crypto Fear & Greed Index from Alternative.me.
+    No API key required. Free tier: 60 req/min.
+
+    Returns:
+        {
+          "current":  {"value": int, "label": str, "date": str},
+          "history":  [{"value": int, "label": str, "date": str}, ...],
+          "signal":   "STRONG_BUY" | "BUY" | "NEUTRAL" | "SELL" | "STRONG_SELL",
+          "source":   "alternative.me" | "fallback",
+        }
+    """
+    def _fetch():
+        url = f"https://api.alternative.me/fng/?limit={limit}&format=json&date_format=us"
+        resp = _session.get(url, timeout=10)
+        if resp.status_code != 200:
+            return None
+        raw = resp.json()
+        if not raw or "data" not in raw:
+            return None
+
+        entries = []
+        for item in raw["data"]:
+            try:
+                val = int(item["value"])
+                entries.append({
+                    "value": val,
+                    "label": item.get("value_classification", ""),
+                    "date":  item.get("timestamp", ""),
+                })
+            except (ValueError, KeyError):
+                continue
+
+        if not entries:
+            return None
+
+        return {
+            "current": entries[0],
+            "history": entries,
+            "signal":  _fg_signal(entries[0]["value"]),
+            "source":  "alternative.me",
+        }
+
+    result = _cached_get("fear_greed_index", 900, _fetch)   # 15-min TTL
+    if result is None:
+        return {
+            "current": {"value": 50, "label": "Neutral", "date": ""},
+            "history": [],
+            "signal":  "NEUTRAL",
+            "source":  "fallback",
+        }
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 9: FRED MACRO INDICATORS
+# M2SL  — M2 money supply (billions USD)
+# WALCL — Fed balance sheet (millions → converted to billions)
+# DCOILWTICO — WTI crude oil spot price (USD/barrel)
+# DTWEXBGS   — DXY broad trade-weighted USD index
+# Uses same FRED API/CSV pattern as fetch_treasury_yield_curve().
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FRED_MACRO_SERIES = {
+    "m2_supply_bn":   "M2SL",
+    "fed_balance_bn": "WALCL",
+    "wti_crude":      "DCOILWTICO",
+    "dxy":            "DTWEXBGS",
+}
+
+_MACRO_FALLBACKS = {
+    "m2_supply_bn":   21_500.0,   # approx March 2026
+    "fed_balance_bn":  6_800.0,
+    "wti_crude":          67.5,
+    "dxy":               104.0,
+}
+
+
+def fetch_macro_indicators() -> dict:
+    """
+    Fetch key FRED macro series: M2, Fed balance sheet, WTI crude, DXY.
+
+    Returns:
+        {
+          "m2_supply_bn":   float,
+          "fed_balance_bn": float,
+          "wti_crude":      float,
+          "dxy":            float,
+          "source":         "FRED" | "fallback",
+          "timestamp":      ISO str,
+        }
+    """
+    def _fetch():
+        result: Dict[str, Any] = {}
+        for key, series_id in _FRED_MACRO_SERIES.items():
+            try:
+                if FRED_API_KEY:
+                    url = "https://api.stlouisfed.org/fred/series/observations"
+                    params = {
+                        "series_id":  series_id,
+                        "api_key":    FRED_API_KEY,
+                        "file_type":  "json",
+                        "sort_order": "desc",
+                        "limit":      5,
+                    }
+                    resp = _session.get(url, params=params, timeout=10)
+                    if resp.status_code == 200:
+                        for o in resp.json().get("observations", []):
+                            val = o.get("value", ".")
+                            if val != ".":
+                                v = float(val)
+                                if series_id == "WALCL":
+                                    v = v / 1000.0   # millions → billions
+                                result[key] = round(v, 2)
+                                break
+                else:
+                    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+                    resp = _session.get(url, timeout=10)
+                    if resp.status_code == 200:
+                        lines = resp.text.strip().split("\n")
+                        for line in reversed(lines[1:]):
+                            parts = line.split(",")
+                            if len(parts) == 2 and parts[1].strip() not in (".", ""):
+                                v = float(parts[1].strip())
+                                if series_id == "WALCL":
+                                    v = v / 1000.0
+                                result[key] = round(v, 2)
+                                break
+            except Exception as e:
+                logger.debug("[FRED Macro] %s failed: %s", series_id, e)
+
+        if len(result) < 2:
+            return None
+
+        for k, v in _MACRO_FALLBACKS.items():
+            result.setdefault(k, v)
+        result["source"] = "FRED"
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    cached = _cached_get("macro_indicators", CACHE_TTL["yields"], _fetch)
+    if cached is None:
+        fb = dict(_MACRO_FALLBACKS)
+        fb["source"] = "fallback"
+        fb["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return fb
+    return cached
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 10: STABLECOIN SUPPLY TRACKER
+# USDT + USDC market caps from CoinGecko (Pro key used if available).
+# Rising stablecoin supply = dry powder waiting to deploy = bullish signal.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STABLE_COIN_IDS = {"tether": "USDT", "usd-coin": "USDC"}
+
+
+def fetch_stablecoin_supply() -> dict:
+    """
+    Fetch USDT and USDC market caps from CoinGecko.
+
+    Returns:
+        {
+          "usdt_bn":   float,
+          "usdc_bn":   float,
+          "total_bn":  float,
+          "source":    "coingecko" | "fallback",
+          "timestamp": ISO str,
+        }
+    """
+    def _fetch():
+        url = f"{COINGECKO_BASE}/coins/markets"
+        params = {
+            "vs_currency": "usd",
+            "ids":         ",".join(_STABLE_COIN_IDS.keys()),
+            "per_page":    10,
+            "sparkline":   "false",
+        }
+        data = _get(url, params=params)
+        if not data or not isinstance(data, list):
+            return None
+        caps: Dict[str, float] = {}
+        for coin in data:
+            cid = coin.get("id", "")
+            mc  = coin.get("market_cap") or 0
+            if cid in _STABLE_COIN_IDS:
+                caps[_STABLE_COIN_IDS[cid]] = round(float(mc) / 1e9, 2)
+        if not caps:
+            return None
+        usdt = caps.get("USDT", 140.0)
+        usdc = caps.get("USDC", 58.0)
+        return {
+            "usdt_bn":   usdt,
+            "usdc_bn":   usdc,
+            "total_bn":  round(usdt + usdc, 2),
+            "source":    "coingecko",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    cached = _cached_get("stablecoin_supply", CACHE_TTL["prices"], _fetch)
+    if cached is None:
+        return {
+            "usdt_bn": 140.0, "usdc_bn": 58.0, "total_bn": 198.0,
+            "source": "fallback",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    return cached
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 11: MACRO REGIME CLASSIFIER
+# Combines F&G, FRED macro, and yield curve to output a named regime.
+# Regime drives Claude's portfolio bias and position sizing adjustments.
+#
+# Regimes:
+#   LIQUIDITY_CRUNCH — extreme fear + inverted curve + strong DXY
+#   STAGFLATION      — oil > $90 + strong DXY + M2 contracting
+#   RISK_OFF         — fear + inverted yield curve
+#   RISK_ON          — greed + normal curve + weak DXY
+#   NEUTRAL          — mixed/ambiguous signals
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_macro_regime() -> dict:
+    """
+    Classify the current macro regime from F&G + FRED + yield curve signals.
+
+    Returns:
+        {
+          "regime":      str,    # RISK_ON | RISK_OFF | STAGFLATION | LIQUIDITY_CRUNCH | NEUTRAL
+          "confidence":  float,  # 0.0–1.0
+          "bias":        str,    # AGGRESSIVE | MODERATE | DEFENSIVE | CASH
+          "signals":     dict,   # raw contributing values
+          "description": str,
+        }
+    """
+    try:
+        fg    = fetch_fear_greed_index()
+        macro = fetch_macro_indicators()
+        curve = fetch_treasury_yield_curve()
+
+        fg_val   = fg["current"]["value"]
+        wti      = macro.get("wti_crude", 67.5)
+        dxy      = macro.get("dxy", 104.0)
+        m2       = macro.get("m2_supply_bn", 21_500.0)
+        y2       = curve["yields"].get("2y", 4.05)
+        y10      = curve["yields"].get("10y", 4.25)
+        inverted = y10 < y2
+        spread   = round(y10 - y2, 3)
+
+        signals = {
+            "fear_greed":           fg_val,
+            "fg_label":             fg["current"].get("label", ""),
+            "wti_crude":            wti,
+            "dxy":                  dxy,
+            "m2_bn":                m2,
+            "yield_spread_10y2y":   spread,
+            "curve_inverted":       inverted,
+        }
+
+        # LIQUIDITY_CRUNCH: extreme fear + inverted curve + strong dollar
+        if fg_val <= 20 and inverted and dxy >= 106:
+            return {
+                "regime": "LIQUIDITY_CRUNCH", "confidence": 0.85,
+                "bias": "DEFENSIVE", "signals": signals,
+                "description": (
+                    f"Extreme fear (F&G={fg_val}), inverted yield curve (spread={spread:+.2f}%), "
+                    f"strong dollar (DXY={dxy:.1f}). Classic liquidity crunch — historically "
+                    f"marks cycle bottoms. 90-day avg return after F&G<20: +62%."
+                ),
+            }
+
+        # STAGFLATION: high oil + strong dollar + M2 declining
+        if wti >= 90 and dxy >= 106 and m2 < 21_000:
+            return {
+                "regime": "STAGFLATION", "confidence": 0.75,
+                "bias": "DEFENSIVE", "signals": signals,
+                "description": (
+                    f"Oil ${wti:.0f}/bbl, DXY {dxy:.1f}, M2 contracting. "
+                    f"Stagflation regime — favor commodities (PAXG, XAUT) and short duration."
+                ),
+            }
+
+        # RISK_OFF: fear + inverted curve
+        if fg_val < 40 and inverted:
+            return {
+                "regime": "RISK_OFF", "confidence": 0.70,
+                "bias": "MODERATE", "signals": signals,
+                "description": (
+                    f"Fear (F&G={fg_val}), inverted yield curve (spread={spread:+.2f}%). "
+                    f"Risk-off: favor T-bills, gold, low-risk RWA. Reduce private credit exposure."
+                ),
+            }
+
+        # RISK_ON: greed + normal curve + weak/stable dollar
+        if fg_val >= 60 and not inverted and dxy <= 104:
+            return {
+                "regime": "RISK_ON", "confidence": 0.75,
+                "bias": "AGGRESSIVE", "signals": signals,
+                "description": (
+                    f"Greed (F&G={fg_val}), normal yield curve (spread={spread:+.2f}%), "
+                    f"dollar soft (DXY={dxy:.1f}). Risk-on: full allocation to high-yield RWA."
+                ),
+            }
+
+        # NEUTRAL: mixed signals
+        return {
+            "regime": "NEUTRAL", "confidence": 0.50,
+            "bias": "MODERATE", "signals": signals,
+            "description": (
+                f"Mixed signals: F&G={fg_val}, DXY={dxy:.1f}, spread={spread:+.2f}%. "
+                f"Balanced allocation — standard risk management."
+            ),
+        }
+
+    except Exception as e:
+        logger.warning("[MacroRegime] Classification error: %s", e)
+        return {
+            "regime": "NEUTRAL", "confidence": 0.30,
+            "bias": "MODERATE", "signals": {},
+            "description": "Regime classifier unavailable — using neutral defaults.",
+        }

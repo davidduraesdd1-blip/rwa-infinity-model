@@ -239,12 +239,12 @@ def send_webhook_alert(subject: str, message: str, config: dict) -> bool:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         headers = {"Content-Type": "application/json"}
+        body = json.dumps(payload, separators=(",", ":")).encode()
         secret = cfg.get("secret", "").strip()
         if secret:
-            body = json.dumps(payload, separators=(",", ":")).encode()
             sig  = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
             headers["X-RWA-Signature"] = sig
-        r = requests.post(url, json=payload, headers=headers, timeout=10)
+        r = requests.post(url, data=body, headers=headers, timeout=10)
         if r.ok:
             logger.info("Webhook alert sent.")
             return True

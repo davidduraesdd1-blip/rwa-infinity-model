@@ -2135,7 +2135,7 @@ RWA_UNIVERSE = [
         "chain": "Solana / Polygon",
         "protocol": "Huma Finance",
         "token_symbol": "HUMA",
-        "coingecko_id": None,
+        "coingecko_id": "huma-finance",
         "defillama_slug": "huma-finance",
         "expected_yield_pct": 10.50,
         "risk_score": 5,

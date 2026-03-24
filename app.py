@@ -421,12 +421,86 @@ if not assets_df.empty:
         if yield_val > 0:
             ticker_items.append(f"💎 {row.get('token_symbol', row.get('id', '?'))}: {_fmt_pct(yield_val)}")
 
+# Add F&G and macro regime to ticker
+_fg_val   = market.get("fear_greed_value", 50)
+_fg_lbl   = market.get("fear_greed_label", "Neutral")
+_fg_sig   = market.get("fear_greed_signal", "NEUTRAL")
+_regime   = market.get("macro_regime", "NEUTRAL")
+_stable   = market.get("stablecoin_total_bn", 0)
+_fg_emoji = {"STRONG_BUY": "🟢", "BUY": "🟡", "NEUTRAL": "⚪", "SELL": "🟠", "STRONG_SELL": "🔴"}.get(_fg_sig, "⚪")
+ticker_items.extend([
+    f"{_fg_emoji} F&G: {_fg_val}/100 ({_fg_lbl})",
+    f"🌐 Regime: {_regime}",
+    f"💵 Stablecoin Supply: ${_stable:.0f}B",
+])
+
 ticker_text = "  ·  ".join(ticker_items)
 st.markdown(f"""
 <div class="ticker-wrap">
     <span style="font-size:15px;color:#9CA3AF;letter-spacing:0.03em">{ticker_text}</span>
 </div>
 """, unsafe_allow_html=True)
+
+# ── Macro Intelligence Banner ────────────────────────────────────────────────
+_REGIME_COLORS = {
+    "RISK_ON":          ("#065F46", "#34D399", "🚀"),
+    "RISK_OFF":         ("#7C2D12", "#F97316", "🛡️"),
+    "STAGFLATION":      ("#78350F", "#FBBF24", "⚠️"),
+    "LIQUIDITY_CRUNCH": ("#1E1B4B", "#818CF8", "🧊"),
+    "NEUTRAL":          ("#1F2937", "#9CA3AF", "⚖️"),
+}
+_rc = _REGIME_COLORS.get(_regime, _REGIME_COLORS["NEUTRAL"])
+_bias        = market.get("macro_bias", "MODERATE")
+_macro_desc  = market.get("macro_description", "")
+
+# F&G color gradient
+if _fg_val <= 20:
+    _fg_color = "#818CF8"
+    _fg_bg    = "#1E1B4B"
+elif _fg_val <= 40:
+    _fg_color = "#F97316"
+    _fg_bg    = "#431407"
+elif _fg_val <= 60:
+    _fg_color = "#9CA3AF"
+    _fg_bg    = "#1F2937"
+elif _fg_val <= 80:
+    _fg_color = "#FBBF24"
+    _fg_bg    = "#451A03"
+else:
+    _fg_color = "#34D399"
+    _fg_bg    = "#064E3B"
+
+_mac_col1, _mac_col2, _mac_col3 = st.columns([1.5, 1.5, 5])
+with _mac_col1:
+    st.markdown(f"""
+    <div style="background:{_fg_bg};border:1px solid {_fg_color}40;border-radius:8px;
+                padding:10px 14px;text-align:center;">
+        <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.1em">Fear & Greed</div>
+        <div style="font-size:28px;font-weight:800;color:{_fg_color}">{_fg_val}</div>
+        <div style="font-size:11px;color:{_fg_color}">{_fg_lbl}</div>
+        <div style="font-size:10px;color:#6B7280;margin-top:2px">Signal: {_fg_sig}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with _mac_col2:
+    st.markdown(f"""
+    <div style="background:{_rc[0]};border:1px solid {_rc[1]}40;border-radius:8px;
+                padding:10px 14px;text-align:center;">
+        <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.1em">Macro Regime</div>
+        <div style="font-size:20px;font-weight:800;color:{_rc[1]}">{_rc[2]} {_regime}</div>
+        <div style="font-size:11px;color:{_rc[1]}">Bias: {_bias}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with _mac_col3:
+    if _macro_desc:
+        st.markdown(f"""
+        <div style="background:#0D1117;border:1px solid #1F2937;border-radius:8px;
+                    padding:10px 14px;font-size:12px;color:#9CA3AF;line-height:1.5">
+            <span style="color:#6B7280;font-size:10px;text-transform:uppercase;letter-spacing:0.08em">MACRO INTELLIGENCE · </span>
+            {_macro_desc}
+        </div>
+        """, unsafe_allow_html=True)
 
 st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
 
