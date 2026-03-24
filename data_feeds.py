@@ -187,7 +187,7 @@ def fetch_defillama_yields() -> List[dict]:
                 "STEAKUSDC", "RE7USDC", "KUSDC", "SNX", "NOTE",
                 # Liquid Staking / DeFi Yield / PayFi (new 2026)
                 "WSTETH", "JITOSOL", "EIGEN", "LBTC", "PENDLE", "MORPHO",
-                "CPUSD", "USDF", "JITOSOL",
+                "CPUSD", "USDF",
             }
             if proj in rwa_projects or sym in rwa_syms or "rwa" in proj:
                 apy = pool.get("apy") or 0
