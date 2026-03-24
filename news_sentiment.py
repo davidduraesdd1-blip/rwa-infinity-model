@@ -20,6 +20,8 @@ from typing import List, Optional
 
 import requests
 
+from config import CLAUDE_MODEL
+
 logger = logging.getLogger(__name__)
 
 # ─── Anthropic client (singleton) ──────────────────────────────────────────────
@@ -140,7 +142,7 @@ def _classify_with_claude(headlines: List[str]) -> dict:
             '"key_theme": "<one short phrase summarizing the dominant RWA story>"}'
         )
         msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=CLAUDE_MODEL,
             max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )

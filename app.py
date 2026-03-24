@@ -369,7 +369,7 @@ with col_status:
     if last_ts:
         try:
             dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-            mins_ago = int((datetime.now(timezone.utc) - dt).total_seconds() / 60)
+            mins_ago = max(0, int((datetime.now(timezone.utc) - dt).total_seconds() / 60))
             last_time = f"{mins_ago}m ago" if mins_ago < 60 else f"{mins_ago//60}h ago"
         except Exception:
             last_time = "—"

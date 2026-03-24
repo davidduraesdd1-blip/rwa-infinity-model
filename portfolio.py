@@ -348,12 +348,20 @@ def build_portfolio(tier: int, portfolio_value_usd: float = 100_000,
         cat = h["category"]
         if cat not in cat_summary:
             cat_summary[cat] = {"weight_pct": 0, "usd_value": 0,
-                                 "yield_pct": 0, "count": 0,
+                                 "yield_pct": 0, "_yield_weighted_sum": 0,
+                                 "count": 0,
                                  "color": CATEGORY_COLORS.get(cat, "#888888")}
-        cat_summary[cat]["weight_pct"] += h["weight_pct"]
-        cat_summary[cat]["usd_value"]  += h["usd_value"]
-        cat_summary[cat]["yield_pct"]  += h["current_yield_pct"] * h["weight_pct"] / 100
-        cat_summary[cat]["count"]      += 1
+        cat_summary[cat]["weight_pct"]          += h["weight_pct"]
+        cat_summary[cat]["usd_value"]           += h["usd_value"]
+        cat_summary[cat]["_yield_weighted_sum"] += h["current_yield_pct"] * h["weight_pct"]
+        cat_summary[cat]["count"]               += 1
+    # Compute weighted-average yield per category (yield_pct = weighted avg, not contribution)
+    for cat_data in cat_summary.values():
+        total_w = cat_data["weight_pct"]
+        cat_data["yield_pct"] = round(
+            cat_data["_yield_weighted_sum"] / total_w if total_w > 0 else 0, 4
+        )
+        del cat_data["_yield_weighted_sum"]
 
     return {
         "tier":             tier,

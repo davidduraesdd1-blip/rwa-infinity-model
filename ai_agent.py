@@ -167,7 +167,7 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
     if portfolio_vol > max_dd:
         return False, f"Portfolio volatility {portfolio_vol:.1f}% > max drawdown limit {max_dd:.1f}%"
 
-    # Check daily trade limit (max 3 per day)
+    # Check recent trade count limit (max 20 trades in last 50 DB rows)
     recent_trades = port.get("recent_trades", 0)
     if recent_trades > 20:
         return False, f"Trade count {recent_trades} exceeds daily limit"
@@ -346,14 +346,14 @@ Current Portfolio (Tier {portfolio.get('tier')}: {_sanitize(portfolio.get('tier_
             )
             xrpl_text = (
                 f"  RLUSD circulating: ${rlusd.get('circulating_bn', 1.5):.1f}B\n"
-                f"  RLUSD/XRP orderbook: bid={bid:.6f if bid else 'N/A'} "
-                f"ask={ask:.6f if ask else 'N/A'} "
-                f"spread={spread:.4f if spread else 'N/A'}%\n"
+                f"  RLUSD/XRP orderbook: bid={f'{bid:.6f}' if bid is not None else 'N/A'} "
+                f"ask={f'{ask:.6f}' if ask is not None else 'N/A'} "
+                f"spread={f'{spread:.4f}' if spread is not None else 'N/A'}%\n"
                 f"  Soil Protocol vaults (RLUSD yield on XRPL): {soil_lines}\n"
                 f"  XRPL RWA TVL: ${xrpl.get('xrpl_rwa_tvl_bn', 2.3):.1f}B "
                 f"(+2200% in 2025)\n"
-                f"  XLS-81 Permissioned DEX: {xrpl['xls81']['status']} since "
-                f"{xrpl['xls81']['activated']}"
+                f"  XLS-81 Permissioned DEX: {xrpl.get('xls81', {}).get('status', 'N/A')} since "
+                f"{xrpl.get('xls81', {}).get('activated', 'N/A')}"
             )
         except Exception:
             pass
@@ -445,7 +445,7 @@ Respond with ONLY the JSON object, no markdown, no explanation outside JSON."""
         parsed = json.loads(raw_text)
         decision   = str(parsed.get("decision", "HOLD")).upper()
         rationale  = _sanitize(parsed.get("rationale", ""), 1000)
-        confidence = float(parsed.get("confidence_pct") or 50)
+        confidence = float(parsed.get("confidence_pct") if parsed.get("confidence_pct") is not None else 50)
         actions    = parsed.get("actions") or []
 
         # Validate decision is in allowed set
@@ -959,7 +959,8 @@ def evaluate_past_decisions(agent_name: str, lookback_cycles: int = 10):
             if before_yield <= 0:
                 continue
 
-            expected_return = float((row.get("confidence_pct") or 50) / 100 * 5)  # rough estimate
+            confidence_val = row.get("confidence_pct")
+            expected_return = float((confidence_val if confidence_val is not None else 50) / 100 * 5)  # rough estimate
             actual_return   = current_yield - before_yield
             outcome         = "WIN" if actual_return > 0 else ("LOSS" if actual_return < -0.5 else "NEUTRAL")
 
