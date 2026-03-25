@@ -97,8 +97,8 @@ def job_news_refresh():
         try:
             from news_sentiment import invalidate_cache
             invalidate_cache()
-        except Exception:
-            pass
+        except Exception as _ce:
+            logger.debug("[Scheduler] Sentiment cache invalidation failed (non-critical): %s", _ce)
     except Exception as e:
         logger.warning("[Scheduler] News refresh failed: %s", e)
 

@@ -995,7 +995,7 @@ with tab_portfolio:
         st.download_button(
             label="📄 Download Portfolio PDF",
             data=pdf_bytes,
-            file_name=f"rwa_portfolio_tier{selected_tier}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            file_name=f"rwa_portfolio_tier{selected_tier}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf",
             mime="application/pdf",
             key="btn_portfolio_pdf",
             help="Download a formatted PDF report of your current portfolio — includes metrics, holdings table, and risk breakdown.",
@@ -1220,8 +1220,8 @@ with tab_arb:
 
         # Display opportunities as cards
         for _, row in arb_df.head(20).iterrows():
-            signal = row.get("signal", "ARB")
-            net_spread = row.get("net_spread_pct", 0)
+            signal = row.get("signal") or "ARB"
+            net_spread = row.get("net_spread_pct") or 0
             sig_class = (
                 "signal-extreme" if signal == "EXTREME_ARB" else
                 "signal-strong"  if signal == "STRONG_ARB"  else
@@ -1230,7 +1230,7 @@ with tab_arb:
             sig_label = signal.replace("_", " ")
 
             with st.expander(
-                f"[{row.get('type','').upper()}] {row.get('asset_a_name') or row.get('asset_a_id','?')} → "
+                f"[{(row.get('type') or '').upper()}] {row.get('asset_a_name') or row.get('asset_a_id','?')} → "
                 f"Net Spread: {net_spread:.2f}%",
                 expanded=(net_spread >= ARB_STRONG_THRESHOLD_PCT)
             ):
@@ -1349,7 +1349,7 @@ with tab_arb:
         st.download_button(
             label="📄 Download Arbitrage PDF",
             data=pdf_arb_bytes,
-            file_name=f"rwa_arbitrage_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            file_name=f"rwa_arbitrage_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf",
             mime="application/pdf",
             key="btn_arb_pdf",
             help="Download a formatted PDF report of all current arbitrage opportunities.",

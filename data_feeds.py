@@ -2717,7 +2717,7 @@ def fetch_coinmetrics_onchain(days: int = 400) -> Dict[str, Any]:
     """
     import datetime as _dt
     import statistics as _stats
-    start = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    start = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
     cache_key = f"cm_onchain_{days}"
 
     def _fetch():
@@ -2800,7 +2800,7 @@ def fetch_coinmetrics_onchain(days: int = 400) -> Dict[str, Any]:
                 "mvrv_history":     {mvrv_dates[i]: round(mvrv_vals[i], 3) for i in range(len(mvrv_dates))},
                 "sopr_history":     {sopr_dates[i]: round(sopr_vals[i], 4) for i in range(len(sopr_dates))},
                 "source":           "coinmetrics_community",
-                "timestamp":        _dt.datetime.utcnow().isoformat(),
+                "timestamp":        _dt.datetime.now(_dt.timezone.utc).isoformat(),
                 "error":            None,
             }
         except Exception as e:
@@ -2879,7 +2879,7 @@ def fetch_deribit_options_chain(currency: str = "BTC") -> dict:
              oi_by_strike (top 20), term_structure, signal, spot_price,
              source, timestamp, error.
     """
-    from datetime import datetime as _dt2
+    from datetime import datetime as _dt2, timezone as _tz2
 
     def _fetch():
         try:
@@ -3005,7 +3005,7 @@ def fetch_deribit_options_chain(currency: str = "BTC") -> dict:
                 "signal":          signal,
                 "spot_price":      spot,
                 "source":          "deribit",
-                "timestamp":       _dt2.utcnow().isoformat(),
+                "timestamp":       _dt2.now(_tz2.utc).isoformat(),
                 "error":           None,
             }
         except Exception as e:
@@ -3241,8 +3241,7 @@ def fetch_xrpl_dex_arb() -> Dict[str, Any]:
         # ── Live XRP/USD price from Binance ────────────────────────────────────
         try:
             px_raw  = fetch_binance_prices(["XRPUSDT"])
-            xrp_usd = float((px_raw.get("XRPUSDT") or {}).get("last_price") or
-                            px_raw.get("XRPUSDT") or 0.0)
+            xrp_usd = float((px_raw.get("XRPUSDT") or {}).get("price_usd") or 0.0)
         except Exception:
             xrp_usd = 0.0
 

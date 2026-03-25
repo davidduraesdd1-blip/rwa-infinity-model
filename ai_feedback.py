@@ -58,7 +58,7 @@ def compute_accuracy(agent_name: str) -> dict:
             (agent_name, cutoff),
         ).fetchall()
     except Exception as e:
-        logger.error(f"compute_accuracy DB read failed: {e}")
+        logger.error("compute_accuracy DB read failed: %s", e)
         return _empty_result(agent_name)
     finally:
         conn.close()
@@ -293,7 +293,7 @@ def update_model_weights() -> dict:
 
         weights = dict(_agent_weights)
 
-    logger.info(f"[AI Feedback] Model weights updated: {weights}")
+    logger.info("[AI Feedback] Model weights updated: %s", weights)
     return weights
 
 

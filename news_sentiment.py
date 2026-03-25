@@ -42,8 +42,8 @@ def _get_anthropic_client():
             try:
                 import anthropic
                 _anthropic_client = anthropic.Anthropic(api_key=api_key, timeout=15.0)
-            except Exception:
-                pass
+            except Exception as _ae:
+                logger.warning("[NewsSentiment] Anthropic client init failed: %s", _ae)
     return _anthropic_client
 
 
