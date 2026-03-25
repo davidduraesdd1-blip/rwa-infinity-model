@@ -57,6 +57,15 @@ def job_full_refresh():
         _last_refresh  = datetime.now(timezone.utc).isoformat()
         _refresh_count += 1
 
+        # Pre-warm market summary caches (F&G, FRED macro, yield curve, stablecoin)
+        # so the next Streamlit render hits the in-memory cache instead of live APIs.
+        try:
+            from data_feeds import get_market_summary
+            _db.write_scan_status(True, progress=95, current_task="Warming market summary cache...")
+            get_market_summary()
+        except Exception as _me:
+            logger.debug("[Scheduler] Market summary cache warm failed (non-critical): %s", _me)
+
         # Trigger arb scan immediately after refresh
         job_arb_scan()
 

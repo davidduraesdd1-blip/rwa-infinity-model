@@ -287,18 +287,14 @@ except Exception:
 def _load_assets():
     df = _db.get_all_rwa_latest()
     if df.empty:
-        # Populate from config defaults on first run
-        from data_feeds import refresh_all_assets
-        try:
-            assets = refresh_all_assets()
-            df = _db.get_all_rwa_latest()
-        except Exception:
-            df = pd.DataFrame(RWA_UNIVERSE)
-            df["current_yield_pct"]  = df["expected_yield_pct"]
-            df["composite_score"]    = 50.0
-            df["current_price"]      = 1.0
-            df["tvl_usd"]            = 0.0
-            df["last_updated"]       = datetime.now(timezone.utc).isoformat()
+        # Scheduler populates DB in the background — return static config immediately
+        # so the first render is fast. Real data appears on next cache expiry (~5 min).
+        df = pd.DataFrame(RWA_UNIVERSE)
+        df["current_yield_pct"]  = df["expected_yield_pct"]
+        df["composite_score"]    = 50.0
+        df["current_price"]      = 1.0
+        df["tvl_usd"]            = 0.0
+        df["last_updated"]       = datetime.now(timezone.utc).isoformat()
     return df
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -328,11 +324,20 @@ def _load_arb():
 def _load_news():
     return _db.get_recent_news(20)
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def _load_market_summary():
+    """Fetch market summary with a hard 6-second timeout to keep the UI responsive.
+    The TTL is short (30 s) so stale/empty results are retried quickly once the
+    background scheduler has warmed the API caches."""
+    import concurrent.futures
     try:
         from data_feeds import get_market_summary
-        return get_market_summary()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+            _fut = _ex.submit(get_market_summary)
+            try:
+                return _fut.result(timeout=6)
+            except concurrent.futures.TimeoutError:
+                return {}
     except Exception:
         return {}
 
