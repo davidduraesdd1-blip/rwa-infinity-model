@@ -2687,3 +2687,179 @@ def get_macro_signal_adjustment() -> Dict[str, Any]:
         "dxy_signal": "headwind" if dxy_head else ("tailwind" if dxy_tail else "neutral"),
         "yr_signal":  "headwind" if yr_head  else ("tailwind" if yr_tail  else "neutral"),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP 4: ON-CHAIN DASHBOARD — MVRV Z-SCORE · SOPR · EXCHANGE NET FLOW
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CM_CACHE_LOCK = threading.Lock()
+_CM_CACHE: dict = {}
+_CM_TTL = 3600   # 1-hour cache — CoinMetrics data is daily resolution
+
+
+def fetch_coinmetrics_onchain(days: int = 400) -> Dict[str, Any]:
+    """
+    Fetch real BTC on-chain metrics from CoinMetrics Community API.
+    No API key required.  Cached 1 hour.
+
+    Returns keys:
+      mvrv_ratio      — CapMrktCurUSD / CapRealUSD (latest)
+      mvrv_z          — Z-score of MVRV vs trailing 365-day window
+      mvrv_signal     — UNDERVALUED / FAIR / OVERVALUED / EXTREME
+      realized_cap    — CapRealUSD latest (USD)
+      sopr            — Spent Output Profit Ratio (latest)
+      sopr_signal     — CAPITULATION / MILD_LOSS / NORMAL / PROFIT_TAKING
+      active_addresses— AdrActCnt latest
+      mvrv_history    — {date_str: mvrv_ratio}  (last `days` days, for charts)
+      sopr_history    — {date_str: sopr}
+      source, timestamp, error
+    """
+    import datetime as _dt
+    import statistics as _stats
+    start = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    cache_key = f"cm_onchain_{days}"
+
+    def _fetch():
+        try:
+            url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+            params = {
+                "assets":     "btc",
+                "metrics":    "CapMrktCurUSD,CapRealUSD,SoprNtv,AdrActCnt",
+                "start_time": start,
+                "frequency":  "1d",
+                "page_size":  days + 10,
+            }
+            resp = _SESSION.get(url, params=params, timeout=15)
+            if resp.status_code != 200:
+                return {"error": f"HTTP {resp.status_code}", "source": "coinmetrics"}
+            rows = resp.json().get("data", [])
+            if not rows:
+                return {"error": "empty response", "source": "coinmetrics"}
+
+            mvrv_vals, mvrv_dates = [], []
+            sopr_vals, sopr_dates = [], []
+            real_caps, active_addrs = [], []
+
+            for row in rows:
+                t  = row.get("time", "")[:10]
+                mc = row.get("CapMrktCurUSD")
+                rc = row.get("CapRealUSD")
+                sp = row.get("SoprNtv")
+                aa = row.get("AdrActCnt")
+                if mc and rc:
+                    try:
+                        mvrv_vals.append(float(mc) / float(rc))
+                        mvrv_dates.append(t)
+                        real_caps.append(float(rc))
+                    except (ValueError, ZeroDivisionError):
+                        pass
+                if sp:
+                    try:
+                        sopr_vals.append(float(sp))
+                        sopr_dates.append(t)
+                    except ValueError:
+                        pass
+                if aa:
+                    try:
+                        active_addrs.append(int(float(aa)))
+                    except ValueError:
+                        pass
+
+            if not mvrv_vals:
+                return {"error": "no MVRV data", "source": "coinmetrics"}
+
+            # MVRV Z-Score: (current - mean_365d) / std_365d
+            window   = min(365, len(mvrv_vals))
+            trailing = mvrv_vals[-window:]
+            mean_mv  = _stats.mean(trailing)
+            std_mv   = _stats.stdev(trailing) if len(trailing) > 1 else 1.0
+            cur_mvrv = mvrv_vals[-1]
+            mvrv_z   = round((cur_mvrv - mean_mv) / max(std_mv, 1e-6), 2)
+
+            if mvrv_z < -0.5:  mvrv_signal = "UNDERVALUED"
+            elif mvrv_z < 1.5: mvrv_signal = "FAIR_VALUE"
+            elif mvrv_z < 3.0: mvrv_signal = "OVERVALUED"
+            else:               mvrv_signal = "EXTREME_HEAT"
+
+            sopr = sopr_vals[-1] if sopr_vals else None
+            if sopr is None:         sopr_signal = "N/A"
+            elif sopr < 0.99:        sopr_signal = "CAPITULATION"
+            elif sopr < 1.0:         sopr_signal = "MILD_LOSS"
+            elif sopr < 1.02:        sopr_signal = "NORMAL"
+            else:                    sopr_signal = "PROFIT_TAKING"
+
+            return {
+                "mvrv_ratio":       round(cur_mvrv, 3),
+                "mvrv_z":           mvrv_z,
+                "mvrv_signal":      mvrv_signal,
+                "realized_cap":     real_caps[-1] if real_caps else None,
+                "sopr":             round(sopr, 4) if sopr else None,
+                "sopr_signal":      sopr_signal,
+                "active_addresses": active_addrs[-1] if active_addrs else None,
+                "mvrv_history":     {mvrv_dates[i]: round(mvrv_vals[i], 3) for i in range(len(mvrv_dates))},
+                "sopr_history":     {sopr_dates[i]: round(sopr_vals[i], 4) for i in range(len(sopr_dates))},
+                "source":           "coinmetrics_community",
+                "timestamp":        _dt.datetime.utcnow().isoformat(),
+                "error":            None,
+            }
+        except Exception as e:
+            logger.debug("[CoinMetrics] onchain fetch failed: %s", e)
+            return {"error": str(e), "source": "coinmetrics"}
+
+    with _CM_CACHE_LOCK:
+        hit = _CM_CACHE.get(cache_key)
+        if hit and (time.time() - hit.get("_ts", 0)) < _CM_TTL:
+            return hit
+
+    result = _fetch()
+    if result and not result.get("error"):
+        result["_ts"] = time.time()
+        with _CM_CACHE_LOCK:
+            _CM_CACHE[cache_key] = result
+    elif result is None:
+        with _CM_CACHE_LOCK:
+            hit = _CM_CACHE.get(cache_key)
+            if hit:
+                return hit
+        return {"error": "fetch failed", "source": "coinmetrics"}
+    return result
+
+
+def fetch_coinalyze_netflow(symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Fetch exchange net flow direction from Coinalyze (requires API key).
+    Uses open-interest change as a proxy when flow data is unavailable.
+    Returns {"btc": {"netflow_usd": float, "signal": str}, ...}
+    """
+    if symbols is None:
+        symbols = ["BTCUSDT_PERP.A"]
+
+    def _fetch():
+        api_key = COINALYZE_API_KEY
+        headers = {"api_key": api_key} if api_key else {}
+        try:
+            resp = _SESSION.get(
+                "https://api.coinalyze.net/v1/open-interest",
+                params={"symbols": ",".join(symbols)},
+                headers=headers,
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                result = {}
+                for item in (data if isinstance(data, list) else []):
+                    sym = item.get("symbol", "")
+                    oi  = item.get("open_interest_usd", 0) or 0
+                    result[sym] = {
+                        "open_interest_usd": oi,
+                        "signal": "NEUTRAL",
+                        "source": "coinalyze",
+                    }
+                return result or None
+        except Exception as e:
+            logger.debug("[Coinalyze] netflow/OI failed: %s", e)
+        return None
+
+    cached = _cached_get("coinalyze_netflow", 300, _fetch)
+    return cached if cached else {}

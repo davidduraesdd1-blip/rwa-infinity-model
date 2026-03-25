@@ -586,7 +586,7 @@ def _load_screener_signals():
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro = st.tabs([
+tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro, tab_onchain = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
     "⚡ Arbitrage",
@@ -598,6 +598,7 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
     "🏛️ Regulatory",
     "🔍 Screener",
     "🌍 Macro",
+    "⛓️ On-Chain",
 ])
 
 
@@ -2691,6 +2692,153 @@ with tab_macro:
         <div style="font-size:12px;color:#6b7280;margin-top:4px">Bias: <b style="color:{r_color}">{regime_bias}</b></div>
     </div>
     """, unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ON-CHAIN TAB (Group 4)
+# ─────────────────────────────────────────────────────────────────────────────
+with tab_onchain:
+    st.markdown("### ⛓️ BTC On-Chain Intelligence")
+    st.caption("CoinMetrics Community API · free, no key · MVRV Z-Score · SOPR · Active Addresses")
+
+    _oc = _df.fetch_coinmetrics_onchain(days=400)
+
+    if _oc.get("error") and not _oc.get("mvrv_z"):
+        st.warning(f"On-chain data unavailable: {_oc.get('error')}. CoinMetrics Community API may be rate-limited — try again in a minute.")
+    else:
+        # ── Snapshot metric cards ─────────────────────────────────────────────
+        _mz   = _oc.get("mvrv_z")
+        _msig = _oc.get("mvrv_signal", "N/A")
+        _sopr = _oc.get("sopr")
+        _ssig = _oc.get("sopr_signal", "N/A")
+        _rc   = _oc.get("realized_cap")
+        _aa   = _oc.get("active_addresses")
+        _mv   = _oc.get("mvrv_ratio")
+
+        _mz_color = {
+            "UNDERVALUED": "#00d4aa", "FAIR_VALUE": "#10b981",
+            "OVERVALUED": "#f59e0b",  "EXTREME_HEAT": "#ef4444",
+        }.get(_msig, "#6b7280")
+        _sp_color = {
+            "CAPITULATION": "#00d4aa", "MILD_LOSS": "#10b981",
+            "NORMAL": "#6b7280",       "PROFIT_TAKING": "#f59e0b",
+        }.get(_ssig, "#6b7280")
+
+        _oc1, _oc2, _oc3, _oc4 = st.columns(4)
+        with _oc1:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_mz_color};border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">MVRV Z-Score</div>
+  <div style="font-size:32px;font-weight:700;color:{_mz_color}">{f"{_mz:+.2f}" if _mz is not None else "—"}</div>
+  <div style="font-size:13px;color:#9ca3af;margin-top:4px">{_msig.replace("_", " ")}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">MVRV ratio: {f"{_mv:.3f}" if _mv else "—"}</div>
+</div>
+""", unsafe_allow_html=True)
+        with _oc2:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_sp_color};border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">SOPR</div>
+  <div style="font-size:32px;font-weight:700;color:{_sp_color}">{f"{_sopr:.4f}" if _sopr is not None else "—"}</div>
+  <div style="font-size:13px;color:#9ca3af;margin-top:4px">{_ssig.replace("_", " ")}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">&gt;1 profit-taking · &lt;1 capitulation</div>
+</div>
+""", unsafe_allow_html=True)
+        with _oc3:
+            def _fmt_b(v):
+                if v is None: return "—"
+                if v >= 1e12: return f"${v/1e12:.2f}T"
+                if v >= 1e9:  return f"${v/1e9:.1f}B"
+                return f"${v/1e6:.0f}M"
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Realized Cap</div>
+  <div style="font-size:24px;font-weight:700;color:#6366f1">{_fmt_b(_rc)}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">Sum of all BTC at last-moved price</div>
+</div>
+""", unsafe_allow_html=True)
+        with _oc4:
+            _aa_fmt = f"{_aa:,}" if _aa else "—"
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #8b5cf6;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Active Addresses</div>
+  <div style="font-size:24px;font-weight:700;color:#8b5cf6">{_aa_fmt}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">Unique BTC addresses active today</div>
+</div>
+""", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ── Charts ────────────────────────────────────────────────────────────
+        import pandas as pd
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        _mvrv_h = _oc.get("mvrv_history", {})
+        _sopr_h = _oc.get("sopr_history", {})
+
+        if _mvrv_h or _sopr_h:
+            _fig_oc = make_subplots(
+                rows=2, cols=1, shared_xaxes=True,
+                subplot_titles=("MVRV Z-Score (365-day rolling)", "SOPR"),
+                vertical_spacing=0.12,
+            )
+            if _mvrv_h:
+                _mh_s   = pd.Series(_mvrv_h).sort_index()
+                _mh_z   = (_mh_s - _mh_s.rolling(365, min_periods=30).mean()) / _mh_s.rolling(365, min_periods=30).std().clip(lower=1e-6)
+                _z_clrs = ["#ef4444" if v > 3 else "#f59e0b" if v > 1.5 else "#10b981" if v > -0.5 else "#00d4aa" for v in _mh_z]
+                _fig_oc.add_trace(
+                    go.Scatter(x=_mh_z.index, y=_mh_z.values, mode="lines", name="MVRV Z",
+                               line=dict(color="#6366f1", width=2)),
+                    row=1, col=1,
+                )
+                for _thresh, _lbl, _clr in [(3.0, "Extreme (>3)", "#ef4444"), (1.5, "Overvalued (>1.5)", "#f59e0b"), (-0.5, "Undervalued (<-0.5)", "#00d4aa")]:
+                    _fig_oc.add_hline(y=_thresh, line_dash="dash", line_color=_clr, opacity=0.4,
+                                      annotation_text=_lbl, annotation_font_size=9, row=1, col=1)
+            if _sopr_h:
+                _sp_s = pd.Series(_sopr_h).sort_index()
+                _fig_oc.add_trace(
+                    go.Scatter(x=_sp_s.index, y=_sp_s.values, mode="lines", name="SOPR",
+                               line=dict(color="#10b981", width=2)),
+                    row=2, col=1,
+                )
+                _fig_oc.add_hline(y=1.0, line_dash="dash", line_color="rgba(255,255,255,0.3)",
+                                  annotation_text="Breakeven", annotation_font_size=9, row=2, col=1)
+            _fig_oc.update_layout(
+                height=480,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0", size=11),
+                margin=dict(l=0, r=0, t=40, b=0),
+                showlegend=False,
+            )
+            _fig_oc.update_yaxes(gridcolor="rgba(255,255,255,0.07)")
+            _fig_oc.update_xaxes(gridcolor="rgba(255,255,255,0.07)")
+            st.plotly_chart(_fig_oc, use_container_width=True)
+
+        # ── Funding rates from Coinalyze (cross-exchange context) ─────────────
+        st.markdown("---")
+        st.markdown("#### 📡 Cross-Exchange Funding Rates (via Coinalyze)")
+        _funding = _df.fetch_coinalyze_funding()
+        if _funding:
+            _fnd_cols = st.columns(len(_funding))
+            for _ci, (_sym, _fdata) in enumerate(_funding.items()):
+                _fr_pct = _fdata.get("funding_rate_pct", 0)
+                _fr_sig = _fdata.get("signal", "NEUTRAL")
+                _fr_clr = {"BEARISH": "#ef4444", "NEUTRAL": "#6b7280", "BULLISH": "#00d4aa"}.get(_fr_sig, "#6b7280")
+                with _fnd_cols[_ci % len(_fnd_cols)]:
+                    st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
+  <div style="font-size:11px;color:#6b7280;margin-bottom:4px">{_sym.replace("USDT_PERP.A", "")}</div>
+  <div style="font-size:20px;font-weight:700;color:{_fr_clr}">{_fr_pct:+.4f}%</div>
+  <div style="font-size:11px;color:#9ca3af">{_fr_sig}</div>
+</div>
+""", unsafe_allow_html=True)
+        else:
+            st.caption("Set RWA_COINALYZE_API_KEY in .env for cross-exchange funding rates.")
+
+        _src = _oc.get("source", "coinmetrics_community")
+        _ts  = _oc.get("timestamp", "")[:19]
+        st.caption(f"Source: {_src} · {_ts} UTC · Cached 1h")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
