@@ -293,7 +293,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 9,
         "min_investment_usd": 100_000,
         "inception_date": "2023-01-04",
-        "description": "Tokenized BlackRock iShares Short Treasury Bond ETF. Multi-chain, daily NAV updates, KYC required.",
+        "description": "Tokenized BlackRock iShares Short Treasury Bond ETF. $2.5B+ TVL (March 2026). Multi-chain, daily NAV updates, KYC required. Ondo Markets perps launched. ADGM regulatory approval.",
         "tags": ["institutional", "treasury", "multi-chain", "accredited"],
     },
     {
@@ -350,7 +350,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 8,
         "min_investment_usd": 500,
         "inception_date": "2023-08-01",
-        "description": "Tokenized note backed by US bank demand deposits and Treasuries. Transferable after 40-day lockup.",
+        "description": "Tokenized note backed by US bank demand deposits and Treasuries. Transferable after 40-day lockup. ADGM approved. Multi-chain: Ethereum, Solana, Mantle, Aptos.",
         "tags": ["retail", "stablecoin", "treasury", "yield-bearing"],
     },
     {
@@ -1215,7 +1215,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 9,
         "min_investment_usd": 100_000,
         "inception_date": "2023-10-01",
-        "description": "DRW/Cumberland-backed institutional T-bill fund. One of the top 3 tokenized treasury vehicles by TVL ($500M–$1B).",
+        "description": "DRW/Cumberland-backed institutional T-bill fund. $1.8B TVL (March 2026) — one of the top 3 tokenized treasury vehicles globally.",
         "tags": ["institutional", "treasury", "drw", "cumberland", "accredited"],
     },
     {

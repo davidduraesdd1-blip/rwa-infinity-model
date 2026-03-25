@@ -3203,3 +3203,131 @@ def get_macro_factor_allocation_bias() -> Dict[str, Any]:
         "rationale": " | ".join(rationale_parts) if rationale_parts else "No significant macro factor signals",
         "source": "macro_factor_engine",
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP 8 — XRPL DEX ARBITRAGE SCANNER (Item 15)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_xrpl_dex_arb() -> Dict[str, Any]:
+    """
+    Scan the XRPL DEX for arbitrage and yield-spread opportunities.
+
+    Three opportunity types analysed:
+      1. xrpl_peg  — RLUSD/XRP DEX price vs $1.00 peg (buy/sell discrepancy)
+      2. xrpl_mm   — Bid-ask spread on RLUSD/XRP (market-making opportunity)
+      3. xrpl_yield — Soil Protocol vault APY vs Aave USDC APY (yield rotation)
+
+    Returns:
+        opportunities : list of dicts sorted by net_spread_pct descending
+        count         : int
+        timestamp     : ISO string
+        source        : "xrpl_dex_arb_scanner"
+    """
+    now    = time.time()
+    cached = _xrpl_cache.get("dex_arb")
+    if cached and now - cached[1] < _XRPL_TTL:
+        return cached[0]
+
+    opps: list = []
+    XRPL_FEE = 0.12  # standard XRPL DEX fee per leg (%)
+
+    try:
+        ob       = fetch_xrpl_rlusd_orderbook()
+        best_bid = ob.get("best_bid_xrp")   # XRP/RLUSD — best price buyer will pay
+        best_ask = ob.get("best_ask_xrp")   # XRP/RLUSD — best price seller will take
+
+        # ── Live XRP/USD price from Binance ────────────────────────────────────
+        try:
+            px_raw  = fetch_binance_prices(["XRPUSDT"])
+            xrp_usd = float((px_raw.get("XRPUSDT") or {}).get("last_price") or
+                            px_raw.get("XRPUSDT") or 0.0)
+        except Exception:
+            xrp_usd = 0.0
+
+        # ── Opp 1: Peg deviation (DEX vs spot) ─────────────────────────────────
+        if best_ask and xrp_usd > 0:
+            dex_cost_usd = best_ask * xrp_usd          # USD to buy 1 RLUSD on DEX
+            peg_dev_pct  = round((1.0 - dex_cost_usd) * 100, 4)
+            gross        = abs(peg_dev_pct)
+            net          = round(gross - XRPL_FEE * 2, 4)
+            if gross >= 0.05:
+                opps.append({
+                    "type":             "xrpl_peg",
+                    "description":      f"RLUSD/XRP DEX peg deviation ({peg_dev_pct:+.3f}%)",
+                    "pair":             "RLUSD/XRP",
+                    "gross_spread_pct": gross,
+                    "net_spread_pct":   max(net, 0.0),
+                    "direction":        "BUY_DEX" if peg_dev_pct > 0 else "SELL_DEX",
+                    "dex_cost_usd":     round(dex_cost_usd, 6),
+                    "estimated_apy":    round(max(net, 0.0) * 52, 2),
+                    "action": (
+                        f"Buy RLUSD on XRPL DEX at ${dex_cost_usd:.5f} (below $1.00 peg). "
+                        f"Sell spot at $1.00 — net spread {net:.3f}% after fees."
+                    ) if peg_dev_pct > 0 else (
+                        f"Sell RLUSD on XRPL DEX at ${dex_cost_usd:.5f} (above peg). "
+                        f"Net spread {net:.3f}% after fees."
+                    ),
+                })
+
+        # ── Opp 2: Market-making spread ────────────────────────────────────────
+        if best_bid and best_ask and best_bid > 0:
+            spread_pct = round((best_ask - best_bid) / best_bid * 100, 4)
+            net_mm     = round(spread_pct - XRPL_FEE * 2, 4)
+            if spread_pct >= 0.05:
+                opps.append({
+                    "type":             "xrpl_mm",
+                    "description":      f"RLUSD/XRP market-making spread: {spread_pct:.3f}%",
+                    "pair":             "RLUSD/XRP",
+                    "gross_spread_pct": spread_pct,
+                    "net_spread_pct":   max(net_mm, 0.0),
+                    "direction":        "MARKET_MAKE",
+                    "bid_xrp":          best_bid,
+                    "ask_xrp":          best_ask,
+                    "estimated_apy":    round(max(net_mm, 0.0) * 365 * 2, 2),
+                    "action": (
+                        f"Post bids at {best_bid:.6f} XRP/RLUSD, offers at {best_ask:.6f}. "
+                        f"Capture {spread_pct:.3f}% spread. Net after fees: {net_mm:.3f}%."
+                    ),
+                })
+
+        # ── Opp 3: Soil Protocol yield vs Aave USDC ────────────────────────────
+        try:
+            vaults = fetch_xrpl_soil_vaults()
+            if vaults:
+                best_vault   = max(vaults, key=lambda v: v.get("apy_pct", 0))
+                soil_apy     = float(best_vault.get("apy_pct", 0))
+                aave_usdc    = 4.2   # Aave V3 USDC supply APY approximation (March 2026)
+                yield_spread = round(soil_apy - aave_usdc, 2)
+                if yield_spread >= 0.5:
+                    net_yield = round(yield_spread - 0.1, 2)  # 0.1% estimated bridge cost
+                    opps.append({
+                        "type":             "xrpl_yield",
+                        "description":      f"Soil '{best_vault['name']}' {soil_apy:.1f}% vs Aave USDC {aave_usdc:.1f}%",
+                        "pair":             f"SOIL/{best_vault.get('backing', 'RLUSD')} vs AAVE/USDC",
+                        "gross_spread_pct": yield_spread,
+                        "net_spread_pct":   max(net_yield, 0.0),
+                        "direction":        "ROTATE_TO_XRPL",
+                        "soil_apy":         soil_apy,
+                        "aave_apy":         aave_usdc,
+                        "estimated_apy":    max(net_yield, 0.0),
+                        "action": (
+                            f"Rotate USDC from Aave V3 ({aave_usdc:.1f}% APY) to Soil "
+                            f"'{best_vault['name']}' on XRPL ({soil_apy:.1f}% APY). "
+                            f"Net yield pickup: +{net_yield:.2f}% after estimated bridge cost."
+                        ),
+                    })
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.debug("[XRPL DEX Arb] scanner error: %s", e)
+
+    result = {
+        "opportunities": sorted(opps, key=lambda x: x["net_spread_pct"], reverse=True),
+        "count":         len(opps),
+        "timestamp":     datetime.now(timezone.utc).isoformat(),
+        "source":        "xrpl_dex_arb_scanner",
+    }
+    _xrpl_cache["dex_arb"] = (result, now)
+    return result

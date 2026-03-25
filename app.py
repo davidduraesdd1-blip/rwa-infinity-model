@@ -56,6 +56,7 @@ import database as _db
 import scheduler as _sched
 import ai_agent as _agent
 import data_feeds as _df
+import pdf_export as _pdf
 from config import (
     PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
     RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
@@ -982,6 +983,21 @@ with tab_portfolio:
     except Exception as e:
         logger.warning("[UI] Credit warnings failed: %s", e)
 
+    # ── PDF Export ────────────────────────────────────────────────────────────
+    st.markdown('<div class="section-header">Export Report</div>', unsafe_allow_html=True)
+    if _pdf._REPORTLAB:
+        pdf_bytes = _pdf.generate_portfolio_pdf(portfolio, tier_cfg.get("name", f"Tier {selected_tier}"))
+        st.download_button(
+            label="📄 Download Portfolio PDF",
+            data=pdf_bytes,
+            file_name=f"rwa_portfolio_tier{selected_tier}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            mime="application/pdf",
+            key="btn_portfolio_pdf",
+            help="Download a formatted PDF report of your current portfolio — includes metrics, holdings table, and risk breakdown.",
+        )
+    else:
+        st.caption("PDF export requires reportlab — `pip install reportlab`")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2: ASSET UNIVERSE
@@ -1269,6 +1285,70 @@ with tab_arb:
             margin=dict(l=40, r=20, t=40, b=80),
         )
         st.plotly_chart(fig_arb, use_container_width=True)
+
+    # ── XRPL DEX Arbitrage Scanner (Item 15) ─────────────────────────────────
+    st.markdown('<div class="section-header">XRPL DEX Arbitrage Scanner</div>',
+                unsafe_allow_html=True)
+
+    @st.cache_data(ttl=120, show_spinner=False)
+    def _load_xrpl_dex_arb():
+        return _df.fetch_xrpl_dex_arb()
+
+    if st.button("⟳ Scan XRPL DEX", key="btn_xrpl_dex_arb"):
+        _load_xrpl_dex_arb.clear()
+
+    with st.spinner("Scanning XRPL DEX for arbitrage…"):
+        dex_arb = _load_xrpl_dex_arb()
+
+    xrpl_opps = dex_arb.get("opportunities", [])
+    if xrpl_opps:
+        xa1, xa2, xa3 = st.columns(3)
+        with xa1:
+            _metric_card("XRPL DEX Opps", str(dex_arb.get("count", 0)), color="#A78BFA")
+        with xa2:
+            best_net = max((o["net_spread_pct"] for o in xrpl_opps), default=0)
+            _metric_card("Best Net Spread", _fmt_pct(best_net), color="#34D399")
+        with xa3:
+            best_apy = max((o.get("estimated_apy", 0) for o in xrpl_opps), default=0)
+            _metric_card("Best Est. APY", _fmt_pct(best_apy), color=tier_cfg["color"])
+
+        for opp in xrpl_opps:
+            net = opp.get("net_spread_pct", 0)
+            with st.expander(
+                f"[{opp['type'].upper()}] {opp['description']} — Net: {net:.3f}%",
+                expanded=(net >= 0.1),
+            ):
+                oc1, oc2, oc3, oc4 = st.columns(4)
+                with oc1:
+                    st.metric("Gross Spread", _fmt_pct(opp.get("gross_spread_pct", 0)))
+                with oc2:
+                    st.metric("Net Spread", _fmt_pct(net))
+                with oc3:
+                    st.metric("Est. APY", _fmt_pct(opp.get("estimated_apy", 0)))
+                with oc4:
+                    st.metric("Direction", opp.get("direction", "—"))
+                if opp.get("action"):
+                    st.markdown(
+                        f'<div style="background:#0D1F2D;border-left:3px solid #A78BFA;'
+                        f'padding:10px 18px;border-radius:0 4px 4px 0;margin:6px 0">'
+                        f'<span style="color:#A78BFA;font-weight:700">Action:</span> '
+                        f'{opp["action"]}</div>',
+                        unsafe_allow_html=True,
+                    )
+    else:
+        st.info("No XRPL DEX arbitrage opportunities detected. Try refreshing or check xrpl-py installation.")
+
+    # ── PDF Export ────────────────────────────────────────────────────────────
+    if _pdf._REPORTLAB and not arb_df.empty:
+        pdf_arb_bytes = _pdf.generate_arb_pdf(arb_df.to_dict("records"))
+        st.download_button(
+            label="📄 Download Arbitrage PDF",
+            data=pdf_arb_bytes,
+            file_name=f"rwa_arbitrage_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            mime="application/pdf",
+            key="btn_arb_pdf",
+            help="Download a formatted PDF report of all current arbitrage opportunities.",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1745,29 +1825,23 @@ with tab_ai:
             facts = fb.get("factors", {})
             rat   = fb.get("rationale", {})
 
-            # Factor input cards
+            # Factor input cards (factors dict is flat: vix, dxy, yield_slope, fg_value, regime)
             fc1, fc2, fc3, fc4 = st.columns(4)
             with fc1:
-                vix_val = facts.get("vix", {}).get("value", "—")
-                vix_sig = facts.get("vix", {}).get("signal", "")
-                st.metric("VIX", f"{vix_val:.1f}" if isinstance(vix_val, (int, float)) else vix_val,
-                          delta=vix_sig, delta_color="inverse")
+                vix_val = facts.get("vix", "—")
+                st.metric("VIX", f"{vix_val:.1f}" if isinstance(vix_val, (int, float)) else str(vix_val))
             with fc2:
-                dxy_val = facts.get("dxy", {}).get("value", "—")
-                dxy_sig = facts.get("dxy", {}).get("signal", "")
-                st.metric("DXY", f"{dxy_val:.1f}" if isinstance(dxy_val, (int, float)) else dxy_val,
-                          delta=dxy_sig, delta_color="inverse")
+                dxy_val = facts.get("dxy", "—")
+                st.metric("DXY", f"{dxy_val:.1f}" if isinstance(dxy_val, (int, float)) else str(dxy_val))
             with fc3:
-                slope_val = facts.get("yield_slope", {}).get("value", "—")
-                slope_sig = facts.get("yield_slope", {}).get("signal", "")
+                slope_val = facts.get("yield_slope", "—")
                 st.metric("Yield Slope (10y-2y)",
-                          f"{slope_val:+.2f}%" if isinstance(slope_val, (int, float)) else slope_val,
-                          delta=slope_sig)
+                          f"{slope_val:+.2f}%" if isinstance(slope_val, (int, float)) else str(slope_val))
             with fc4:
-                fg_val = facts.get("fear_greed", {}).get("value", "—")
-                fg_sig = facts.get("fear_greed", {}).get("signal", "")
-                st.metric("Fear & Greed", f"{fg_val}/100" if isinstance(fg_val, (int, float)) else fg_val,
-                          delta=fg_sig)
+                fg_val2 = facts.get("fg_value", "—")
+                regime_val = facts.get("regime", "")
+                st.metric("Fear & Greed", f"{fg_val2}/100" if isinstance(fg_val2, int) else str(fg_val2),
+                          delta=regime_val)
 
             # Allocation adjustment table
             if adjs:
@@ -1779,11 +1853,9 @@ with tab_ai:
                 adj_df = pd.DataFrame(adj_rows)
                 st.dataframe(adj_df, use_container_width=True, hide_index=True)
 
-            # Rationale summary
+            # Rationale summary (rationale is a single string)
             if rat:
-                rat_lines = " | ".join(f"**{k}:** {v}" for k, v in rat.items() if v)
-                if rat_lines:
-                    st.caption(rat_lines)
+                st.caption(str(rat))
 
     # ── XRPL Intelligence + Tier 3 Status (Upgrades 10, 11, 12) ─────────────────
     st.markdown('<div class="section-header">XRPL Intelligence</div>', unsafe_allow_html=True)

@@ -599,6 +599,89 @@ def pay_x402_service(url: str, max_usdc_cents: int = 1) -> Optional[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TIER 3 — MOONPAY OPEN WALLET STANDARD  (Upgrade 11 supplement)
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    import moonpay  # noqa: F401 — presence-check only
+    _MOONPAY = True
+    logger.info("[Agent] MoonPay OWS SDK available")
+except ImportError:
+    _MOONPAY = False
+    logger.info("[Agent] moonpay SDK not installed — MoonPay OWS disabled")
+
+
+def execute_moonpay_ows(
+    action: str,
+    asset: str,
+    amount_usd: float,
+    chain: str = "ethereum",
+) -> Optional[dict]:
+    """Submit an on-chain execution request via MoonPay Open Wallet Standard (OWS).
+
+    MoonPay OWS (released March 23 2026, MIT, Python SDK) supports 8 chains
+    including XRPL, Base, Ethereum, Solana, Polygon, Arbitrum, Optimism, Avalanche.
+
+    Args:
+        action     : "BUY" | "SELL" | "SWAP"
+        asset      : token symbol (e.g. "USDC", "RLUSD", "OUSG")
+        amount_usd : USD notional value
+        chain      : target chain slug
+
+    Returns dict with {status, tx_hash, chain, asset, amount_usd} on success,
+    or None if OWS is unavailable / dry-run mode.
+
+    Upgrade 11 — complements Coinbase AgentKit for non-Base chains (especially XRPL).
+    Full execution requires MOONPAY_API_KEY environment variable.
+    """
+    api_key = os.environ.get("MOONPAY_API_KEY", "").strip()
+    if not api_key:
+        logger.info(
+            "[MoonPay OWS] MOONPAY_API_KEY not set — "
+            "set it to enable on-chain execution via MoonPay Open Wallet Standard"
+        )
+        return None
+
+    if not _MOONPAY:
+        logger.debug("[MoonPay OWS] moonpay SDK not installed")
+        return None
+
+    try:
+        import httpx
+        payload = {
+            "action":     action.upper(),
+            "asset":      asset.upper(),
+            "amount_usd": round(amount_usd, 2),
+            "chain":      chain.lower(),
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        }
+        with httpx.Client(timeout=20) as client:
+            resp = client.post(
+                "https://api.moonpay.com/v1/ows/execute",
+                json=payload,
+                headers=headers,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info(
+                    "[MoonPay OWS] %s %s $%.0f on %s → tx: %s",
+                    action, asset, amount_usd, chain,
+                    data.get("tx_hash", "pending"),
+                )
+                return data
+            logger.warning(
+                "[MoonPay OWS] HTTP %d: %s", resp.status_code, resp.text[:200]
+            )
+            return None
+    except Exception as e:
+        logger.error("[MoonPay OWS] execution failed: %s", e)
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # AGENT PIPELINE NODES
 # ─────────────────────────────────────────────────────────────────────────────
 
