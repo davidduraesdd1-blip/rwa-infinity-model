@@ -586,7 +586,7 @@ def _load_screener_signals():
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro, tab_onchain = st.tabs([
+tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro, tab_onchain, tab_options = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
     "⚡ Arbitrage",
@@ -599,6 +599,7 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
     "🔍 Screener",
     "🌍 Macro",
     "⛓️ On-Chain",
+    "📐 Options Flow",
 ])
 
 
@@ -2839,6 +2840,151 @@ with tab_onchain:
         _src = _oc.get("source", "coinmetrics_community")
         _ts  = _oc.get("timestamp", "")[:19]
         st.caption(f"Source: {_src} · {_ts} UTC · Cached 1h")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 13: OPTIONS FLOW
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_options:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    st.markdown("### 📐 BTC Options Flow — Deribit")
+    st.caption("Deribit public API · no key required · OI by Strike · Put/Call Ratio · IV Term Structure · Max Pain · Cached 15 min")
+
+    _opt_curr = st.selectbox("Currency", ["BTC", "ETH"], key="opt_curr_sel")
+    _oc5 = _df.fetch_deribit_options_chain(currency=_opt_curr)
+
+    if _oc5.get("error") and not _oc5.get("oi_by_strike"):
+        st.warning(f"Options data unavailable: {_oc5.get('error')}. Deribit may be temporarily unreachable.")
+    else:
+        _pc   = _oc5.get("put_call_ratio")
+        _mp   = _oc5.get("max_pain")
+        _tput = _oc5.get("total_put_oi", 0)
+        _tcal = _oc5.get("total_call_oi", 0)
+        _osig = _oc5.get("signal", "N/A")
+        _spot = _oc5.get("spot_price")
+
+        _sig_color = {
+            "EXTREME_PUTS":  "#ef4444",
+            "BEARISH":       "#f59e0b",
+            "NEUTRAL":       "#6b7280",
+            "BULLISH":       "#10b981",
+            "EXTREME_CALLS": "#00d4aa",
+        }.get(_osig, "#6b7280")
+
+        _oc5a, _oc5b, _oc5c, _oc5d = st.columns(4)
+        with _oc5a:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_sig_color};border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Put/Call Ratio</div>
+  <div style="font-size:32px;font-weight:700;color:{_sig_color}">{f"{_pc:.3f}" if _pc is not None else "—"}</div>
+  <div style="font-size:13px;color:#9ca3af;margin-top:4px">{_osig.replace("_", " ")}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">&gt;1.1 bearish · &lt;0.9 bullish</div>
+</div>
+""", unsafe_allow_html=True)
+        with _oc5b:
+            _mp_dist = f"{abs(_mp - _spot) / _spot * 100:.1f}% {'below' if _mp < _spot else 'above'} spot" if _mp and _spot else ""
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Max Pain</div>
+  <div style="font-size:26px;font-weight:700;color:#6366f1">{f"${_mp:,.0f}" if _mp else "—"}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">{_mp_dist}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:2px">Strike minimising buyer payout</div>
+</div>
+""", unsafe_allow_html=True)
+        with _oc5c:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #ef4444;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Total Put OI</div>
+  <div style="font-size:28px;font-weight:700;color:#ef4444">{f"{_tput:,.0f}" if _tput else "—"}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">contracts</div>
+</div>
+""", unsafe_allow_html=True)
+        with _oc5d:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Total Call OI</div>
+  <div style="font-size:28px;font-weight:700;color:#10b981">{f"{_tcal:,.0f}" if _tcal else "—"}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">contracts</div>
+</div>
+""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Dual panel: OI by Strike + IV Term Structure ──────────────────────
+        _oi5  = _oc5.get("oi_by_strike", [])
+        _ts5  = _oc5.get("term_structure", [])
+        _col5a, _col5b = st.columns([3, 2])
+
+        with _col5a:
+            if _oi5:
+                _fig5a = go.Figure()
+                _strikes5 = [str(int(r["strike"])) for r in _oi5]
+                _fig5a.add_trace(go.Bar(
+                    name="Puts", x=_strikes5,
+                    y=[r["put_oi"] for r in _oi5],
+                    marker_color="rgba(239,68,68,0.8)",
+                ))
+                _fig5a.add_trace(go.Bar(
+                    name="Calls", x=_strikes5,
+                    y=[r["call_oi"] for r in _oi5],
+                    marker_color="rgba(16,185,129,0.8)",
+                ))
+                if _mp:
+                    _fig5a.add_vline(x=str(int(_mp)), line_dash="dash",
+                                     line_color="#6366f1", opacity=0.8,
+                                     annotation_text=f"Max Pain ${_mp:,.0f}",
+                                     annotation_font_size=10)
+                if _spot:
+                    _fig5a.add_vline(x=str(int(_spot)), line_dash="dot",
+                                     line_color="#f59e0b", opacity=0.6,
+                                     annotation_text="Spot",
+                                     annotation_font_size=10)
+                _fig5a.update_layout(
+                    title="OI by Strike (Top 20)", barmode="stack",
+                    height=360, paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0", size=11),
+                    margin=dict(l=0, r=0, t=40, b=60),
+                    legend=dict(orientation="h", y=1.08),
+                    xaxis=dict(tickangle=-45, gridcolor="rgba(255,255,255,0.05)"),
+                    yaxis=dict(gridcolor="rgba(255,255,255,0.07)", title="OI (contracts)"),
+                )
+                st.plotly_chart(_fig5a, use_container_width=True)
+            else:
+                st.info("No OI by strike data available.")
+
+        with _col5b:
+            _ts5_valid = [t for t in _ts5 if t.get("atm_iv") is not None and t.get("dte", 0) <= 365]
+            if _ts5_valid:
+                _fig5b = go.Figure()
+                _fig5b.add_trace(go.Scatter(
+                    x=[t["dte"] for t in _ts5_valid],
+                    y=[t["atm_iv"] for t in _ts5_valid],
+                    mode="lines+markers",
+                    name="ATM IV",
+                    line=dict(color="#6366f1", width=2),
+                    marker=dict(size=7),
+                    text=[t["expiry"] for t in _ts5_valid],
+                    hovertemplate="%{text}<br>DTE: %{x}<br>IV: %{y:.1f}%<extra></extra>",
+                ))
+                _fig5b.update_layout(
+                    title="IV Term Structure (ATM)",
+                    height=360, paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0", size=11),
+                    margin=dict(l=0, r=0, t=40, b=0),
+                    xaxis=dict(title="Days to Expiry", gridcolor="rgba(255,255,255,0.05)"),
+                    yaxis=dict(title="IV (%)", gridcolor="rgba(255,255,255,0.07)"),
+                )
+                st.plotly_chart(_fig5b, use_container_width=True)
+            else:
+                st.info("IV term structure unavailable.")
+
+        _ts5_str = _oc5.get("timestamp", "")[:19]
+        st.caption(f"Source: Deribit · {_ts5_str} UTC · Spot: ${_spot:,.0f}" if _spot else f"Source: Deribit · {_ts5_str} UTC")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
