@@ -140,7 +140,7 @@ BASESCAN_BASE       = "https://api.basescan.org/api"
 SNOWTRACE_BASE      = "https://api.snowtrace.io/api"
 
 # CEX Public Market Data (read-only, no auth needed for prices)
-BINANCE_BASE        = "https://api.binance.com/api/v3"
+BINANCE_BASE        = "https://api.binance.us/api/v3"
 COINBASE_BASE       = "https://api.coinbase.com/v2"
 KRAKEN_BASE         = "https://api.kraken.com/0/public"
 OKX_BASE            = "https://www.okx.com/api/v5"
