@@ -568,6 +568,20 @@ tier_cfg      = PORTFOLIO_TIERS[selected_tier]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SCREENER CACHE — defined here (module-level) so it is registered once per
+# process and NOT re-registered on every Streamlit render cycle.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from data_feeds import compute_screener_signals as _compute_screener_signals
+
+_SCR_SYMS  = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_screener_signals():
+    return {sym: _compute_screener_signals(sym) for sym in _SCR_SYMS}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2257,9 +2271,6 @@ with tab_reg:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_screener:
-    from data_feeds import compute_screener_signals
-
-    _SCR_SYMS  = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
     _SCR_NAMES = {"BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana", "XRPUSDT": "XRP"}
     _SCR_ICONS = {"BTCUSDT": "₿", "ETHUSDT": "Ξ", "SOLUSDT": "◎", "XRPUSDT": "✕"}
 
@@ -2274,14 +2285,10 @@ with tab_screener:
 
     _scr_refresh = st.button("⟳ Refresh Screener", key="btn_scr_refresh")
 
-    @st.cache_data(ttl=300, show_spinner=False)
-    def _load_screener_signals():
-        return {sym: compute_screener_signals(sym) for sym in _SCR_SYMS}
-
     if _scr_refresh:
         _load_screener_signals.clear()
 
-    with st.spinner("Fetching Binance data…"):
+    with st.spinner("Fetching Bybit data…"):
         sig_data = _load_screener_signals()
 
     # ── Signal cards ─────────────────────────────────────────────────────────
@@ -2326,6 +2333,15 @@ with tab_screener:
             mtf_color = ("#34D399" if (mtf or 0) >= 0.65
                          else "#EF4444" if (mtf or 0) <= 0.35 else "#FBBF24")
 
+            conf_bull  = s.get("confluence_bullish")
+            conf_str   = f"{conf_bull}/4 TFs" if conf_bull is not None else "—"
+            conf_color = ("#34D399" if (conf_bull or 0) >= 3
+                          else "#FBBF24" if (conf_bull or 0) == 2 else "#EF4444")
+
+            pos_size   = s.get("position_size_pct")
+            pos_str    = f"{pos_size}% of max" if pos_size is not None else "—"
+            pos_color  = sig_color  # mirror the signal colour
+
             st.markdown(f"""
 <div style="background:#111827;border:1px solid #1F2937;border-top:3px solid {sig_color};
             border-radius:10px;padding:16px;margin-bottom:12px">
@@ -2367,6 +2383,14 @@ with tab_screener:
       <td style="color:#6B7280;padding:5px 0 3px"><b>MTF Confidence</b></td>
       <td style="color:{mtf_color};text-align:right;font-weight:700;font-size:14px">{mtf_str}</td>
     </tr>
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">Confluence</td>
+      <td style="color:{conf_color};text-align:right;font-weight:600">{conf_str}</td>
+    </tr>
+    <tr>
+      <td style="color:#6B7280;padding:3px 0">Position Size</td>
+      <td style="color:{pos_color};text-align:right;font-weight:600">{pos_str}</td>
+    </tr>
   </table>
 </div>
 """, unsafe_allow_html=True)
@@ -2384,6 +2408,8 @@ with tab_screener:
         mtf = s.get("mtf_confidence")
         row["MTF Score"] = f"{mtf * 100:.1f}%" if mtf is not None else "—"
         row["Signal"]    = s.get("signal", "HOLD")
+        conf_b = s.get("confluence_bullish")
+        row["Confluence"] = f"{conf_b}/4" if conf_b is not None else "—"
         tf_rows.append(row)
 
     st.dataframe(
@@ -2393,9 +2419,9 @@ with tab_screener:
 
     st.markdown(
         "<p style='color:#4B5563;font-size:11px;margin-top:8px'>"
-        "Weights: 1H 10% · 4H 20% · 1D 35% · 1W 35%. "
+        "Weights: 1H 5% · 4H 15% · 1D 40% · 1W 40%. "
         "Score ≥ 65% → BUY · ≤ 35% → SELL · else HOLD. "
-        "Data: Binance spot + perpetuals. Refreshes every 5 min. "
+        "Data: Bybit v5 perpetuals. Refreshes every 5 min. "
         "Not financial advice."
         "</p>",
         unsafe_allow_html=True,

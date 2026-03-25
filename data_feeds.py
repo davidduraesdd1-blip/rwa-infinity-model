@@ -1965,7 +1965,8 @@ def get_macro_regime() -> dict:
 # TIER 2 — ON-CHAIN SIGNALS + MULTI-TIMEFRAME SCREENER  (Upgrades 6, 7, 8)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_BINANCE_FUTURES_BASE = "https://fapi.binance.com/fapi/v1"
+# Bybit v5 — no US geo-block (replaces fapi.binance.com)
+_BYBIT_BASE = "https://api.bybit.com/v5"
 
 _SCREENER_SYMBOLS: List[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 _SCREENER_LABELS: Dict[str, str] = {
@@ -1982,9 +1983,10 @@ _screener_lock = threading.Lock()
 
 
 def fetch_binance_funding_rates(symbols: Optional[List[str]] = None) -> Dict[str, float]:
-    """Return latest perpetual funding rate (%) per symbol from Binance.
+    """Return latest perpetual funding rate (%) per symbol from Bybit v5.
 
-    Upgrade 7 — uses fapi.binance.com/premiumIndex, no auth required. TTL 5 min.
+    Upgrade 7 — uses api.bybit.com/v5/market/funding/history, no auth required. TTL 5 min.
+    Bybit v5 — no US geo-block (replaces fapi.binance.com).
     """
     if symbols is None:
         symbols = _SCREENER_SYMBOLS
@@ -1997,10 +1999,12 @@ def fetch_binance_funding_rates(symbols: Optional[List[str]] = None) -> Dict[str
     result: Dict[str, float] = {}
     for sym in symbols:
         try:
-            url  = f"{_BINANCE_FUTURES_BASE}/premiumIndex?symbol={sym}"
-            data = _get(url)
-            if isinstance(data, dict) and "lastFundingRate" in data:
-                result[sym] = float(data["lastFundingRate"]) * 100  # fraction → %
+            url  = f"{_BYBIT_BASE}/market/funding/history"
+            data = _get(url, params={"category": "linear", "symbol": sym, "limit": 1})
+            if (isinstance(data, dict) and data.get("retCode") == 0):
+                items = (data.get("result") or {}).get("list") or []
+                if items:
+                    result[sym] = float(items[0]["fundingRate"]) * 100  # decimal → %
         except Exception as e:
             logger.warning("[FundingRates] %s: %s", sym, e)
 
@@ -2009,9 +2013,10 @@ def fetch_binance_funding_rates(symbols: Optional[List[str]] = None) -> Dict[str
 
 
 def fetch_binance_open_interest(symbols: Optional[List[str]] = None) -> Dict[str, float]:
-    """Return current open interest (coin units) per symbol from Binance futures.
+    """Return current open interest (coin units) per symbol from Bybit v5.
 
-    Upgrade 7 — uses fapi.binance.com/openInterest, no auth required. TTL 5 min.
+    Upgrade 7 — uses api.bybit.com/v5/market/open-interest, no auth required. TTL 5 min.
+    Bybit v5 — no US geo-block (replaces fapi.binance.com).
     Multiply by price to get USD notional.
     """
     if symbols is None:
@@ -2025,10 +2030,13 @@ def fetch_binance_open_interest(symbols: Optional[List[str]] = None) -> Dict[str
     result: Dict[str, float] = {}
     for sym in symbols:
         try:
-            url  = f"{_BINANCE_FUTURES_BASE}/openInterest?symbol={sym}"
-            data = _get(url)
-            if isinstance(data, dict) and "openInterest" in data:
-                result[sym] = float(data["openInterest"])
+            url  = f"{_BYBIT_BASE}/market/open-interest"
+            data = _get(url, params={"category": "linear", "symbol": sym,
+                                     "intervalTime": "1h", "limit": 1})
+            if (isinstance(data, dict) and data.get("retCode") == 0):
+                items = (data.get("result") or {}).get("list") or []
+                if items:
+                    result[sym] = float(items[0]["openInterest"])
         except Exception as e:
             logger.warning("[OpenInterest] %s: %s", sym, e)
 
@@ -2130,8 +2138,11 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
 
         # ── Price + 24h change (from daily bars) ──────────────────────────────
         if len(bars_1d) >= 2:
-            result["price"]          = bars_1d[-1]["c"]
-            result["change_24h_pct"] = (bars_1d[-1]["c"] / bars_1d[-2]["c"] - 1.0) * 100.0
+            result["price"]   = bars_1d[-1]["c"]
+            _prev_close       = bars_1d[-2]["c"]
+            result["change_24h_pct"] = (
+                (bars_1d[-1]["c"] / _prev_close - 1.0) * 100.0 if _prev_close else 0.0
+            )
 
         # ── EMA helper (standard EMA, no pandas dependency) ───────────────────
         def _ema(closes: List[float], period: int) -> float:
@@ -2219,7 +2230,8 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
                 ema_score = 0.0
             return (rsi_score + ema_score) / 2.0
 
-        TF_WEIGHTS = {"1H": 0.10, "4H": 0.20, "1D": 0.35, "1W": 0.35}
+        # Weights: 1H noise-filter, 4H entry-timing, 1D primary, 1W macro-trend
+        TF_WEIGHTS = {"1H": 0.05, "4H": 0.15, "1D": 0.40, "1W": 0.40}
         tf_scores = {
             "1H": _tf_score(bars_1h, 20,  50),
             "4H": _tf_score(bars_4h, 20,  50),
@@ -2229,6 +2241,17 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
         mtf = sum(tf_scores[tf] * TF_WEIGHTS[tf] for tf in TF_WEIGHTS)
         result["mtf_breakdown"]  = {k: round(v, 3) for k, v in tf_scores.items()}
         result["mtf_confidence"] = round(mtf, 3)
+
+        # Confluence: count how many TFs are bullish (score > 0.5)
+        bullish_tfs = sum(1 for v in tf_scores.values() if v > 0.5)
+        bearish_tfs = sum(1 for v in tf_scores.values() if v < 0.5)
+        result["confluence_bullish"] = bullish_tfs
+        result["confluence_bearish"] = bearish_tfs
+        result["confluence_score"] = bullish_tfs / len(tf_scores)  # 0.0 to 1.0
+
+        # Position sizing by confluence strength
+        confluence_map = {4: 100, 3: 75, 2: 50, 1: 25, 0: 0}
+        result["position_size_pct"] = confluence_map.get(bullish_tfs if mtf >= 0.5 else bearish_tfs, 0)
 
         # ── Overall signal ────────────────────────────────────────────────────
         if mtf >= 0.65:
