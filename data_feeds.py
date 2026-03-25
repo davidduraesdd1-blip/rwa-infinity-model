@@ -2020,8 +2020,8 @@ def get_macro_regime() -> dict:
         wti      = macro.get("wti_crude", 67.5)
         dxy      = macro.get("dxy", 104.0)
         m2       = macro.get("m2_supply_bn", 21_500.0)
-        y2       = curve["yields"].get("2y", 4.05)
-        y10      = curve["yields"].get("10y", 4.25)
+        y2       = curve.get("yields", {}).get("2y", 4.05)
+        y10      = curve.get("yields", {}).get("10y", 4.25)
         inverted = y10 < y2
         spread   = round(y10 - y2, 3)
 

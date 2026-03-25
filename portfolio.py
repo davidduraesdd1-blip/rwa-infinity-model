@@ -742,7 +742,7 @@ def check_rebalance_needed(portfolio: dict, current_weights: Dict[str, float]) -
     Check if portfolio needs rebalancing.
     Returns signal dict with drift analysis.
     """
-    tier     = portfolio.get("tier", 3)
+    tier     = max(1, min(5, int(portfolio.get("tier", 3))))
     tier_cfg = PORTFOLIO_TIERS[tier]
     target   = tier_cfg["allocations"]
     threshold = {"daily": 5, "weekly": 8, "bi-weekly": 10, "monthly": 15}.get(
