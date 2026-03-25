@@ -58,7 +58,8 @@ import ai_agent as _agent
 import data_feeds as _df
 from config import (
     PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
-    RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT
+    RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
+    XRPL_RLUSD_ISSUER,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2840,6 +2841,66 @@ with tab_onchain:
         _src = _oc.get("source", "coinmetrics_community")
         _ts  = _oc.get("timestamp", "")[:19]
         st.caption(f"Source: {_src} · {_ts} UTC · Cached 1h")
+
+    # ── RLUSD / XRPL Live Data (Group 6) ─────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🌊 RLUSD & XRP Ledger")
+    st.caption("XRPL ledger gateway_balances + CoinGecko · Ripple USD · Cached 15 min")
+
+    _rlusd = _df.fetch_xrpl_rlusd()
+
+    if _rlusd.get("error") and not _rlusd.get("circulating_supply"):
+        st.caption(f"RLUSD data unavailable: {_rlusd.get('error')}. XRPL cluster may be unreachable.")
+    else:
+        def _fmt_supply(v):
+            if v is None: return "—"
+            if v >= 1e9:  return f"${v/1e9:.2f}B"
+            if v >= 1e6:  return f"${v/1e6:.1f}M"
+            return f"${v:,.0f}"
+
+        _rl_xrpl  = _rlusd.get("xrpl_supply")
+        _rl_circ  = _rlusd.get("circulating_supply")
+        _rl_price = _rlusd.get("price_usd", 1.0)
+        _rl_mcap  = _rlusd.get("market_cap_usd")
+        _rl_src   = _rlusd.get("source", "—")
+
+        _rla, _rlb, _rlc, _rld = st.columns(4)
+        with _rla:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #3b82f6;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">XRPL On-Ledger Supply</div>
+  <div style="font-size:22px;font-weight:700;color:#3b82f6">{_fmt_supply(_rl_xrpl) if _rl_xrpl else "—"}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">RLUSD issued on XRPL ledger</div>
+</div>
+""", unsafe_allow_html=True)
+        with _rlb:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #06b6d4;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Circulating Supply</div>
+  <div style="font-size:22px;font-weight:700;color:#06b6d4">{_fmt_supply(_rl_circ)}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">All chains (CoinGecko)</div>
+</div>
+""", unsafe_allow_html=True)
+        with _rlc:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Market Cap</div>
+  <div style="font-size:22px;font-weight:700;color:#10b981">{_fmt_supply(_rl_mcap)}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">Target: $1.5B+ (Ripple 2026)</div>
+</div>
+""", unsafe_allow_html=True)
+        with _rld:
+            _peg_color = "#10b981" if abs((_rl_price or 1.0) - 1.0) < 0.005 else "#f59e0b"
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_peg_color};border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Price</div>
+  <div style="font-size:28px;font-weight:700;color:{_peg_color}">${_rl_price:.4f}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">{'On peg' if abs((_rl_price or 1.0) - 1.0) < 0.005 else 'Off peg!'}</div>
+</div>
+""", unsafe_allow_html=True)
+
+        _rl_ts = _rlusd.get("timestamp", "")[:19]
+        st.caption(f"Source: {_rl_src} · {_rl_ts} UTC · XRPL issuer: {XRPL_RLUSD_ISSUER[:12]}…")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

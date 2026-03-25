@@ -3014,3 +3014,80 @@ def fetch_deribit_options_chain(currency: str = "BTC") -> dict:
 
     cached = _cached_get(f"deribit_chain_{currency}", 900, _fetch)
     return cached if cached else {"error": "cache miss", "source": "deribit"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP 6: XRPL / RLUSD LIVE DATA
+# ─────────────────────────────────────────────────────────────────────────────
+
+# RLUSD currency code on XRPL (hex-padded "RLUSD" = 52 4C 55 53 44)
+_RLUSD_HEX = "524C555344000000000000000000000000000000"
+
+
+def fetch_xrpl_rlusd() -> dict:
+    """
+    Fetch live RLUSD metrics from XRPL ledger (gateway_balances) +
+    CoinGecko market data.  Free, no key required.  Cached 15 min.
+
+    Returns: xrpl_supply, price_usd, market_cap_usd, circulating_supply,
+             supply_change_pct (vs cached), source, timestamp, error.
+    """
+    def _fetch():
+        result: dict = {}
+
+        # ── XRPL JSON-RPC — gateway_balances for RLUSD issuer ────────────────
+        try:
+            xrpl_resp = _session.post(
+                "https://xrplcluster.com/",
+                json={
+                    "method": "gateway_balances",
+                    "params": [{
+                        "account": XRPL_RLUSD_ISSUER,
+                        "strict": True,
+                        "ledger_index": "validated",
+                    }],
+                },
+                timeout=12,
+            )
+            if xrpl_resp.status_code == 200:
+                r = xrpl_resp.json().get("result", {})
+                obligations = r.get("obligations", {})
+                # Try both hex-encoded and 3-char fallback
+                raw = obligations.get(_RLUSD_HEX) or obligations.get("RLUSD")
+                if raw:
+                    result["xrpl_supply"] = round(float(raw), 2)
+                    result["source_xrpl"] = "xrpl_ledger"
+        except Exception as e:
+            logger.debug("[XRPL] gateway_balances failed: %s", e)
+
+        # ── CoinGecko market data ─────────────────────────────────────────────
+        try:
+            cg_resp = _session.get(
+                f"{COINGECKO_BASE}/coins/ripple-usd",
+                params={
+                    "localization": "false",
+                    "tickers": "false",
+                    "market_data": "true",
+                    "community_data": "false",
+                    "developer_data": "false",
+                },
+                timeout=10,
+            )
+            if cg_resp.status_code == 200:
+                md = cg_resp.json().get("market_data", {})
+                result["price_usd"]          = round(md.get("current_price", {}).get("usd", 1.0), 6)
+                result["market_cap_usd"]     = md.get("market_cap", {}).get("usd")
+                result["circulating_supply"] = md.get("circulating_supply")
+                result["total_supply"]       = md.get("total_supply")
+                result["source_cg"]          = "coingecko"
+        except Exception as e:
+            logger.debug("[RLUSD] CoinGecko failed: %s", e)
+
+        if not result:
+            return None
+        result["source"]    = "xrpl_ledger+coingecko" if "xrpl_supply" in result else "coingecko"
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    cached = _cached_get("xrpl_rlusd", 900, _fetch)
+    return cached if cached else {"error": "unavailable", "source": "xrpl"}

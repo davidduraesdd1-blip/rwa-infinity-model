@@ -2502,9 +2502,9 @@ RWA_UNIVERSE = [
         "category": "Private Credit",
         "subcategory": "Institutional RWA",
         "chain": "Mantra",
-        "protocol": "Mantra Chain / OM",
-        "token_symbol": "OM",
-        "coingecko_id": "mantra-dao",
+        "protocol": "Mantra Chain",
+        "token_symbol": "MANTRA",          # Rebranded from OM → MANTRA (1:4 split, March 3 2026)
+        "coingecko_id": "mantra-dao",      # CoinGecko continues tracking under mantra-dao
         "defillama_slug": "mantra",
         "expected_yield_pct": 9.00,
         "risk_score": 4,
@@ -2512,7 +2512,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 9,
         "min_investment_usd": 1_000,
         "inception_date": "2024-07-01",
-        "description": "Mantra is a purpose-built, licensed RWA blockchain (VARA Dubai). $1B+ in deals signed with MAG Group, Damac Properties, NEOM. Cosmos-based, IBC-connected.",
+        "description": "Mantra is a purpose-built, licensed RWA blockchain (VARA Dubai). $1B+ in deals signed with MAG Group, Damac Properties, NEOM. Cosmos-based, IBC-connected. Token rebranded from OM to MANTRA (1:4 split, March 2026) with $25M buyback program.",
         "tags": ["institutional", "private-credit", "mantra", "dubai", "vara-licensed", "cosmos", "real-estate-deals"],
     },
     # ── SWARM MARKETS Additional Stocks ──────────────────────────────────────
@@ -2935,6 +2935,27 @@ RWA_UNIVERSE = [
         "description": "Agora's AUSD is a regulated, institutional-grade yield-bearing stablecoin backed by US Treasuries and overnight repos. Dragonfly + White Star capital-backed. Distributed to DeFi protocols and neobanks as productive cash alternative.",
         "tags": ["retail", "payfi", "stablecoin", "yield-bearing", "agora", "treasury-backed", "institutional"],
     },
+
+    # ── AI AGENT INFRASTRUCTURE ────────────────────────────────────────────────
+    {
+        "id": "VIRTUALS_PROTOCOL",
+        "name": "Virtuals Protocol — AI Agent Tokenization Platform",
+        "category": "DeFi Yield",
+        "subcategory": "AI Infrastructure",
+        "chain": "Base",
+        "protocol": "Virtuals Protocol",
+        "token_symbol": "VIRTUAL",
+        "coingecko_id": "virtual-protocol",
+        "defillama_slug": "virtuals-protocol",
+        "expected_yield_pct": 18.0,
+        "risk_score": 7,
+        "liquidity_score": 8,
+        "regulatory_score": 5,
+        "min_investment_usd": 1,
+        "inception_date": "2023-11-01",
+        "description": "Virtuals Protocol enables creation, ownership and monetization of AI agents on-chain. 18,000+ deployed agents, $75M+ protocol revenue. Co-ownership model distributes agent revenue to VIRTUAL token stakers. Base-native, Coinbase partnership.",
+        "tags": ["retail", "ai-agents", "base", "defi-native", "revenue-sharing", "coinbase-ecosystem"],
+    },
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3146,7 +3167,7 @@ DEFILLAMA_PROTOCOLS = [
     # ── Avalanche ecosystem ───────────────────────────────────────────────────
     "spiko",
     # ── Base ecosystem ────────────────────────────────────────────────────────
-    "dinari", "opentrade",
+    "dinari", "opentrade", "virtuals-protocol",
     # ── DEX tokenized stocks ──────────────────────────────────────────────────
     "gains-network", "synthetix",
     # ── Aptos ecosystem ───────────────────────────────────────────────────────
