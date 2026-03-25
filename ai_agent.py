@@ -162,7 +162,7 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
 
     # Check max drawdown not breached
     portfolio_vol = metrics.get("portfolio_volatility_pct", 0)
-    tier_cfg      = PORTFOLIO_TIERS[cfg["risk_tier"]]
+    tier_cfg      = PORTFOLIO_TIERS[max(1, min(5, int(cfg.get("risk_tier", 3))))]
     max_dd        = tier_cfg["max_drawdown_pct"]
     if portfolio_vol > max_dd:
         return False, f"Portfolio volatility {portfolio_vol:.1f}% > max drawdown limit {max_dd:.1f}%"

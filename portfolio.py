@@ -221,6 +221,7 @@ def rank_assets_for_tier(tier: int, assets: List[dict]) -> List[dict]:
     Filter and rank assets suitable for a given risk tier.
     Returns sorted list with added 'score' field.
     """
+    tier        = max(1, min(5, int(tier)))
     tier_cfg    = PORTFOLIO_TIERS[tier]
     min_risk    = tier_cfg["min_risk_score"]
     max_risk    = tier_cfg["max_risk_score"]
@@ -283,6 +284,7 @@ def build_portfolio(tier: int, portfolio_value_usd: float = 100_000,
         else:
             assets = df.to_dict("records")
 
+    tier        = max(1, min(5, int(tier)))
     tier_cfg    = PORTFOLIO_TIERS[tier]
     alloc_cats  = tier_cfg["allocations"]   # {category: weight_pct}
     max_single  = 30.0                       # max single position % (diversification cap)

@@ -1315,7 +1315,7 @@ with tab_arb:
         for opp in xrpl_opps:
             net = opp.get("net_spread_pct", 0)
             with st.expander(
-                f"[{opp['type'].upper()}] {opp['description']} — Net: {net:.3f}%",
+                f"[{opp.get('type', 'UNK').upper()}] {opp.get('description', '—')} — Net: {net:.3f}%",
                 expanded=(net >= 0.1),
             ):
                 oc1, oc2, oc3, oc4 = st.columns(4)

@@ -913,8 +913,8 @@ def get_market_summary() -> dict:
         "gold_price_usd":        gold_price,
         "protocol_count":        len(protocols),
         # Fear & Greed
-        "fear_greed_value":      fg["current"]["value"],
-        "fear_greed_label":      fg["current"]["label"],
+        "fear_greed_value":      fg.get("current", {}).get("value", 50),
+        "fear_greed_label":      fg.get("current", {}).get("label", "Neutral"),
         "fear_greed_signal":     fg["signal"],
         # Stablecoin dry powder
         "stablecoin_total_bn":   stable["total_bn"],
@@ -1223,7 +1223,7 @@ def fetch_treasury_yield_curve() -> dict:
 def get_risk_free_rate() -> float:
     """Return the current 3-month T-bill yield as the risk-free rate."""
     curve = fetch_treasury_yield_curve()
-    return curve["yields"].get("3m", 4.32)
+    return curve.get("yields", {}).get("3m", 4.32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2730,7 +2730,7 @@ def fetch_coinmetrics_onchain(days: int = 400) -> Dict[str, Any]:
                 "frequency":  "1d",
                 "page_size":  days + 10,
             }
-            resp = _SESSION.get(url, params=params, timeout=15)
+            resp = _session.get(url, params=params, timeout=15)
             if resp.status_code != 200:
                 return {"error": f"HTTP {resp.status_code}", "source": "coinmetrics"}
             rows = resp.json().get("data", [])
@@ -2839,7 +2839,7 @@ def fetch_coinalyze_netflow(symbols: Optional[List[str]] = None) -> Dict[str, An
         api_key = COINALYZE_API_KEY
         headers = {"api_key": api_key} if api_key else {}
         try:
-            resp = _SESSION.get(
+            resp = _session.get(
                 "https://api.coinalyze.net/v1/open-interest",
                 params={"symbols": ",".join(symbols)},
                 headers=headers,
@@ -3112,14 +3112,15 @@ def get_macro_factor_allocation_bias() -> Dict[str, Any]:
     Magnitudes are calibrated to stay within ±10pp per category.
     """
     try:
-        macro  = fetch_macro_indicators()
-        fg     = fetch_fear_greed_index()
-        curve  = fetch_treasury_yield_curve()
-        regime = get_macro_regime()
+        macro   = fetch_macro_indicators()
+        yf_mac  = fetch_yfinance_macro()
+        fg      = fetch_fear_greed_index()
+        curve   = fetch_treasury_yield_curve()
+        regime  = get_macro_regime()
     except Exception as e:
         return {"adjustments": {}, "factors": {}, "rationale": f"fetch error: {e}", "source": "macro_factor_engine"}
 
-    vix       = float(macro.get("vix", 18.0))
+    vix       = float(yf_mac.get("vix", 18.0))
     dxy       = float(macro.get("dxy", 104.0))
     y2        = float(curve.get("yields", {}).get("2y", 4.05))
     y10       = float(curve.get("yields", {}).get("10y", 4.25))
