@@ -3091,3 +3091,115 @@ def fetch_xrpl_rlusd() -> dict:
 
     cached = _cached_get("xrpl_rlusd", 900, _fetch)
     return cached if cached else {"error": "unavailable", "source": "xrpl"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP 7: MACRO FACTOR ALLOCATION BIAS (Item 14 — factor-based optimization)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_macro_factor_allocation_bias() -> Dict[str, Any]:
+    """
+    Derive per-category allocation weight adjustments (percentage points) from
+    live macro factors: VIX, DXY, yield curve slope, Fear & Greed.
+
+    Returns:
+        adjustments : {category: delta_pct}  — add to base tier weights
+        factors     : {vix, dxy, yield_slope, fg_value, regime}
+        rationale   : str — human-readable explanation
+        source      : "macro_factor_engine"
+
+    Positive delta = overweight, negative = underweight.
+    Magnitudes are calibrated to stay within ±10pp per category.
+    """
+    try:
+        macro  = fetch_macro_indicators()
+        fg     = fetch_fear_greed_index()
+        curve  = fetch_treasury_yield_curve()
+        regime = get_macro_regime()
+    except Exception as e:
+        return {"adjustments": {}, "factors": {}, "rationale": f"fetch error: {e}", "source": "macro_factor_engine"}
+
+    vix       = float(macro.get("vix", 18.0))
+    dxy       = float(macro.get("dxy", 104.0))
+    y2        = float(curve.get("yields", {}).get("2y", 4.05))
+    y10       = float(curve.get("yields", {}).get("10y", 4.25))
+    slope     = round(y10 - y2, 3)
+    fg_val    = int(fg.get("current", {}).get("value", 50))
+    reg_name  = regime.get("regime", "NEUTRAL")
+
+    adj: Dict[str, float] = {}
+    rationale_parts: list = []
+
+    # ── Factor 1: VIX regime ──────────────────────────────────────────────────
+    if vix > 30:
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  + 6
+        adj["Private Credit"]    = adj.get("Private Credit", 0)    - 4
+        adj["Real Estate"]       = adj.get("Real Estate", 0)       - 2
+        adj["DeFi Yield"]        = adj.get("DeFi Yield", 0)        - 2
+        rationale_parts.append(f"VIX {vix:.0f} (high fear) → defensive tilt, +6pp govt bonds")
+    elif vix > 20:
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  + 3
+        adj["Private Credit"]    = adj.get("Private Credit", 0)    - 2
+        rationale_parts.append(f"VIX {vix:.0f} (elevated) → mild defensive tilt")
+    elif vix < 13:
+        adj["Private Credit"]    = adj.get("Private Credit", 0)    + 4
+        adj["DeFi Yield"]        = adj.get("DeFi Yield", 0)        + 2
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  - 4
+        adj["Carbon Credits"]    = adj.get("Carbon Credits", 0)    + 1
+        rationale_parts.append(f"VIX {vix:.0f} (suppressed) → risk-on, favour yield/credit")
+
+    # ── Factor 2: Yield curve slope ───────────────────────────────────────────
+    if slope < -0.3:
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  + 8
+        adj["Private Credit"]    = adj.get("Private Credit", 0)    - 5
+        adj["Infrastructure"]    = adj.get("Infrastructure", 0)    + 3
+        adj["Trade Finance"]     = adj.get("Trade Finance", 0)     - 2
+        rationale_parts.append(f"10y-2y spread {slope:+.2f}% (inverted) → recession hedge, +8pp govt bonds")
+    elif slope < 0.2:
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  + 3
+        adj["Private Credit"]    = adj.get("Private Credit", 0)    - 2
+        rationale_parts.append(f"10y-2y spread {slope:+.2f}% (flat) → mild duration bias")
+    elif slope > 1.5:
+        adj["Private Credit"]    = adj.get("Private Credit", 0)    + 3
+        adj["Real Estate"]       = adj.get("Real Estate", 0)       + 2
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  - 3
+        rationale_parts.append(f"10y-2y spread {slope:+.2f}% (steep) → growth environment, +credit/RE")
+
+    # ── Factor 3: DXY (USD strength) ─────────────────────────────────────────
+    if dxy > 108:
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  + 4
+        adj["Trade Finance"]     = adj.get("Trade Finance", 0)     - 3
+        adj["Commodities"]       = adj.get("Commodities", 0)       - 2
+        rationale_parts.append(f"DXY {dxy:.1f} (strong USD) → favour USD-denominated short-duration assets")
+    elif dxy < 98:
+        adj["Trade Finance"]     = adj.get("Trade Finance", 0)     + 3
+        adj["Commodities"]       = adj.get("Commodities", 0)       + 3
+        adj["Real Estate"]       = adj.get("Real Estate", 0)       + 2
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  - 2
+        rationale_parts.append(f"DXY {dxy:.1f} (weak USD) → favour commodities, trade finance, real assets")
+
+    # ── Factor 4: Fear & Greed (sentiment) ───────────────────────────────────
+    if fg_val <= 20:
+        adj["DeFi Yield"]        = adj.get("DeFi Yield", 0)        + 4
+        adj["Private Credit"]    = adj.get("Private Credit", 0)    + 2
+        rationale_parts.append(f"F&G {fg_val} (extreme fear) → accumulate yield, historical +62% 90d fwd")
+    elif fg_val >= 80:
+        adj["DeFi Yield"]        = adj.get("DeFi Yield", 0)        - 4
+        adj["Government Bonds"]  = adj.get("Government Bonds", 0)  + 3
+        rationale_parts.append(f"F&G {fg_val} (extreme greed) → reduce risk, rotate to safety")
+
+    # Cap each adjustment to ±10pp
+    adj = {k: max(min(round(v, 1), 10.0), -10.0) for k, v in adj.items()}
+
+    return {
+        "adjustments": adj,
+        "factors": {
+            "vix":         vix,
+            "dxy":         dxy,
+            "yield_slope": slope,
+            "fg_value":    fg_val,
+            "regime":      reg_name,
+        },
+        "rationale": " | ".join(rationale_parts) if rationale_parts else "No significant macro factor signals",
+        "source": "macro_factor_engine",
+    }

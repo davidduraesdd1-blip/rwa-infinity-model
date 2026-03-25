@@ -1722,6 +1722,69 @@ with tab_ai:
     else:
         st.info("No agent decisions yet. Start an agent or run a manual cycle above.")
 
+    # ── Macro Factor Allocation Bias (Group 7) ───────────────────────────────────
+    st.markdown('<div class="section-header">Macro Factor Allocation Bias</div>', unsafe_allow_html=True)
+
+    with st.expander("📊 VIX · DXY · Yield Curve · Fear & Greed → Allocation Adjustments", expanded=True):
+        from data_feeds import get_macro_factor_allocation_bias
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _load_factor_bias():
+            return get_macro_factor_allocation_bias()
+
+        if st.button("⟳ Refresh Factor Bias", key="btn_factor_bias_refresh"):
+            _load_factor_bias.clear()
+
+        with st.spinner("Computing factor allocation bias…"):
+            fb = _load_factor_bias()
+
+        if "error" in fb:
+            st.warning(f"Factor bias unavailable: {fb['error']}")
+        else:
+            adjs  = fb.get("adjustments", {})
+            facts = fb.get("factors", {})
+            rat   = fb.get("rationale", {})
+
+            # Factor input cards
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            with fc1:
+                vix_val = facts.get("vix", {}).get("value", "—")
+                vix_sig = facts.get("vix", {}).get("signal", "")
+                st.metric("VIX", f"{vix_val:.1f}" if isinstance(vix_val, (int, float)) else vix_val,
+                          delta=vix_sig, delta_color="inverse")
+            with fc2:
+                dxy_val = facts.get("dxy", {}).get("value", "—")
+                dxy_sig = facts.get("dxy", {}).get("signal", "")
+                st.metric("DXY", f"{dxy_val:.1f}" if isinstance(dxy_val, (int, float)) else dxy_val,
+                          delta=dxy_sig, delta_color="inverse")
+            with fc3:
+                slope_val = facts.get("yield_slope", {}).get("value", "—")
+                slope_sig = facts.get("yield_slope", {}).get("signal", "")
+                st.metric("Yield Slope (10y-2y)",
+                          f"{slope_val:+.2f}%" if isinstance(slope_val, (int, float)) else slope_val,
+                          delta=slope_sig)
+            with fc4:
+                fg_val = facts.get("fear_greed", {}).get("value", "—")
+                fg_sig = facts.get("fear_greed", {}).get("signal", "")
+                st.metric("Fear & Greed", f"{fg_val}/100" if isinstance(fg_val, (int, float)) else fg_val,
+                          delta=fg_sig)
+
+            # Allocation adjustment table
+            if adjs:
+                st.markdown("**Category Allocation Adjustments (pp)**")
+                adj_rows = [
+                    {"Category": cat, "Adjustment (pp)": f"{val:+.1f}", "Direction": "▲ Increase" if val > 0 else ("▼ Decrease" if val < 0 else "— Neutral")}
+                    for cat, val in sorted(adjs.items(), key=lambda x: -abs(x[1]))
+                ]
+                adj_df = pd.DataFrame(adj_rows)
+                st.dataframe(adj_df, use_container_width=True, hide_index=True)
+
+            # Rationale summary
+            if rat:
+                rat_lines = " | ".join(f"**{k}:** {v}" for k, v in rat.items() if v)
+                if rat_lines:
+                    st.caption(rat_lines)
+
     # ── XRPL Intelligence + Tier 3 Status (Upgrades 10, 11, 12) ─────────────────
     st.markdown('<div class="section-header">XRPL Intelligence</div>', unsafe_allow_html=True)
 

@@ -202,9 +202,104 @@ _decision_cache: dict = {}
 _decision_cache_lock = threading.Lock()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CLAUDE TOOL-USE DEFINITIONS  (Item 16 — agents call data functions themselves)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_AGENT_TOOLS = [
+    {
+        "name": "get_fear_greed",
+        "description": (
+            "Get the current Crypto Fear & Greed Index (0-100). "
+            "Values ≤20 = extreme fear (historically precede bull runs, +62% avg 90d return). "
+            "Also returns 7-day history and raw signal."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_macro_indicators",
+        "description": (
+            "Get live macro indicators from FRED and yfinance: M2 money supply (bn), "
+            "Fed balance sheet (bn), WTI crude ($/bbl), DXY (USD index), VIX, "
+            "SPX, Gold, and total stablecoin dry-powder (USDT+USDC bn)."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_yield_curve",
+        "description": (
+            "Get US Treasury yield curve: 3m, 1y, 2y, 5y, 10y, 30y yields. "
+            "Includes 10y-2y spread and inversion flag. "
+            "Inverted curve historically precedes recession by 12-18 months."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_onchain_data",
+        "description": (
+            "Get BTC on-chain metrics from CoinMetrics Community API: "
+            "MVRV ratio, MVRV Z-Score (>3 = overvalued, <-0.5 = undervalued), "
+            "SOPR (>1 = profit-taking, <1 = capitulation), realized cap, active addresses."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_xrpl_data",
+        "description": (
+            "Get XRPL ecosystem data: RLUSD circulating supply (currently ~$1.5B), "
+            "RLUSD/XRP orderbook bid/ask/spread, Soil Protocol vault APYs, "
+            "XLS-81 permissioned DEX status, total XRPL RWA TVL ($2.3B)."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_factor_bias",
+        "description": (
+            "Get macro factor portfolio allocation bias: VIX/DXY/yield-curve-slope/F&G "
+            "driven overweight/underweight recommendations (±pp) per asset category. "
+            "Use this to validate or refine proposed allocation changes."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+]
+
+
+def _execute_agent_tool(name: str) -> dict:
+    """Execute a named data tool and return its result as a serialisable dict."""
+    try:
+        from data_feeds import (
+            fetch_fear_greed_index, fetch_macro_indicators,
+            fetch_treasury_yield_curve, fetch_coinmetrics_onchain,
+            fetch_xrpl_stats, get_macro_factor_allocation_bias,
+            fetch_stablecoin_supply,
+        )
+        if name == "get_fear_greed":
+            fg = fetch_fear_greed_index()
+            return {"current": fg.get("current"), "signal": fg.get("signal"),
+                    "history_7d": [h["value"] for h in fg.get("history", [])[:7]]}
+        if name == "get_macro_indicators":
+            m = fetch_macro_indicators()
+            s = fetch_stablecoin_supply()
+            return {**m, "stablecoin_total_bn": s.get("total_bn"),
+                    "usdt_bn": s.get("usdt_bn"), "usdc_bn": s.get("usdc_bn")}
+        if name == "get_yield_curve":
+            return fetch_treasury_yield_curve()
+        if name == "get_onchain_data":
+            oc = fetch_coinmetrics_onchain(days=400)
+            return {k: v for k, v in oc.items() if k not in ("mvrv_history", "sopr_history")}
+        if name == "get_xrpl_data":
+            return fetch_xrpl_stats()
+        if name == "get_factor_bias":
+            return get_macro_factor_allocation_bias()
+    except Exception as e:
+        return {"error": str(e), "tool": name}
+    return {"error": f"unknown tool: {name}"}
+
+
 def _call_claude(state: AgentState) -> tuple[str, str, float, list]:
     """
-    Call Claude claude-sonnet-4-6 to make a portfolio decision.
+    Call Claude claude-sonnet-4-6 to make a portfolio decision using tool_use.
+    Claude calls data tools as needed, then returns a structured JSON decision.
     Returns (decision, rationale, confidence_pct, proposed_actions).
     """
     if not _ANTHROPIC:
@@ -255,112 +350,7 @@ Current Portfolio (Tier {portfolio.get('tier')}: {_sanitize(portfolio.get('tier_
         for o in arb_opps[:3]
     ])
 
-    # Fetch live macro intelligence for richer AI context
-    yield_curve_text = ""
-    social_text      = ""
-    fg_text          = ""
-    macro_text       = ""
-    regime_text      = ""
-    xrpl_text        = ""
-    try:
-        from data_feeds import (
-            fetch_treasury_yield_curve, fetch_social_signals,
-            get_private_credit_warnings, fetch_fear_greed_index,
-            fetch_macro_indicators, fetch_stablecoin_supply, get_macro_regime,
-            fetch_xrpl_stats,
-        )
-        # Yield curve
-        curve = fetch_treasury_yield_curve()
-        ylds  = curve.get("yields", {})
-        spread = round(ylds.get("10y", 4.25) - ylds.get("2y", 4.05), 3)
-        yield_curve_text = (
-            f"  3m: {ylds.get('3m', 'N/A')}%  |  1y: {ylds.get('1y', 'N/A')}%  |  "
-            f"2y: {ylds.get('2y', 'N/A')}%  |  10y: {ylds.get('10y', 'N/A')}%  |  "
-            f"Spread 10y-2y: {spread:+.2f}%  ({'NORMAL' if spread >= 0 else 'INVERTED'})"
-        )
-        # Fear & Greed
-        fg = fetch_fear_greed_index()
-        fg_val   = fg["current"]["value"]
-        fg_label = fg["current"]["label"]
-        fg_signal = fg["signal"]
-        # Build 7-day history summary
-        hist = fg.get("history", [])[:7]
-        hist_vals = [str(h["value"]) for h in hist]
-        fg_text = (
-            f"  Current: {fg_val}/100 ({fg_label}) → Signal: {fg_signal}\n"
-            f"  7-day history: {' → '.join(hist_vals)}\n"
-            f"  CONTEXT: Values ≤20 = Extreme Fear. Historical data shows +62% avg 90-day "
-            f"return when F&G < 20. Prolonged extreme fear (>30 days) has preceded every "
-            f"major crypto bull run since 2019."
-        )
-        # Macro indicators
-        macro = fetch_macro_indicators()
-        stable = fetch_stablecoin_supply()
-        macro_text = (
-            f"  M2 Money Supply: ${macro.get('m2_supply_bn', 0):,.0f}B\n"
-            f"  Fed Balance Sheet: ${macro.get('fed_balance_bn', 0):,.0f}B\n"
-            f"  WTI Crude Oil: ${macro.get('wti_crude', 0):.1f}/bbl\n"
-            f"  DXY (USD Index): {macro.get('dxy', 0):.1f}\n"
-            f"  Stablecoin Dry Powder: ${stable.get('total_bn', 0):.1f}B "
-            f"(USDT ${stable.get('usdt_bn', 0):.1f}B + USDC ${stable.get('usdc_bn', 0):.1f}B)"
-        )
-        # Macro regime
-        regime = get_macro_regime()
-        regime_text = (
-            f"  Regime: {regime['regime']} (confidence: {regime['confidence']*100:.0f}%)\n"
-            f"  Portfolio Bias: {regime['bias']}\n"
-            f"  {regime['description']}"
-        )
-        # Social signals
-        signals = fetch_social_signals()
-        if signals.get("source") == "santiment":
-            top_signal = max(
-                [(k, v) for k, v in signals.items() if isinstance(v, dict)],
-                key=lambda x: x[1].get("social_volume_7d", 0),
-                default=(None, None)
-            )
-            if top_signal[0]:
-                social_text = (
-                    f"  Highest buzz (7d): {top_signal[0]} — "
-                    f"{top_signal[1].get('social_volume_7d', 0):.0f} mentions, "
-                    f"dev activity: {top_signal[1].get('dev_activity_30d', 0):.0f} commits/30d"
-                )
-        # Private credit warnings
-        pc_warnings = get_private_credit_warnings()
-        if pc_warnings:
-            social_text += "\n  CREDIT WARNINGS: " + " | ".join(
-                f"[{w['severity']}] {w['protocol']}: {w['type']}"
-                for w in pc_warnings[:3]
-            )
-        # XRPL / RLUSD intelligence (Upgrade 12)
-        try:
-            xrpl = fetch_xrpl_stats()
-            rlusd = xrpl.get("rlusd", {})
-            soil  = xrpl.get("soil_vaults", [])
-            bid   = rlusd.get("best_bid_xrp")
-            ask   = rlusd.get("best_ask_xrp")
-            spread = rlusd.get("spread_pct")
-            soil_lines = "  ".join(
-                f"{v['name']}: {v['apy_pct']}% APR ({v['risk']} risk, {v['backing']})"
-                for v in soil
-            )
-            xrpl_text = (
-                f"  RLUSD circulating: ${rlusd.get('circulating_bn', 1.5):.1f}B\n"
-                f"  RLUSD/XRP orderbook: bid={f'{bid:.6f}' if bid is not None else 'N/A'} "
-                f"ask={f'{ask:.6f}' if ask is not None else 'N/A'} "
-                f"spread={f'{spread:.4f}' if spread is not None else 'N/A'}%\n"
-                f"  Soil Protocol vaults (RLUSD yield on XRPL): {soil_lines}\n"
-                f"  XRPL RWA TVL: ${xrpl.get('xrpl_rwa_tvl_bn', 2.3):.1f}B "
-                f"(+2200% in 2025)\n"
-                f"  XLS-81 Permissioned DEX: {xrpl.get('xls81', {}).get('status', 'N/A')} since "
-                f"{xrpl.get('xls81', {}).get('activated', 'N/A')}"
-            )
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    prompt = f"""You are {_sanitize(agent_cfg['name'])}, an autonomous RWA (Real World Asset) portfolio manager.
+    initial_prompt = f"""You are {_sanitize(agent_cfg['name'])}, an autonomous RWA (Real World Asset) portfolio manager.
 
 AGENT PROFILE:
 - Strategy: {_sanitize(agent_cfg['strategy'])}
@@ -377,30 +367,13 @@ TOP HOLDINGS:
 TOP ARBITRAGE OPPORTUNITIES:
 {arb_text if arb_text else "  No significant arbitrage opportunities detected"}
 
-US TREASURY YIELD CURVE (live):
-{yield_curve_text if yield_curve_text else "  Unavailable"}
-
-CRYPTO FEAR & GREED INDEX (live):
-{fg_text if fg_text else "  Unavailable"}
-
-MACRO INDICATORS (FRED live):
-{macro_text if macro_text else "  Unavailable"}
-
-MACRO REGIME CLASSIFICATION:
-{regime_text if regime_text else "  Unavailable"}
-
-MARKET INTELLIGENCE:
-{social_text if social_text else "  No social or credit warning signals available"}
-
-XRPL / RLUSD INTELLIGENCE (live):
-{xrpl_text if xrpl_text else "  XRPL data unavailable"}
-
-TASK: Analyze the above — especially the Fear & Greed context, macro regime, and yield curve — and provide EXACTLY ONE decision in JSON format:
+TASK: Use your available tools to gather live market intelligence (fear & greed, macro indicators, \
+yield curve, on-chain data, XRPL stats, factor bias), then provide EXACTLY ONE decision in JSON format:
 
 {{
   "decision": "REBALANCE" | "HOLD" | "DEPLOY" | "REDUCE",
   "confidence_pct": 0-100,
-  "rationale": "2-3 sentence explanation of your decision",
+  "rationale": "2-3 sentence explanation referencing data you retrieved",
   "actions": [
     {{
       "action_type": "BUY" | "SELL" | "ROTATE",
@@ -423,18 +396,47 @@ CONSTRAINTS (HARD LIMITS — you cannot override these):
 - Only suggest assets from the approved RWA universe
 - Prioritize yield quality over quantity
 
-Respond with ONLY the JSON object, no markdown, no explanation outside JSON."""
+Call tools first to gather intelligence, then respond with ONLY the JSON object."""
 
     try:
         client = _anthropic.Anthropic(api_key=api_key, timeout=CLAUDE_TIMEOUT)
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=800,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        if not response.content:
-            return "HOLD", "Empty response from Claude", 30.0, []
-        raw_text = response.content[0].text.strip()
+
+        # Tool-use loop — Claude calls data tools as needed (max 5 rounds)
+        messages: list[dict] = [{"role": "user", "content": initial_prompt}]
+        raw_text = ""
+        for _round in range(5):
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=1500,
+                tools=_AGENT_TOOLS,
+                messages=messages,
+            )
+            if not response.content:
+                break
+
+            if response.stop_reason != "tool_use":
+                # Final text response — extract it
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        raw_text = block.text.strip()
+                        break
+                break
+
+            # Claude wants to call tools — execute them and feed results back
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    tool_data = _execute_agent_tool(block.name)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(tool_data, default=str)[:4000],
+                    })
+            messages.append({"role": "user", "content": tool_results})
+
+        if not raw_text:
+            return "HOLD", "Empty response from Claude after tool loop", 30.0, []
 
         # Extract JSON from response
         if "```json" in raw_text:
