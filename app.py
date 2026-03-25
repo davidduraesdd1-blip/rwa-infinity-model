@@ -2397,6 +2397,57 @@ with tab_screener:
 </div>
 """, unsafe_allow_html=True)
 
+    # ── Blood in the Streets · DCA Multiplier · Macro Overlay ────────────────
+    st.markdown("---")
+    _btc_sig   = sig_data.get("BTCUSDT", {})
+    _btc_rsi   = _btc_sig.get("rsi_14")
+    _bits      = _df.compute_blood_in_streets(_fg_val, _btc_rsi)
+    _dca_mult  = _bits["dca_multiplier"]
+    _macro_adj = _df.get_macro_signal_adjustment()
+
+    _bits_color = {"BLOOD_IN_STREETS": "#ef4444", "EXTREME_FEAR": "#f59e0b", "NORMAL": "#6b7280"}.get(_bits["signal"], "#6b7280")
+    _bits_bg    = {"BLOOD_IN_STREETS": "#1f0000",  "EXTREME_FEAR": "#1c1200", "NORMAL": "#111827"}.get(_bits["signal"], "#111827")
+    _dca_color  = {0.0: "#ef4444", 0.5: "#f97316", 1.0: "#9ca3af", 2.0: "#10b981", 3.0: "#00d4aa"}.get(_dca_mult, "#9ca3af")
+    _dca_label  = {0.0: "HOLD", 0.5: "0.5× reduce", 1.0: "1× base", 2.0: "2× accumulate", 3.0: "3× max accumulate"}.get(_dca_mult, f"{_dca_mult}×")
+    _rc         = {"MACRO_HEADWIND": "#ef4444", "MILD_HEADWIND": "#f97316", "MACRO_NEUTRAL": "#6b7280", "MILD_TAILWIND": "#10b981", "MACRO_TAILWIND": "#00d4aa"}.get(_macro_adj["regime"], "#6b7280")
+
+    _b1, _b2, _b3 = st.columns(3)
+    with _b1:
+        st.markdown(f"""
+<div style="background:{_bits_bg};border:1px solid {_bits_color};border-top:3px solid {_bits_color};
+            border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Blood in Streets</div>
+  <div style="font-size:18px;font-weight:700;color:{_bits_color}">{_bits["signal"].replace("_", " ")}</div>
+  <div style="font-size:12px;color:#9ca3af;margin-top:4px">{_bits["strength"]} · {_bits["criteria_met"]}/3 criteria met</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">{_bits["description"]}</div>
+  <div style="margin-top:10px;font-size:11px;color:#6b7280">
+    {"✅" if _bits["criteria"]["extreme_fear"] else "❌"} F&amp;G≤25 &nbsp;
+    {"✅" if _bits["criteria"]["rsi_oversold"] else "❌"} RSI≤30 &nbsp;
+    {"✅" if _bits["criteria"]["exchange_outflow"] else "❌"} Outflow
+  </div>
+</div>
+""", unsafe_allow_html=True)
+    with _b2:
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_dca_color};
+            border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">DCA Multiplier</div>
+  <div style="font-size:36px;font-weight:700;color:{_dca_color}">{_dca_mult}×</div>
+  <div style="font-size:13px;color:#9ca3af;margin-top:4px">{_dca_label}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">F&amp;G: {_bits["fg_value"]}/100 · BTC RSI: {f"{_btc_rsi:.1f}" if _btc_rsi else "—"}</div>
+</div>
+""", unsafe_allow_html=True)
+    with _b3:
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_rc};
+            border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Macro Overlay</div>
+  <div style="font-size:18px;font-weight:700;color:{_rc}">{_macro_adj["regime"].replace("_", " ")}</div>
+  <div style="font-size:12px;color:#9ca3af;margin-top:4px">Confidence adj: {_macro_adj["adjustment"]:+.0f} pts</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:8px">DXY {_macro_adj["dxy"]:.1f} ({_macro_adj["dxy_signal"]}) · 10Y {_macro_adj["ten_yr"]:.2f}% ({_macro_adj["yr_signal"]})</div>
+</div>
+""", unsafe_allow_html=True)
+
     # ── MTF breakdown table ───────────────────────────────────────────────────
     st.markdown("#### Timeframe Breakdown")
     tf_rows = []
