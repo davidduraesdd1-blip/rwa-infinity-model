@@ -26,7 +26,7 @@ from config import (
     NEWSAPI_API_KEY, CRYPTOPANIC_API_KEY,
     BINANCE_API_KEY, BINANCE_API_SECRET,
     DUNE_API_KEY,
-    SANTIMENT_API_KEY, FRED_API_KEY,
+    SANTIMENT_API_KEY, FRED_API_KEY, COINALYZE_API_KEY,
     XRPL_NODE_URL, XRPL_RLUSD_ISSUER,
     get_asset_fee_bps,
 )
@@ -1701,17 +1701,21 @@ def fetch_fear_greed_index(limit: int = 30) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _FRED_MACRO_SERIES = {
-    "m2_supply_bn":   "M2SL",
-    "fed_balance_bn": "WALCL",
-    "wti_crude":      "DCOILWTICO",
-    "dxy":            "DTWEXBGS",
+    "m2_supply_bn":      "M2SL",
+    "fed_balance_bn":    "WALCL",
+    "wti_crude":         "DCOILWTICO",
+    "dxy":               "DTWEXBGS",
+    "ten_yr_yield":      "DGS10",     # US 10-year Treasury yield
+    "ism_manufacturing": "NAPM",      # ISM Manufacturing PMI proxy
 }
 
 _MACRO_FALLBACKS = {
-    "m2_supply_bn":   21_500.0,   # approx March 2026
-    "fed_balance_bn":  6_800.0,
-    "wti_crude":          67.5,
-    "dxy":               104.0,
+    "m2_supply_bn":      21_500.0,   # approx March 2026
+    "fed_balance_bn":     6_800.0,
+    "wti_crude":             67.5,
+    "dxy":                  104.0,
+    "ten_yr_yield":           4.35,   # Fed cut 75bp since Sep 2024
+    "ism_manufacturing":     52.0,    # approx March 2026
 }
 
 
@@ -1784,6 +1788,140 @@ def fetch_macro_indicators() -> dict:
         fb["timestamp"] = datetime.now(timezone.utc).isoformat()
         return fb
     return cached
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 9b: YFINANCE MACRO SUPPLEMENTALS
+# VIX, Gold spot, SPX from Yahoo Finance.  Free, no key required.
+# DXY and WTI are already covered by FRED DTWEXBGS / DCOILWTICO.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_yfinance_macro() -> dict:
+    """
+    Fetch macro market supplementals via yfinance: VIX, Gold, SPX.
+    Returns fallback values if yfinance is not installed or data unavailable.
+    """
+    _YFINANCE_FALLBACKS: Dict[str, Any] = {"vix": 18.0, "gold_spot": 2900.0, "spx": 5800.0}
+
+    def _fetch():
+        try:
+            import yfinance as yf
+        except ImportError:
+            return None
+        result: Dict[str, Any] = {}
+        _MAP = {"vix": "^VIX", "gold_spot": "GC=F", "spx": "^GSPC"}
+        for key, symbol in _MAP.items():
+            try:
+                hist = yf.Ticker(symbol).history(period="5d")
+                if not hist.empty:
+                    result[key] = round(float(hist["Close"].iloc[-1]), 2)
+            except Exception as e:
+                logger.debug("[yfinance] %s failed: %s", symbol, e)
+        if not result:
+            return None
+        result["source"]    = "yfinance"
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    cached = _cached_get("yfinance_macro", CACHE_TTL["yields"], _fetch)
+    if cached is None:
+        fb = dict(_YFINANCE_FALLBACKS)
+        fb["source"]    = "fallback"
+        fb["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return fb
+    return cached
+
+
+def fetch_macro_timeseries(days: int = 90) -> Dict[str, Any]:
+    """
+    Fetch historical daily close price series for macro correlation analysis.
+
+    Keys: BTC, VIX, Gold, SPX, DXY, Oil — each maps to a dict of {date_str: price}.
+    Returns {} if yfinance not installed.  Cached 30 min.
+    """
+    def _fetch():
+        try:
+            import yfinance as yf
+        except ImportError:
+            return {}
+        _SYMBOLS = {
+            "BTC":  "BTC-USD",
+            "VIX":  "^VIX",
+            "Gold": "GC=F",
+            "SPX":  "^GSPC",
+            "DXY":  "DX-Y.NYB",
+            "Oil":  "CL=F",
+        }
+        result: Dict[str, Any] = {}
+        for key, symbol in _SYMBOLS.items():
+            try:
+                hist = yf.Ticker(symbol).history(period=f"{days}d")
+                if not hist.empty:
+                    result[key] = {
+                        str(dt)[:10]: round(float(v), 4)
+                        for dt, v in hist["Close"].items()
+                    }
+            except Exception as e:
+                logger.debug("[MacroTS] %s failed: %s", symbol, e)
+        result["_days"]      = days
+        result["_timestamp"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    cached = _cached_get(f"macro_ts_{days}", 1800, _fetch)
+    return cached if cached else {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COINALYZE: AGGREGATED FUNDING RATES (cross-exchange: Binance+Bybit+OKX)
+# Free tier available at coinalyze.net — set RWA_COINALYZE_API_KEY for
+# higher rate limits.  Falls back to {} if unavailable.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_coinalyze_funding(
+    symbols: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch aggregated perpetual funding rates from Coinalyze.
+    Returns {symbol: {"funding_rate", "funding_rate_pct", "open_interest_usd", "signal"}}
+    """
+    if symbols is None:
+        symbols = ["BTCUSDT_PERP.A", "ETHUSDT_PERP.A", "SOLUSDT_PERP.A"]
+
+    def _fetch():
+        headers: Dict[str, str] = {}
+        if COINALYZE_API_KEY:
+            headers["api_key"] = COINALYZE_API_KEY
+        url = "https://api.coinalyze.net/v1/funding-rate"
+        try:
+            resp = _session.get(
+                url,
+                params={"symbols": ",".join(symbols)},
+                headers=headers,
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                result: Dict[str, Any] = {}
+                for item in (data if isinstance(data, list) else []):
+                    sym  = item.get("symbol", "")
+                    rate = float(item.get("last_funding_rate", 0))
+                    result[sym] = {
+                        "funding_rate":     rate,
+                        "funding_rate_pct": round(rate * 100, 4),
+                        "open_interest_usd": item.get("open_interest_usd"),
+                        "signal": (
+                            "BEARISH" if rate > 0.0003
+                            else ("BULLISH" if rate < -0.0003 else "NEUTRAL")
+                        ),
+                        "source": "coinalyze",
+                    }
+                return result if result else None
+        except Exception as e:
+            logger.debug("[Coinalyze] funding fetch failed: %s", e)
+        return None
+
+    cached = _cached_get("coinalyze_funding", CACHE_TTL["prices"], _fetch)
+    return cached if cached else {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

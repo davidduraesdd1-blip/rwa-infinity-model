@@ -17,6 +17,7 @@ COINMARKETCAP_API_KEY   = _os.environ.get("RWA_COINMARKETCAP_API_KEY")   # coinm
 TIINGO_API_KEY          = _os.environ.get("RWA_TIINGO_API_KEY")          # tiingo.com — stocks/ETFs/crypto
 ALPHA_VANTAGE_API_KEY   = _os.environ.get("RWA_ALPHA_VANTAGE_API_KEY")   # alphavantage.co — stocks/forex
 FRED_API_KEY            = _os.environ.get("RWA_FRED_API_KEY")            # fred.stlouisfed.org — macro/rates
+COINALYZE_API_KEY       = _os.environ.get("RWA_COINALYZE_API_KEY")       # coinalyze.net — aggregated funding/OI
 MESSARI_API_KEY         = _os.environ.get("RWA_MESSARI_API_KEY")         # messari.io — crypto fundamentals
 NANSEN_API_KEY          = _os.environ.get("RWA_NANSEN_API_KEY")          # nansen.ai — on-chain analytics
 DUNE_API_KEY            = _os.environ.get("RWA_DUNE_API_KEY")            # dune.com — on-chain analytics

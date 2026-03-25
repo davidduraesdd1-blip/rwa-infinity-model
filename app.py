@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 import database as _db
 import scheduler as _sched
 import ai_agent as _agent
+import data_feeds as _df
 from config import (
     PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
     RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT
@@ -585,7 +586,7 @@ def _load_screener_signals():
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener = st.tabs([
+tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
     "⚡ Arbitrage",
@@ -596,6 +597,7 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
     "📋 Trade Log",
     "🏛️ Regulatory",
     "🔍 Screener",
+    "🌍 Macro",
 ])
 
 
@@ -2426,6 +2428,218 @@ with tab_screener:
         "</p>",
         unsafe_allow_html=True,
     )
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 11: MACRO INTELLIGENCE
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_macro:
+    st.markdown('<div class="section-header">Macro Intelligence Dashboard</div>', unsafe_allow_html=True)
+    st.caption("FRED + yfinance macro data · Rolling correlations with BTC · M2 84-day lead indicator")
+
+    # ── Load data ──────────────────────────────────────────────────────────────
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _load_macro_snapshot():
+        fred  = _df.fetch_macro_indicators()
+        yf_m  = _df.fetch_yfinance_macro()
+        return fred, yf_m
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _load_macro_ts(days: int):
+        return _df.fetch_macro_timeseries(days)
+
+    fred_data, yf_data = _load_macro_snapshot()
+
+    # ── Macro Snapshot Metrics ─────────────────────────────────────────────────
+    st.markdown("#### Current Macro Snapshot")
+    mc1, mc2, mc3, mc4, mc5, mc6, mc7, mc8 = st.columns(8)
+    mc1.metric("10Y Yield", f"{fred_data.get('ten_yr_yield', 4.35):.2f}%")
+    mc2.metric("DXY", f"{fred_data.get('dxy', 104.0):.1f}")
+    mc3.metric("VIX", f"{yf_data.get('vix', 18.0):.1f}")
+    mc4.metric("Gold", f"${yf_data.get('gold_spot', 2900.0):,.0f}")
+    mc5.metric("WTI Oil", f"${fred_data.get('wti_crude', 67.5):.1f}")
+    mc6.metric("SPX", f"{yf_data.get('spx', 5800.0):,.0f}")
+    mc7.metric("M2 ($B)", f"${fred_data.get('m2_supply_bn', 21500.0):,.0f}B")
+    mc8.metric("ISM Mfg", f"{fred_data.get('ism_manufacturing', 52.0):.1f}")
+
+    src_label = fred_data.get("source", "fallback")
+    yf_src    = yf_data.get("source", "fallback")
+    st.caption(f"FRED source: **{src_label}** · yfinance source: **{yf_src}** · Cached 30 min")
+
+    st.markdown("---")
+
+    # ── Rolling Correlation Section ────────────────────────────────────────────
+    st.markdown("#### BTC Rolling Correlations vs Macro Factors")
+    st.caption("Pearson correlation of daily returns over selected window. +1 = move together, -1 = inverse.")
+
+    corr_days = st.select_slider(
+        "Lookback window",
+        options=[14, 30, 60, 90],
+        value=30,
+        key="macro_corr_days",
+    )
+
+    ts_data = _load_macro_ts(corr_days + 20)  # fetch extra days for rolling window
+
+    if ts_data and "BTC" in ts_data:
+        import pandas as pd
+        import plotly.graph_objects as go
+
+        # Build DataFrame from timeseries dicts
+        frames: dict = {}
+        for key in ["BTC", "VIX", "Gold", "SPX", "DXY", "Oil"]:
+            series = ts_data.get(key)
+            if series and isinstance(series, dict):
+                frames[key] = pd.Series(series).rename(key)
+
+        if len(frames) >= 2:
+            df_ts = pd.DataFrame(frames).sort_index()
+            df_ts.index = pd.to_datetime(df_ts.index)
+            df_ret = df_ts.pct_change().dropna()
+
+            # Rolling correlation of each factor vs BTC
+            factors = [c for c in df_ret.columns if c != "BTC"]
+            corr_results: dict = {}
+            for fac in factors:
+                if fac in df_ret.columns and "BTC" in df_ret.columns:
+                    rolling_corr = df_ret["BTC"].rolling(corr_days).corr(df_ret[fac]).dropna()
+                    if not rolling_corr.empty:
+                        corr_results[fac] = rolling_corr
+
+            if corr_results:
+                fig_corr = go.Figure()
+                colors = {"VIX": "#ef4444", "Gold": "#f59e0b", "SPX": "#10b981",
+                          "DXY": "#6366f1", "Oil": "#f97316"}
+                for fac, series in corr_results.items():
+                    fig_corr.add_trace(go.Scatter(
+                        x=series.index, y=series.values,
+                        mode="lines", name=fac,
+                        line=dict(color=colors.get(fac, "#888"), width=2),
+                    ))
+                fig_corr.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)")
+                fig_corr.add_hline(y=0.5,  line_dash="dot", line_color="rgba(16,185,129,0.4)",
+                                   annotation_text="Strong positive")
+                fig_corr.add_hline(y=-0.5, line_dash="dot", line_color="rgba(239,68,68,0.4)",
+                                   annotation_text="Strong negative")
+                fig_corr.update_layout(
+                    height=320,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    yaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
+                    xaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+                )
+                st.plotly_chart(fig_corr, use_container_width=True)
+
+                # Current snapshot bar chart
+                st.markdown(f"**Current {corr_days}-day correlations with BTC**")
+                current_corrs = {
+                    fac: float(series.iloc[-1])
+                    for fac, series in corr_results.items()
+                    if len(series) > 0
+                }
+                corr_df = pd.DataFrame(
+                    list(current_corrs.items()), columns=["Factor", "Correlation"]
+                ).sort_values("Correlation", ascending=True)
+                bar_colors = ["#ef4444" if v < 0 else "#10b981" for v in corr_df["Correlation"]]
+                fig_bar = go.Figure(go.Bar(
+                    x=corr_df["Correlation"], y=corr_df["Factor"],
+                    orientation="h",
+                    marker_color=bar_colors,
+                    text=[f"{v:.3f}" for v in corr_df["Correlation"]],
+                    textposition="outside",
+                ))
+                fig_bar.update_layout(
+                    height=220,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"),
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    xaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
+                    yaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.info("Not enough data for rolling correlations. Try a smaller window.")
+        else:
+            st.info("Loading macro timeseries data... (requires yfinance installed)")
+    else:
+        st.info("Macro timeseries unavailable. Install yfinance: `pip install yfinance`")
+
+    st.markdown("---")
+
+    # ── M2 84-Day Lead Indicator ───────────────────────────────────────────────
+    st.markdown("#### M2 Money Supply — 84-Day Lead Indicator")
+    st.caption("M2 shifted forward 84 days overlaid on BTC price. Rising M2 historically precedes BTC rallies by ~3 months.")
+
+    ts_long = _load_macro_ts(365)
+    if ts_long and "BTC" in ts_long:
+        import pandas as pd
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        btc_series = ts_long.get("BTC", {})
+        if btc_series:
+            btc_df = pd.Series(btc_series).rename("BTC")
+            btc_df.index = pd.to_datetime(btc_df.index)
+
+            # M2 from FRED (monthly series) — use current value as flat line if no history
+            m2_now = fred_data.get("m2_supply_bn", 21500.0)
+
+            fig_m2 = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_m2.add_trace(
+                go.Scatter(x=btc_df.index, y=btc_df.values,
+                           name="BTC Price", line=dict(color="#f59e0b", width=2)),
+                secondary_y=False,
+            )
+            # M2 annotation (full monthly timeseries would need FRED historical API)
+            fig_m2.add_hline(
+                y=m2_now, line_dash="dot", line_color="rgba(99,102,241,0.6)",
+                annotation_text=f"M2 now: ${m2_now:,.0f}B",
+                secondary_y=True,
+            )
+            fig_m2.update_layout(
+                height=280,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0"),
+                margin=dict(l=0, r=0, t=20, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+                yaxis=dict(title="BTC Price (USD)", gridcolor="rgba(255,255,255,0.07)"),
+                yaxis2=dict(title="M2 ($B)", gridcolor="rgba(255,255,255,0.03)"),
+            )
+            st.plotly_chart(fig_m2, use_container_width=True)
+            st.caption("Note: M2 84-day shift requires FRED historical API key for full series. Set RWA_FRED_API_KEY in .env to enable.")
+        else:
+            st.info("BTC historical data unavailable.")
+    else:
+        st.info("Loading 1-year macro timeseries... (requires yfinance installed)")
+
+    st.markdown("---")
+
+    # ── Macro Regime ───────────────────────────────────────────────────────────
+    st.markdown("#### Macro Regime Classifier")
+    regime_data = market.get("macro_regime", "NEUTRAL")
+    regime_bias = market.get("macro_bias", "NEUTRAL")
+    regime_desc = market.get("macro_description", "")
+    regime_colors = {
+        "RISK_ON": "#10b981", "RISK_OFF": "#ef4444",
+        "STAGFLATION": "#f59e0b", "LIQUIDITY_CRUNCH": "#8b5cf6", "NEUTRAL": "#6b7280",
+    }
+    r_color = regime_colors.get(regime_data, "#6b7280")
+    st.markdown(f"""
+    <div style="background:rgba(255,255,255,0.04);border:1px solid {r_color};
+    border-radius:8px;padding:16px 20px;margin-bottom:8px">
+        <div style="font-size:18px;font-weight:700;color:{r_color}">{regime_data.replace('_', ' ')}</div>
+        <div style="font-size:13px;color:#9ca3af;margin-top:6px">{regime_desc}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">Bias: <b style="color:{r_color}">{regime_bias}</b></div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
