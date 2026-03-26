@@ -301,6 +301,7 @@ _ss("user_anthropic_key", "")  # per-session user-supplied key — never written
 _ss("ai_news_brief",    "")
 _ss("pro_mode",         True)   # #65: True=Pro (all metrics), False=Beginner (simplified)
 _ss("demo_mode",        False)  # #67: Demo/Sandbox — no real API calls, synthetic data
+_ss("wallet_address",   "")     # #110: EVM wallet address for Zerion/ERC-3643 lookups
 
 # ── Shareable URL params — read ?tier=X&value=Y on page load ─────────────────
 try:
@@ -3428,6 +3429,258 @@ with tab_onchain:
 
         _rl_ts = _rlusd.get("timestamp", "")[:19]
         st.caption(f"Source: {_rl_src} · {_rl_ts} UTC · XRPL issuer: {XRPL_RLUSD_ISSUER[:12]}…")
+
+    # ── XRPL MPT (XLS-33d Multi-Purpose Token) (#106) ────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🔷 XRPL Multi-Purpose Tokens (XLS-33d)")
+    st.caption("XRPL JSON-RPC ledger_data · MPT issuances + RLUSD gateway supply · Cached 5 min")
+
+    _mpt = _df.fetch_xrpl_mpt_data()
+    if _mpt.get("error") and not _mpt.get("issuances") and not _mpt.get("rlusd_gateway_supply"):
+        st.caption(f"MPT data unavailable: {_mpt.get('error')}")
+    else:
+        _mpt_iss   = _mpt.get("issuances", [])
+        _mpt_rlusd = _mpt.get("rlusd_gateway_supply")
+        _mpt_total = _mpt.get("total_issuances", 0)
+        _mpt_a, _mpt_b = st.columns(2)
+        with _mpt_a:
+            _rlusd_fmt = f"${_mpt_rlusd/1e6:.1f}M" if _mpt_rlusd and _mpt_rlusd >= 1e6 else (f"${_mpt_rlusd:,.0f}" if _mpt_rlusd else "—")
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #06b6d4;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Gateway Supply</div>
+  <div style="font-size:26px;font-weight:700;color:#06b6d4">{_rlusd_fmt}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">On-ledger RLUSD via gateway_balances</div>
+</div>
+""", unsafe_allow_html=True)
+        with _mpt_b:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #8b5cf6;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Active MPT Issuances</div>
+  <div style="font-size:26px;font-weight:700;color:#8b5cf6">{_mpt_total:,}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">XLS-33d MPT objects on ledger</div>
+</div>
+""", unsafe_allow_html=True)
+        if _mpt_iss:
+            _mpt_rows = []
+            for _iss in _mpt_iss[:10]:
+                _mpt_rows.append({
+                    "Issuer": (_iss.get("issuer") or "")[:16] + "…",
+                    "Max Amount": _iss.get("maximum_amount", "—"),
+                    "Outstanding": _iss.get("outstanding_amount", "—"),
+                    "Flags": _iss.get("flags", 0),
+                })
+            st.dataframe(pd.DataFrame(_mpt_rows), use_container_width=True, hide_index=True)
+
+    # ─── Chainlink Reference Price Feeds (#108 + #109) ───────────────────────
+    st.markdown("---")
+    st.markdown("#### 🔗 Chainlink Reference Price Feeds")
+    st.caption("Etherscan eth_call proxy · latestAnswer() + decimals() · Cached 1 min")
+
+    if feature_enabled("etherscan"):
+        @st.cache_data(ttl=60, show_spinner=False)
+        def _cl_prices():
+            pairs = ["XAU/USD", "EUR/USD", "BTC/USD", "ETH/USD", "LINK/USD"]
+            return _df.fetch_multicall3_prices(pairs)
+
+        _cl_data = _cl_prices()
+        if _cl_data:
+            _cl_cols = st.columns(len(_cl_data))
+            for _ci, (_pair, _cprice) in enumerate(_cl_data.items()):
+                _err = _cprice.get("error")
+                _pv  = _cprice.get("price_usd")
+                _pv_fmt = f"${_pv:,.4f}" if _pv else "—"
+                _clr = "#10b981" if _pv else "#6b7280"
+                with _cl_cols[_ci]:
+                    st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
+  <div style="font-size:10px;color:#6b7280;margin-bottom:4px">{_pair}</div>
+  <div style="font-size:18px;font-weight:700;color:{_clr}">{_pv_fmt}</div>
+  <div style="font-size:10px;color:#9ca3af">Chainlink</div>
+</div>
+""", unsafe_allow_html=True)
+        else:
+            st.caption("No Chainlink data — check ETHERSCAN_API_KEY.")
+    else:
+        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable Chainlink price feeds.")
+
+    # ─── ERC-4626 Vault Reader (#103) ────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🏦 ERC-4626 Tokenized Vault Metrics")
+    st.caption("Etherscan eth_call · pricePerShare() + totalAssets() · BUIDL / OUSG / USDY / wstETH")
+
+    if feature_enabled("erc4626") or feature_enabled("etherscan"):
+        @st.cache_data(ttl=120, show_spinner=False)
+        def _vault_data():
+            return {sym: _df.fetch_erc4626_vault_data(sym)
+                    for sym in ["BUIDL", "OUSG", "USDY", "WSTETH"]}
+
+        _vaults = _vault_data()
+        _v_cols = st.columns(4)
+        for _vi, (_sym, _vd) in enumerate(_vaults.items()):
+            _err    = _vd.get("error")
+            _pps    = _vd.get("price_per_share")
+            _ta     = _vd.get("total_assets_usd")
+            _pps_s  = f"${_pps:.6f}" if _pps else "—"
+            _ta_s   = (f"${_ta/1e9:.2f}B" if _ta and _ta >= 1e9 else f"${_ta/1e6:.1f}M" if _ta else "—")
+            _vc     = "#10b981" if _pps else "#6b7280"
+            with _v_cols[_vi]:
+                st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_vc};border-radius:10px;padding:14px">
+  <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px">{_sym}</div>
+  <div style="font-size:10px;color:#6b7280">pricePerShare</div>
+  <div style="font-size:16px;font-weight:700;color:{_vc}">{_pps_s}</div>
+  <div style="font-size:10px;color:#6b7280;margin-top:6px">totalAssets</div>
+  <div style="font-size:14px;color:#9ca3af">{_ta_s}</div>
+</div>
+""", unsafe_allow_html=True)
+    else:
+        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-4626 vault reader.")
+
+    # ─── ERC-7540 Redemption Queue (#104) ────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### ⏳ ERC-7540 Async Redemption Depth")
+    st.caption("Etherscan eth_call · totalPendingRedemptions() · BUIDL / OUSG")
+
+    if feature_enabled("erc4626") or feature_enabled("etherscan"):
+        @st.cache_data(ttl=180, show_spinner=False)
+        def _redeem_data():
+            return {sym: _df.fetch_erc7540_redemption_depth(sym)
+                    for sym in ["BUIDL", "OUSG"]}
+
+        _redeems = _redeem_data()
+        _rd_cols = st.columns(2)
+        for _ri, (_sym, _rd) in enumerate(_redeems.items()):
+            _pending = _rd.get("pending_redemptions_usd")
+            _p_s     = (f"${_pending/1e6:.1f}M" if _pending and _pending >= 1e6 else
+                        f"${_pending:,.0f}" if _pending else "—")
+            _rc2     = "#f59e0b" if _pending and _pending > 0 else "#10b981"
+            with _rd_cols[_ri]:
+                st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px">{_sym} Pending Redemptions</div>
+  <div style="font-size:22px;font-weight:700;color:{_rc2};margin-top:6px">{_p_s}</div>
+  <div style="font-size:11px;color:#9ca3af;margin-top:4px">Queued for settlement (ERC-7540)</div>
+</div>
+""", unsafe_allow_html=True)
+    else:
+        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-7540 queue depth.")
+
+    # ─── Wallet Address Input (#110) + ERC-3643 + Zerion ─────────────────────
+    st.markdown("---")
+    st.markdown("#### 👛 Wallet Intelligence")
+    _wallet_input = st.text_input(
+        "EVM Wallet Address",
+        value=st.session_state.get("wallet_address", ""),
+        placeholder="0x…",
+        key="wallet_address_input",
+        help="Enter an EVM-compatible wallet address (0x…) for ERC-3643 compliance checks and Zerion portfolio import.",
+        max_chars=42,
+    )
+    _wallet_addr = _wallet_input.strip()
+    if _wallet_addr:
+        st.session_state["wallet_address"] = _wallet_addr
+
+    # ERC-3643 Compliance Check (#105)
+    st.markdown("##### 🛡️ ERC-3643 / T-REX On-Chain Compliance")
+    st.caption("Etherscan eth_call · isVerified(address) on BUIDL/OUSG — institutional compliance registry")
+
+    if _wallet_addr and (feature_enabled("onchainid") or feature_enabled("etherscan")):
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _compliance_check(wallet):
+            return {sym: _df.fetch_erc3643_compliance(sym, wallet)
+                    for sym in ["BUIDL", "OUSG"]}
+
+        _compl = _compliance_check(_wallet_addr)
+        _co_cols = st.columns(len(_compl))
+        for _coi, (_sym, _cd) in enumerate(_compl.items()):
+            _verified = _cd.get("is_verified")
+            _co_lbl   = "VERIFIED" if _verified is True else ("NOT VERIFIED" if _verified is False else "—")
+            _co_clr   = "#10b981" if _verified else ("#ef4444" if _verified is False else "#6b7280")
+            with _co_cols[_coi]:
+                st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
+  <div style="font-size:11px;color:#6b7280;margin-bottom:4px">{_sym}</div>
+  <div style="font-size:18px;font-weight:700;color:{_co_clr}">{_co_lbl}</div>
+  <div style="font-size:10px;color:#9ca3af">ERC-3643 isVerified</div>
+</div>
+""", unsafe_allow_html=True)
+    elif not _wallet_addr:
+        st.caption("Enter a wallet address above to check ERC-3643 compliance status.")
+    else:
+        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-3643 compliance checks.")
+
+    # Zerion Portfolio Import (#111)
+    st.markdown("##### 🟣 Zerion On-Chain Portfolio")
+    st.caption("Zerion API v1 · wallet positions across all EVM chains · Cached 3 min")
+
+    if _wallet_addr and feature_enabled("zerion"):
+        @st.cache_data(ttl=180, show_spinner=False)
+        def _zerion_portfolio(wallet):
+            return _df.fetch_zerion_portfolio(wallet)
+
+        _zp = _zerion_portfolio(_wallet_addr)
+        if _zp.get("error") and not _zp.get("positions"):
+            st.caption(f"Zerion unavailable: {_zp.get('error')}")
+        else:
+            _za, _zb, _zc = st.columns(3)
+            _z_total  = _zp.get("total_value_usd", 0)
+            _z_chains = _zp.get("chain_distribution", {})
+            _z_npos   = len(_zp.get("positions", []))
+            with _za:
+                st.metric("Total Value", f"${_z_total:,.2f}" if _z_total else "—")
+            with _zb:
+                st.metric("Positions", str(_z_npos))
+            with _zc:
+                st.metric("Chains", str(len(_z_chains)))
+
+            _z_pos = _zp.get("positions", [])
+            if _z_pos:
+                _z_rows = []
+                for _zr in _z_pos[:20]:
+                    _z_rows.append({
+                        "Asset":  _zr.get("symbol", "—"),
+                        "Chain":  _zr.get("chain", "—"),
+                        "Value":  f"${_zr.get('value_usd', 0):,.2f}",
+                        "Amount": f"{_zr.get('quantity', 0):.4f}",
+                    })
+                st.dataframe(pd.DataFrame(_z_rows), use_container_width=True, hide_index=True)
+    elif not _wallet_addr:
+        st.caption("Enter a wallet address above to load Zerion portfolio data.")
+    else:
+        st.caption("Set RWA_ZERION_API_KEY in .env to enable Zerion portfolio import.")
+
+    # ─── Wormhole Cross-Chain VAA Activity (#113) ─────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🌉 Wormhole Cross-Chain Bridge Activity")
+    st.caption("Wormhole Scan public API · Verified Action Approvals (VAAs) · RWA bridge flow tracker")
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _wh_vaas(chain_id):
+        return _df.fetch_wormhole_rwa_vaa(emitter_chain_id=chain_id, page_size=15)
+
+    _wh_chain_opts = {"Ethereum (2)": 2, "Solana (1)": 1, "BSC (4)": 4}
+    _wh_sel = st.selectbox("Source Chain", list(_wh_chain_opts.keys()),
+                           key="wh_chain_sel", index=0)
+    _wh_chain_id = _wh_chain_opts[_wh_sel]
+    _wh_data = _wh_vaas(_wh_chain_id)
+
+    if _wh_data:
+        _wh_rows = []
+        for _wv in _wh_data:
+            _ts_raw = _wv.get("timestamp", "")
+            _ts_str = _ts_raw[:19].replace("T", " ") if _ts_raw else "—"
+            _wh_rows.append({
+                "Sequence":   _wv.get("sequence", "—"),
+                "Emitter":    (_wv.get("emitter_address") or "")[:16] + "…",
+                "Timestamp":  _ts_str,
+                "Payload":    _wv.get("payload_type", 0),
+                "Guardian":   _wv.get("guardian_set", 0),
+                "Tx Hash":    (_wv.get("tx_hash") or "")[:16] + ("…" if _wv.get("tx_hash") else ""),
+            })
+        st.dataframe(pd.DataFrame(_wh_rows), use_container_width=True, hide_index=True)
+        st.caption(f"{len(_wh_data)} VAAs · Chain ID {_wh_chain_id} · Wormhole Scan public API")
+    else:
+        st.caption("No recent VAA data found for this chain.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

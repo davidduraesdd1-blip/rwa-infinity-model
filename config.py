@@ -96,6 +96,13 @@ PROPY_API_KEY           = _os.environ.get("RWA_PROPY_API_KEY")          # propy.
 MANTRA_API_KEY          = _os.environ.get("RWA_MANTRA_API_KEY")         # mantrachain.io
 PLUME_API_KEY           = _os.environ.get("RWA_PLUME_API_KEY")          # plumenetwork.xyz
 
+# ── Phase 11 Web3 & Future-Ready APIs ────────────────────────────────────────
+ZERION_API_KEY          = _os.environ.get("RWA_ZERION_API_KEY")          # zerion.io — wallet portfolio API (#111)
+WORMHOLE_API_KEY        = _os.environ.get("RWA_WORMHOLE_API_KEY")        # wormholescan.io — VAA tracking (#113)
+CHAINLINK_STREAM_KEY    = _os.environ.get("RWA_CHAINLINK_STREAM_KEY")    # Chainlink Data Streams client key (#108)
+CHAINLINK_STREAM_SECRET = _os.environ.get("RWA_CHAINLINK_STREAM_SECRET") # Chainlink Data Streams client secret (#108)
+ONCHAINID_API_KEY       = _os.environ.get("RWA_ONCHAINID_API_KEY")       # onchainid.com — KYC eligibility (#107)
+
 # ── News & Sentiment ─────────────────────────────────────────────────────────
 NEWSAPI_API_KEY         = _os.environ.get("RWA_NEWSAPI_API_KEY")        # newsapi.org
 CRYPTOPANIC_API_KEY     = _os.environ.get("RWA_CRYPTOPANIC_API_KEY")    # cryptopanic.com
@@ -3981,6 +3988,13 @@ FEATURES: dict = {
     "xrpl":                 bool(XRPL_NODE_URL),
     # Error monitoring
     "sentry":               bool(_os.environ.get("RWA_SENTRY_DSN")),
+    # Phase 11 Web3
+    "zerion":               bool(_os.environ.get("RWA_ZERION_API_KEY")),          # wallet portfolio (#111)
+    "chainlink_streams":    bool(_os.environ.get("RWA_CHAINLINK_STREAM_KEY")),    # data streams (#108)
+    "onchainid":            bool(_os.environ.get("RWA_ONCHAINID_API_KEY")),       # KYC eligibility (#107)
+    "wormhole":             True,  # public API, no key needed (#113)
+    "erc4626":              bool(_os.environ.get("RWA_ALCHEMY_API_KEY") or _os.environ.get("RWA_INFURA_API_KEY")),  # (#103)
+    "multicall3":           bool(_os.environ.get("RWA_ALCHEMY_API_KEY") or _os.environ.get("RWA_INFURA_API_KEY")),  # (#109)
 }
 
 SENTRY_DSN: str | None = _os.environ.get("RWA_SENTRY_DSN")
@@ -4031,4 +4045,9 @@ ALLOWED_DOMAINS: frozenset = frozenset({
     "xrpl-facilitator-mainnet.t54.ai",
     "api.dune.com",
     "dogechain.info",
+    # Phase 11
+    "api.zerion.io",                 # Zerion portfolio API (#111)
+    "api.wormholescan.io",           # Wormhole VAA tracking (#113)
+    "api.chain.link",                # Chainlink Data Streams (#108)
+    "min-api.cryptocompare.com",     # CryptoCompare — Chainlink fallback
 })

@@ -3949,3 +3949,465 @@ def fetch_protocol_fees(slugs: Optional[List[str]] = None) -> Dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source":    "defillama_fees",
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ERC-4626 VAULT DIRECT READS  (#103)
+# Read pricePerShare() and totalAssets() from ERC-4626 tokenised vaults
+# via Etherscan API (no web3 install needed — uses eth_call via JSON-RPC)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ERC-4626 ABI function selectors
+_ERC4626_PRICE_PER_SHARE = "0x99530b06"  # pricePerShare() selector (4-byte)
+_ERC4626_TOTAL_ASSETS    = "0x01e1d114"  # totalAssets() selector
+_ERC4626_DECIMALS        = "0x313ce567"  # decimals() selector
+
+# Known ERC-4626 vault addresses for tracked RWA assets
+_ERC4626_VAULTS: dict = {
+    "BUIDL":  {"address": "0x7712c34205737192402172409a8F7ccef8aA2AEc", "chain": "ethereum", "decimals": 6},
+    "OUSG":   {"address": "0x1B19C19393e2d034D8Ff31ff34c81252FcBbe39B", "chain": "ethereum", "decimals": 18},
+    "USDY":   {"address": "0x96F6ef951840721AdBF46Ac996b59E0235CB985C", "chain": "ethereum", "decimals": 18},
+    "WSTETH": {"address": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", "chain": "ethereum", "decimals": 18},
+}
+
+_ETHERSCAN_RPC = "https://api.etherscan.io/api"
+
+
+def _etherscan_call(contract: str, data: str) -> Optional[str]:
+    """Call eth_call via Etherscan proxy (no web3 needed)."""
+    key = ETHERSCAN_API_KEY or ""
+    params = {
+        "module": "proxy", "action": "eth_call",
+        "to": contract, "data": data,
+        "tag": "latest", "apikey": key,
+    }
+    try:
+        r = _get("https://api.etherscan.io/api", params=params, timeout=8)
+        if r and isinstance(r, dict):
+            return r.get("result", "")
+    except Exception as e:
+        logger.debug("[ERC4626] eth_call failed: %s", e)
+    return None
+
+
+def fetch_erc4626_vault_data(symbol: str) -> dict:
+    """
+    Read pricePerShare() and totalAssets() from an ERC-4626 vault.
+
+    Uses Etherscan eth_call proxy — no web3 installation needed.
+    Falls back to "unavailable" if Etherscan key missing or call fails.
+
+    Returns:
+        symbol, address, price_per_share, total_assets_usd, decimals, source
+    """
+    vault = _ERC4626_VAULTS.get(symbol)
+    if not vault:
+        return {"symbol": symbol, "source": "unknown_vault", "error": f"No vault configured for {symbol}"}
+
+    addr     = vault["address"]
+    decimals = vault.get("decimals", 18)
+    result   = {"symbol": symbol, "address": addr, "price_per_share": None,
+                 "total_assets": None, "decimals": decimals, "source": "unavailable"}
+
+    cache_key = f"erc4626:{symbol}"
+    cached    = _cached_get(cache_key, 300)  # 5-min cache
+    if cached:
+        return cached
+
+    # pricePerShare()
+    raw_pps = _etherscan_call(addr, _ERC4626_PRICE_PER_SHARE)
+    if raw_pps and raw_pps != "0x":
+        try:
+            result["price_per_share"] = int(raw_pps, 16) / (10 ** decimals)
+            result["source"] = "etherscan"
+        except (ValueError, ZeroDivisionError):
+            pass
+
+    # totalAssets()
+    raw_ta = _etherscan_call(addr, _ERC4626_TOTAL_ASSETS)
+    if raw_ta and raw_ta != "0x":
+        try:
+            result["total_assets"] = int(raw_ta, 16) / (10 ** decimals)
+        except (ValueError, ZeroDivisionError):
+            pass
+
+    _cache_set(cache_key, result, 300)
+    return result
+
+
+def fetch_erc7540_redemption_depth(symbol: str) -> dict:
+    """
+    ERC-7540 async vault — read pending redemption queue depth as a risk signal.
+    ERC-7540 extends ERC-4626 with async operations; pendingRedeemRequest(owner) returns queue size.
+
+    Returns: symbol, pending_redemptions, source
+    """
+    # ERC-7540 pendingRedeemRequest selector: 0x0dfe1681 (varies by implementation)
+    # Most ERC-7540 vaults also expose claimableRedeemRequest(owner)
+    # For portfolio-level stats, use the generic totalPendingRedemptions if available
+    vault = _ERC4626_VAULTS.get(symbol)
+    if not vault:
+        return {"symbol": symbol, "source": "unknown_vault"}
+
+    # Attempt totalPendingRedemptions (non-standard but common)
+    _TOTAL_PENDING_SEL = "0xbf2c0224"  # totalPendingRedemptions() — common extension
+    raw = _etherscan_call(vault["address"], _TOTAL_PENDING_SEL)
+    pending = None
+    if raw and raw != "0x":
+        try:
+            pending = int(raw, 16) / (10 ** vault.get("decimals", 18))
+        except (ValueError, ZeroDivisionError):
+            pass
+
+    return {
+        "symbol":               symbol,
+        "pending_redemptions":  pending,
+        "source":               "etherscan" if pending is not None else "unavailable",
+    }
+
+
+def fetch_erc3643_compliance(contract: str, wallet: str = "") -> dict:
+    """
+    ERC-3643 (T-REX) compliance reads — isVerified() + canTransfer() for a wallet.
+    Used for permissioned RWA tokens (BUIDL, tokenized equity, etc.)
+
+    Returns: is_verified, can_transfer, source
+    """
+    if not wallet or not contract:
+        return {"is_verified": None, "can_transfer": None, "source": "missing_params"}
+
+    # isVerified(address) — T-REX IIdentityRegistry
+    # Function selector: keccak256("isVerified(address)") = 0xb9209e33
+    padded_wallet = wallet.lower().replace("0x", "").zfill(64)
+    _is_verified_sel = "0xb9209e33" + padded_wallet
+
+    raw = _etherscan_call(contract, _is_verified_sel)
+    is_verified = None
+    if raw and len(raw) >= 64:
+        try:
+            is_verified = bool(int(raw, 16))
+        except ValueError:
+            pass
+
+    return {
+        "wallet":      wallet,
+        "contract":    contract,
+        "is_verified": is_verified,
+        "can_transfer": None,  # canTransfer requires additional params (to, amount, data)
+        "source":      "etherscan" if is_verified is not None else "unavailable",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XRPL MPT DATA  (#106)
+# Multi-Purpose Token (XLS-33d) issuances and RLUSD flows
+# Uses XRPL public HTTP REST API (no xrpl-py needed for basic reads)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_XRPL_RPC_URL = "https://s1.ripple.com:51234"
+
+_XRPL_MPT_CACHE: dict = {}
+_XRPL_MPT_LOCK  = threading.Lock()
+_XRPL_MPT_TTL   = 300  # 5 min
+
+
+def fetch_xrpl_mpt_data() -> dict:
+    """
+    Fetch XRPL Multi-Purpose Token (MPT) issuances and RLUSD metadata.
+
+    Uses XRPL public JSON-RPC endpoint. Returns issuance count, RLUSD supply,
+    and recent MPT transaction volume from ledger data.
+
+    Returns:
+        mpt_issuance_count, rlusd_supply, source, timestamp
+    """
+    with _XRPL_MPT_LOCK:
+        cached = _XRPL_MPT_CACHE.get("mpt_data")
+        if cached and (time.time() - cached["_ts"]) < _XRPL_MPT_TTL:
+            return {k: v for k, v in cached.items() if k != "_ts"}
+
+    result: dict = {
+        "mpt_issuance_count": 0, "rlusd_supply": None,
+        "source": "unavailable", "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Query ledger_objects for MPTokenIssuance type
+    try:
+        payload = {
+            "method": "ledger_data",
+            "params": [{"ledger_index": "validated", "type": "mpt_issuance", "limit": 50}],
+        }
+        r = _SESSION.post(_XRPL_RPC_URL, json=payload, timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("result", {})
+            objs = data.get("state", [])
+            result["mpt_issuance_count"] = len(objs)
+            result["source"] = "xrpl_rpc"
+    except Exception as e:
+        logger.debug("[XRPL MPT] issuance fetch failed: %s", e)
+
+    # Query RLUSD supply via account_lines for the Ripple issuer
+    # RLUSD issuer: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh (Ripple RLUSD genesis)
+    try:
+        payload = {
+            "method": "gateway_balances",
+            "params": [{"account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh", "ledger_index": "validated"}],
+        }
+        r = _SESSION.post(_XRPL_RPC_URL, json=payload, timeout=8)
+        if r.status_code == 200:
+            obligations = r.json().get("result", {}).get("obligations", {})
+            rlusd = obligations.get("RLUSD") or obligations.get("USD")
+            if rlusd:
+                result["rlusd_supply"] = float(rlusd)
+    except Exception as e:
+        logger.debug("[XRPL MPT] RLUSD supply fetch failed: %s", e)
+
+    with _XRPL_MPT_LOCK:
+        _XRPL_MPT_CACHE["mpt_data"] = {**result, "_ts": time.time()}
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHAINLINK DATA FEEDS  (#108)
+# On-chain price reference data for tokenized real-world assets
+# Uses Chainlink's public REST API (no SDK needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CHAINLINK_FEEDS: dict = {
+    # Pair → Chainlink feed contract address on Ethereum
+    "XAU/USD":   "0x214eD9Da11D2fbe465a6fc601a91E62EbEc1a0D6",
+    "EUR/USD":   "0xb49f677943BC038e9857d61E7d053CaA2C1734C1",
+    "BTC/USD":   "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",
+    "ETH/USD":   "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+    "LINK/USD":  "0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c",
+    "AAPL/USD":  "0x139C8512Cde1778e9b9a8e721ce1aEbd4dD43587",  # Tokenised equity feed
+    "TSLA/USD":  "0x1ceDaaB50936881B3e449e47e40A2cDAF5576A4a",  # Tokenised equity feed
+}
+
+_CL_ANSWER_SEL    = "0x50d25bcd"  # latestAnswer() selector
+_CL_DECIMALS_SEL  = "0x313ce567"  # decimals() selector
+_CL_CACHE: dict   = {}
+_CL_CACHE_TTL     = 60  # 1 min
+
+
+def fetch_chainlink_price(pair: str) -> dict:
+    """
+    Fetch latest Chainlink price feed value for a pair.
+
+    Uses Etherscan eth_call proxy to call latestAnswer() on the feed contract.
+    No Chainlink SDK or auth needed for read-only price checks.
+
+    Returns: pair, price, decimals, source
+    """
+    feed_addr = _CHAINLINK_FEEDS.get(pair)
+    if not feed_addr:
+        return {"pair": pair, "price": None, "source": "unknown_feed"}
+
+    cache_key = f"cl:{pair}"
+    cached    = _CL_CACHE.get(cache_key)
+    if cached and (time.time() - cached["_ts"]) < _CL_CACHE_TTL:
+        return {k: v for k, v in cached.items() if k != "_ts"}
+
+    result: dict = {"pair": pair, "price": None, "decimals": 8, "source": "unavailable"}
+
+    # Read decimals
+    raw_dec = _etherscan_call(feed_addr, _CL_DECIMALS_SEL)
+    if raw_dec and raw_dec != "0x":
+        try:
+            result["decimals"] = int(raw_dec, 16)
+        except ValueError:
+            pass
+
+    # Read latestAnswer
+    raw_ans = _etherscan_call(feed_addr, _CL_ANSWER_SEL)
+    if raw_ans and raw_ans != "0x":
+        try:
+            raw_int = int(raw_ans, 16)
+            # Handle negative values (two's complement for int256)
+            if raw_int >= 2**255:
+                raw_int -= 2**256
+            if raw_int > 0:
+                result["price"]  = raw_int / (10 ** result["decimals"])
+                result["source"] = "chainlink_etherscan"
+        except (ValueError, ZeroDivisionError):
+            pass
+
+    _CL_CACHE[cache_key] = {**result, "_ts": time.time()}
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WEB3-MULTICALL (Multicall3)  (#109)
+# Batch N EVM contract reads into 1 RPC call using Multicall3 contract
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11"  # Deployed on all EVM chains
+
+
+def fetch_multicall3_prices(pairs: list) -> dict:
+    """
+    Batch-read Chainlink prices via Multicall3 to minimise RPC calls.
+
+    Uses Etherscan's eth_call for each target in a single logical batch.
+    (True Multicall3 requires web3.py — this is a sequential batch with shared session.)
+
+    Returns: dict of pair → price
+    """
+    results = {}
+    for pair in pairs:
+        r = fetch_chainlink_price(pair)
+        if r.get("price"):
+            results[pair] = r["price"]
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ZERION PORTFOLIO API  (#111)
+# Unified EVM + Solana positions from wallet address
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ZERION_BASE = "https://api.zerion.io/v1"
+_ZERION_CACHE: dict = {}
+_ZERION_TTL   = 120  # 2 min
+
+
+def fetch_zerion_portfolio(wallet_address: str) -> dict:
+    """
+    Fetch unified EVM + Solana token positions for a wallet address from Zerion.
+
+    Requires RWA_ZERION_API_KEY. Returns empty portfolio if key missing or API unavailable.
+
+    Returns:
+        wallet, positions (list), total_usd, chain_distribution, source
+    """
+    if not wallet_address or not wallet_address.startswith("0x"):
+        return {"wallet": wallet_address, "positions": [], "total_usd": 0.0,
+                "source": "invalid_address"}
+
+    api_key = ZERION_API_KEY  # from config
+    if not api_key:
+        return {"wallet": wallet_address, "positions": [], "total_usd": 0.0,
+                "source": "no_api_key",
+                "message": "Set RWA_ZERION_API_KEY to enable wallet portfolio import"}
+
+    cache_key = f"zerion:{wallet_address.lower()}"
+    cached    = _ZERION_CACHE.get(cache_key)
+    if cached and (time.time() - cached["_ts"]) < _ZERION_TTL:
+        return {k: v for k, v in cached.items() if k != "_ts"}
+
+    import base64 as _b64
+    auth_token = _b64.b64encode(f"{api_key}:".encode()).decode()
+
+    result: dict = {
+        "wallet": wallet_address, "positions": [], "total_usd": 0.0,
+        "chain_distribution": {}, "source": "unavailable",
+    }
+
+    try:
+        url = f"{_ZERION_BASE}/wallets/{wallet_address}/positions/"
+        r   = _SESSION.get(
+            url,
+            headers={"Authorization": f"Basic {auth_token}", "Accept": "application/json"},
+            params={"filter[position_types]": "wallet", "currency": "usd", "sort": "-value"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            positions = []
+            chain_dist: dict = {}
+            total = 0.0
+            for item in data:
+                attrs  = item.get("attributes", {})
+                value  = float(attrs.get("value") or 0)
+                chain  = attrs.get("relationships", {}).get("chain", {}).get("data", {}).get("id", "unknown")
+                symbol = (attrs.get("fungible_info") or {}).get("symbol", "?")
+                positions.append({
+                    "symbol":  symbol,
+                    "chain":   chain,
+                    "value":   round(value, 2),
+                    "qty":     float(attrs.get("quantity", {}).get("float") or 0),
+                    "price":   float(attrs.get("price") or 0),
+                })
+                total += value
+                chain_dist[chain] = chain_dist.get(chain, 0) + value
+
+            result.update({
+                "positions":          positions[:20],  # cap at 20
+                "total_usd":          round(total, 2),
+                "chain_distribution": {k: round(v, 2) for k, v in chain_dist.items()},
+                "source":             "zerion",
+            })
+        elif r.status_code == 401:
+            result["source"]  = "auth_error"
+            result["message"] = "Zerion API key invalid — check RWA_ZERION_API_KEY"
+    except Exception as e:
+        logger.debug("[Zerion] fetch failed for %s: %s", wallet_address, e)
+
+    _ZERION_CACHE[cache_key] = {**result, "_ts": time.time()}
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORMHOLE VAA TRACKING  (#113)
+# Cross-chain RWA asset movement monitoring via Wormhole Scan public API
+# ─────────────────────────────────────────────────────────────────────────────
+
+_WORMHOLE_API  = "https://api.wormholescan.io/api/v1"
+_WH_CACHE: dict = {}
+_WH_LOCK        = threading.Lock()
+_WH_TTL         = 300  # 5 min
+
+
+def fetch_wormhole_rwa_vaa(
+    emitter_chain_id: int = 2,   # Ethereum = 2
+    page_size: int = 20,
+) -> list:
+    """
+    Fetch recent Wormhole VAA (Verified Action Approvals) from Wormhole Scan.
+    Used to track cross-chain RWA token bridging activity.
+
+    Args:
+        emitter_chain_id: Wormhole chain ID to filter (2=Ethereum, 1=Solana, 4=BSC)
+        page_size: Number of recent VAAs to return
+
+    Returns:
+        List of VAA dicts: id, sequence, emitter_address, timestamp, payload_type, txhash
+    """
+    cache_key = f"wh_vaa:{emitter_chain_id}"
+    with _WH_LOCK:
+        cached = _WH_CACHE.get(cache_key)
+        if cached and (time.time() - cached["_ts"]) < _WH_TTL:
+            return cached["data"]
+
+    vaas = []
+    try:
+        r = _SESSION.get(
+            f"{_WORMHOLE_API}/vaas",
+            params={
+                "chainId": emitter_chain_id,
+                "pageSize": page_size,
+                "sortOrder": "DESC",
+            },
+            timeout=10,
+        )
+        if r.status_code == 200:
+            raw_vaas = r.json().get("data", [])
+            for v in raw_vaas:
+                vaas.append({
+                    "id":              v.get("id", ""),
+                    "sequence":        v.get("sequence", 0),
+                    "emitter_chain":   v.get("emitterChain", emitter_chain_id),
+                    "emitter_address": v.get("emitterAddr", ""),
+                    "timestamp":       v.get("timestamp", ""),
+                    "tx_hash":         (v.get("txHash") or ""),
+                    "payload_type":    v.get("payloadType", 0),
+                    "guardian_set":    v.get("guardianSetIndex", 0),
+                })
+    except Exception as e:
+        logger.debug("[Wormhole] VAA fetch failed: %s", e)
+
+    with _WH_LOCK:
+        _WH_CACHE[cache_key] = {"data": vaas, "_ts": time.time()}
+
+    return vaas
