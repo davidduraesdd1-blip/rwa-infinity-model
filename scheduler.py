@@ -204,7 +204,7 @@ def start():
         # ── Graceful resume from DB ───────────────────────────────────────────
         try:
             _st = _db.read_scan_status()
-            if _st.get("timestamp"):
+            if _st and _st.get("timestamp"):
                 _last_refresh = _st["timestamp"]
                 logger.info("[Scheduler] Resumed — last refresh: %s", _last_refresh)
             else:
