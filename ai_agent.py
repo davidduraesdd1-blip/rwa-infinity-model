@@ -1273,3 +1273,174 @@ class AgentSupervisor:
 
 # Module-level singleton supervisor
 supervisor = AgentSupervisor()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCENARIO SIMULATION AGENT  (#38)
+# "What if HY spreads widen 200bp?" — Monte Carlo stress test via Claude
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_scenario_simulation(scenario: str, portfolio_snapshot: dict) -> dict:
+    """
+    Run a natural language scenario simulation using Claude.
+
+    Args:
+        scenario:           Free-text scenario e.g. "What if HY spreads widen 200bp?"
+        portfolio_snapshot: Current portfolio state (asset TVLs, yields, weights)
+
+    Returns:
+        {
+          "scenario":     the input scenario,
+          "impact":       narrative impact summary,
+          "affected":     [list of affected assets],
+          "yield_delta":  estimated portfolio yield change (pct points),
+          "risk_delta":   estimated risk score change,
+          "monte_carlo":  {"p5": float, "p50": float, "p95": float},
+          "source":       "claude" | "error",
+        }
+    """
+    if not _ANTHROPIC_AVAILABLE:
+        return {"scenario": scenario, "source": "error", "error": "anthropic SDK not installed"}
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return {"scenario": scenario, "source": "error", "error": "ANTHROPIC_API_KEY not set"}
+
+    # Summarize portfolio for prompt (top 10 positions by weight)
+    positions = portfolio_snapshot.get("positions", [])[:10]
+    pos_lines = [
+        f"  {p.get('name','?')}: yield={p.get('yield_pct',0):.1f}% tvl=${p.get('tvl_usd',0)/1e6:.0f}M "
+        f"weight={p.get('weight_pct',0):.1f}%"
+        for p in positions
+    ]
+    pos_block = "\n".join(pos_lines) if pos_lines else "  No positions loaded"
+
+    prompt = f"""You are a quantitative risk analyst for a Real World Asset (RWA) tokenization portfolio.
+
+SCENARIO: {scenario}
+
+CURRENT PORTFOLIO (top positions):
+{pos_block}
+
+Portfolio stats:
+- Total AUM: ${portfolio_snapshot.get('total_aum_usd', 0)/1e6:.1f}M
+- Avg yield: {portfolio_snapshot.get('avg_yield_pct', 0):.1f}%
+- Macro regime: {portfolio_snapshot.get('macro_regime', 'UNKNOWN')}
+
+Analyze this scenario and respond in JSON with this EXACT schema:
+{{
+  "impact": "2-3 sentence narrative impact",
+  "affected": ["asset1", "asset2"],
+  "yield_delta_pp": <float — estimated yield change in percentage points>,
+  "risk_delta": <float from -1.0 to +1.0 — risk increase is positive>,
+  "monte_carlo": {{"p5": <worst 5th pct outcome %>, "p50": <median %>, "p95": <best 95th pct %>}},
+  "recommended_action": "brief action recommendation"
+}}
+
+Return ONLY valid JSON. No markdown, no explanation outside the JSON."""
+
+    try:
+        client = _anthropic.Anthropic(api_key=api_key, timeout=float(CLAUDE_TIMEOUT))
+        msg = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip() if msg.content else ""
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].strip()
+            if raw.startswith("json"):
+                raw = raw[4:].lstrip()
+        import json as _json
+        parsed = _json.loads(raw)
+        parsed["scenario"] = scenario
+        parsed["source"] = "claude"
+        return parsed
+    except Exception as e:
+        logger.warning("[Scenario] simulation failed: %s", e)
+        return {
+            "scenario": scenario,
+            "source": "error",
+            "error": str(e),
+            "impact": "Simulation unavailable — check API key.",
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANOMALY DETECTION AGENT  (#39)
+# Flags assets with >15% TVL drop in 24hrs or unusual yield spikes
+# ─────────────────────────────────────────────────────────────────────────────
+
+def detect_portfolio_anomalies(
+    current_snapshot: dict,
+    previous_snapshot: dict,
+    tvl_drop_threshold: float = 0.15,
+    yield_spike_threshold: float = 0.30,
+) -> list[dict]:
+    """
+    Detect anomalies between two portfolio snapshots.
+
+    Args:
+        current_snapshot:   Latest market data snapshot
+        previous_snapshot:  Prior snapshot (≥1h ago)
+        tvl_drop_threshold: Flag if TVL drops more than this fraction (default 15%)
+        yield_spike_threshold: Flag if yield changes more than this fraction (default 30%)
+
+    Returns:
+        List of anomaly dicts, each with: asset, type, severity, delta, description
+    """
+    anomalies = []
+    cur_assets  = {a["id"]: a for a in current_snapshot.get("assets", [])}
+    prev_assets = {a["id"]: a for a in previous_snapshot.get("assets", [])}
+
+    for asset_id, cur in cur_assets.items():
+        prev = prev_assets.get(asset_id)
+        if not prev:
+            continue
+
+        cur_tvl  = float(cur.get("tvl_usd", 0) or 0)
+        prev_tvl = float(prev.get("tvl_usd", 0) or 0)
+        cur_yield  = float(cur.get("yield_pct", 0) or 0)
+        prev_yield = float(prev.get("yield_pct", 0) or 0)
+
+        # TVL drop anomaly
+        if prev_tvl > 1_000_000 and cur_tvl < prev_tvl * (1 - tvl_drop_threshold):
+            pct_drop = (prev_tvl - cur_tvl) / prev_tvl
+            anomalies.append({
+                "asset":       asset_id,
+                "name":        cur.get("name", asset_id),
+                "type":        "TVL_DROP",
+                "severity":    "HIGH" if pct_drop > 0.30 else "MEDIUM",
+                "delta_pct":   round(-pct_drop * 100, 1),
+                "prev_tvl_m":  round(prev_tvl / 1e6, 2),
+                "cur_tvl_m":   round(cur_tvl / 1e6, 2),
+                "description": (
+                    f"{cur.get('name', asset_id)} TVL dropped {pct_drop*100:.1f}% "
+                    f"(${prev_tvl/1e6:.1f}M → ${cur_tvl/1e6:.1f}M). "
+                    "Possible exploit, redemption rush, or protocol issue."
+                ),
+            })
+
+        # Yield spike anomaly (sudden yield spike can signal increased risk)
+        if prev_yield > 0 and abs(cur_yield - prev_yield) / max(prev_yield, 0.01) > yield_spike_threshold:
+            direction = "SPIKE" if cur_yield > prev_yield else "DROP"
+            anomalies.append({
+                "asset":       asset_id,
+                "name":        cur.get("name", asset_id),
+                "type":        f"YIELD_{direction}",
+                "severity":    "MEDIUM",
+                "delta_pp":    round(cur_yield - prev_yield, 2),
+                "prev_yield":  round(prev_yield, 2),
+                "cur_yield":   round(cur_yield, 2),
+                "description": (
+                    f"{cur.get('name', asset_id)} yield {direction.lower()}d "
+                    f"{abs(cur_yield - prev_yield):.1f}pp "
+                    f"({prev_yield:.1f}% → {cur_yield:.1f}%). "
+                    "Review protocol health before adding exposure."
+                ),
+            })
+
+    # Sort by severity (HIGH first)
+    anomalies.sort(key=lambda x: 0 if x["severity"] == "HIGH" else 1)
+    return anomalies
