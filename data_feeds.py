@@ -251,9 +251,8 @@ def fetch_defillama_yields_for_rwa() -> List[dict]:
     RWA protocols. Returns up to 50 top pools sorted by TVL.
     """
     def _fetch():
-        import requests as _req
         try:
-            resp = _req.get("https://yields.llama.fi/pools", timeout=15)
+            resp = _session.get("https://yields.llama.fi/pools", timeout=15)
             if resp.status_code != 200:
                 return []
             pools = resp.json().get("data", [])
@@ -940,10 +939,10 @@ def get_market_summary() -> dict:
     protocols   = fetch_defillama_protocols()
     yield_pools = fetch_defillama_yields()
     total_tvl   = sum(p.get("tvl", 0) or 0 for p in protocols)
-    active_pools = len([p for p in yield_pools if p["tvl_usd"] > 100_000])
+    active_pools = len([p for p in yield_pools if (p.get("tvl_usd") or 0) > 100_000])
     avg_yield    = (
-        sum(p["apy"] for p in yield_pools if p["apy"] > 0 and p["apy"] < 100)
-        / max(len([p for p in yield_pools if 0 < p["apy"] < 100]), 1)
+        sum(p.get("apy", 0) for p in yield_pools if 0 < (p.get("apy") or 0) < 100)
+        / max(len([p for p in yield_pools if 0 < (p.get("apy") or 0) < 100]), 1)
     )
     gold_price   = fetch_gold_price()
 
@@ -961,11 +960,11 @@ def get_market_summary() -> dict:
         # Fear & Greed
         "fear_greed_value":      fg.get("current", {}).get("value", 50),
         "fear_greed_label":      fg.get("current", {}).get("label", "Neutral"),
-        "fear_greed_signal":     fg["signal"],
+        "fear_greed_signal":     fg.get("signal", "Neutral"),
         # Stablecoin dry powder
-        "stablecoin_total_bn":   stable["total_bn"],
-        "usdt_supply_bn":        stable["usdt_bn"],
-        "usdc_supply_bn":        stable["usdc_bn"],
+        "stablecoin_total_bn":   stable.get("total_bn", 0),
+        "usdt_supply_bn":        stable.get("usdt_bn", 0),
+        "usdc_supply_bn":        stable.get("usdc_bn", 0),
         # Macro regime
         "macro_regime":          regime["regime"],
         "macro_bias":            regime["bias"],
@@ -2084,6 +2083,8 @@ def fetch_global_m2_composite() -> dict:
                 # Public CSV endpoint (no key needed)
                 csv_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=M2SL"
                 r = _session.get(csv_url, timeout=12)
+                if r.status_code != 200:
+                    raise ValueError(f"FRED CSV returned HTTP {r.status_code}")
                 lines = r.text.strip().split("\n")[1:]  # skip header
                 obs = []
                 for line in reversed(lines[-6:]):

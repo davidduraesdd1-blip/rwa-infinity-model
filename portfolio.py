@@ -1043,7 +1043,7 @@ def calculate_portfolio_duration(holdings: list, portfolio_value_usd: float = 10
     return {
         "weighted_avg_duration": round(wav_duration, 4),
         "dv01_usd":              round(dv01, 2),
-        "dv01_per_million":      round(dv01 * (1_000_000 / max(portfolio_value_usd, 1)), 2),
+        "dv01_per_million":      round(dv01 * (1_000_000 / portfolio_value_usd), 2) if portfolio_value_usd > 0 else 0.0,
         "rate_exposure_label":   dur_label,
         "zero_duration_pct":     round(zero_dur_pct, 2),
         "scenarios":             scenarios,
