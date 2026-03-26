@@ -3503,8 +3503,8 @@ with tab_onchain:
     st.caption("XRPL JSON-RPC ledger_data · MPT issuances + RLUSD gateway supply · Cached 5 min")
 
     _mpt = _df.fetch_xrpl_mpt_data()
-    if _mpt.get("error") and not _mpt.get("issuances") and not _mpt.get("rlusd_gateway_supply"):
-        st.caption(f"MPT data unavailable: {_mpt.get('error')}")
+    if _mpt.get("source") == "unavailable":
+        st.caption("MPT data unavailable — XRPL RPC unreachable.")
     else:
         _mpt_rlusd = _mpt.get("rlusd_supply")
         _mpt_total = _mpt.get("mpt_issuance_count", 0)
@@ -3677,8 +3677,8 @@ with tab_onchain:
             return _df.fetch_zerion_portfolio(wallet)
 
         _zp = _zerion_portfolio(_wallet_addr)
-        if _zp.get("error") and not _zp.get("positions"):
-            st.caption(f"Zerion unavailable: {_zp.get('error')}")
+        if _zp.get("source") in ("unavailable", "auth_error", "invalid_address"):
+            st.caption(f"Zerion unavailable — {_zp.get('message', _zp.get('source', ''))}")
         else:
             _za, _zb, _zc = st.columns(3)
             _z_total  = _zp.get("total_usd", 0)

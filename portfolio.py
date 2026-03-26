@@ -1212,7 +1212,7 @@ def compute_factor_tilted_portfolio(
 
     adj         = macro_factors.get("adjustments", {})
     factors     = macro_factors.get("factors", {})
-    regime      = macro_factors.get("regime", "NEUTRAL")
+    regime      = factors.get("regime", macro_factors.get("regime", "NEUTRAL"))
     vix         = float(factors.get("vix", 18.0))
     rationale   = macro_factors.get("rationale", "")
 
