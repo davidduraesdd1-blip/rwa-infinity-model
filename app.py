@@ -1040,14 +1040,28 @@ with tab_portfolio:
     # ── PDF Export ────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Export Report</div>', unsafe_allow_html=True)
     if _pdf._REPORTLAB:
-        pdf_bytes = _pdf.generate_portfolio_pdf(portfolio, tier_cfg.get("name", f"Tier {selected_tier}"))
+        # Build stress scenarios for PDF (crisis + moderate)
+        from portfolio import stress_test_correlations as _stc
+        _stress_for_pdf = {}
+        if portfolio.get("holdings"):
+            try:
+                _stress_for_pdf["crisis"]   = _stc(portfolio, scenario="crisis")
+                _stress_for_pdf["moderate"] = _stc(portfolio, scenario="moderate")
+            except Exception:
+                pass
+        pdf_bytes = _pdf.generate_portfolio_pdf(
+            portfolio,
+            tier_cfg.get("name", f"Tier {selected_tier}"),
+            macro_data=market,
+            stress_results=_stress_for_pdf if _stress_for_pdf else None,
+        )
         st.download_button(
             label="📄 Download Portfolio PDF",
             data=pdf_bytes,
             file_name=f"rwa_portfolio_tier{selected_tier}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf",
             mime="application/pdf",
             key="btn_portfolio_pdf",
-            help="Download a formatted PDF report of your current portfolio — includes metrics, holdings table, and risk breakdown.",
+            help="Download a formatted PDF report — includes metrics, holdings, macro intelligence, and risk scenarios.",
         )
     else:
         st.caption("PDF export requires reportlab — `pip install reportlab`")

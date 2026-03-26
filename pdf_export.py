@@ -92,13 +92,20 @@ def _fmt(val, prefix="", suffix="", decimals=2, fallback="N/A"):
 
 # ─── Portfolio Report ──────────────────────────────────────────────────────────
 
-def generate_portfolio_pdf(portfolio: dict, tier_name: str = "Portfolio") -> bytes:
+def generate_portfolio_pdf(
+    portfolio: dict,
+    tier_name: str = "Portfolio",
+    macro_data: dict | None = None,
+    stress_results: dict | None = None,
+) -> bytes:
     """
     Generate a portfolio report PDF.
 
     Args:
-        portfolio: result from portfolio.build_portfolio() — includes holdings + metrics
-        tier_name: e.g. "Balanced Growth" for the title
+        portfolio:      result from portfolio.build_portfolio() — includes holdings + metrics
+        tier_name:      e.g. "Balanced Growth" for the title
+        macro_data:     optional market summary dict — adds macro intelligence section
+        stress_results: optional dict of {scenario: stress_test result} — adds risk scenarios section
 
     Returns:
         Raw PDF bytes.
@@ -193,6 +200,58 @@ def generate_portfolio_pdf(portfolio: dict, tier_name: str = "Portfolio") -> byt
         tbl3 = Table(cat_data, colWidths=[7 * cm, 3 * cm, 4 * cm, 2.5 * cm])
         tbl3.setStyle(_table_style(len(cat_data)))
         story.append(tbl3)
+        story.append(Spacer(1, 10))
+
+    # ── Macro Intelligence (Phase 12 Enhancement) ────────────────────────────
+    if macro_data:
+        story.append(Paragraph("Macro Intelligence", styles["section"]))
+        macro_rows = [["Macro Signal", "Value"]]
+        _reg    = macro_data.get("macro_regime",       "N/A")
+        _bias   = macro_data.get("macro_bias",         "")
+        _fg_val = macro_data.get("fear_greed_value",   "N/A")
+        _fg_lbl = macro_data.get("fear_greed_label",   "")
+        _fg_sig = macro_data.get("fear_greed_signal",  "")
+        _sc_tot = macro_data.get("stablecoin_total_bn", 0)
+        macro_rows += [
+            ["Macro Regime",            f"{_reg} — {_bias}" if _bias else _reg],
+            ["Fear & Greed",            f"{_fg_val} / 100 — {_fg_lbl} ({_fg_sig})"],
+            ["Stablecoin Supply",       f"${_sc_tot:.1f}B (dry powder indicator)"],
+            ["Portfolio Value (USD)",   _fmt(portfolio.get("portfolio_value_usd", 0), "$", "", 0)],
+        ]
+        tbl_m = Table(macro_rows, colWidths=[6 * cm, 14 * cm])
+        tbl_m.setStyle(_table_style(len(macro_rows)))
+        story.append(tbl_m)
+        story.append(Spacer(1, 10))
+
+    # ── Risk Scenarios (Phase 12 Enhancement) ────────────────────────────────
+    if stress_results:
+        story.append(Paragraph("Risk Scenario Analysis", styles["section"]))
+        stress_header = ["Scenario", "Portfolio Vol%", "VaR 95%", "CVaR 95%", "Max Drawdown%", "vs Baseline"]
+        stress_data   = [stress_header]
+        _base_vol = metrics.get("portfolio_volatility_pct", 0) or 0
+        for _sc_name, _sc_res in stress_results.items():
+            if not _sc_res or not isinstance(_sc_res, dict):
+                continue
+            _sc_metrics = _sc_res.get("metrics", {})
+            _sc_vol     = _sc_metrics.get("portfolio_volatility_pct", 0) or 0
+            _delta_vol  = round(_sc_vol - _base_vol, 2) if _base_vol else 0
+            stress_data.append([
+                _sc_res.get("label", _sc_name)[:30],
+                _fmt(_sc_vol, suffix="%", decimals=2),
+                _fmt(_sc_metrics.get("var_95_pct"), suffix="%", decimals=2),
+                _fmt(_sc_metrics.get("cvar_95_pct"), suffix="%", decimals=2),
+                _fmt(_sc_metrics.get("max_drawdown_pct"), suffix="%", decimals=1),
+                f"+{_delta_vol:.2f}%" if _delta_vol >= 0 else f"{_delta_vol:.2f}%",
+            ])
+        if len(stress_data) > 1:
+            tbl_s = Table(stress_data, colWidths=[5.5 * cm, 3 * cm, 3 * cm, 3 * cm, 3.5 * cm, 3 * cm])
+            tbl_s.setStyle(_table_style(len(stress_data)))
+            story.append(tbl_s)
+            story.append(Paragraph(
+                "Crisis: ρ=1.0 (full contagion).  Moderate: ρ=0.70 (risk-off elevated correlation).",
+                styles["footer"],
+            ))
+            story.append(Spacer(1, 10))
 
     # ── Footer ──
     story.append(Spacer(1, 20))
