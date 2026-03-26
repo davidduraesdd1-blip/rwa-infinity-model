@@ -747,7 +747,7 @@ with tab_portfolio:
                         <div style="background:{_h_color};width:{_h_bar_w}%;height:100%;border-radius:4px;
                                     transition:width 0.4s ease"></div>
                     </div>
-                    <div style="font-size:10px;color:#6B7280;margin-top:4px">{_health["breakdown"]}</div>
+                    <div style="font-size:10px;color:#6B7280;margin-top:4px">{(_health or {}).get("breakdown", "")}</div>
                 </div>
             </div>""",
             unsafe_allow_html=True,
