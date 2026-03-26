@@ -299,6 +299,8 @@ _ss("tab_index",        0)
 _ss("api_key_set",      bool(os.environ.get("ANTHROPIC_API_KEY")))
 _ss("user_anthropic_key", "")  # per-session user-supplied key — never written to os.environ
 _ss("ai_news_brief",    "")
+_ss("pro_mode",         True)   # #65: True=Pro (all metrics), False=Beginner (simplified)
+_ss("demo_mode",        False)  # #67: Demo/Sandbox — no real API calls, synthetic data
 
 # ── Shareable URL params — read ?tier=X&value=Y on page load ─────────────────
 try:
@@ -355,6 +357,11 @@ def _load_arb():
     except Exception as e:
         logger.warning("load_arb failed: %s", e)
         return pd.DataFrame(), {}
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_briefing(tier: int, metrics_key: str, n_holdings: int) -> str:
+    """Cache key uses tier + rounded yield + holding count to avoid stale briefs."""
+    return ""  # populated lazily inside the tab to avoid blocking initial render
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _load_news():
@@ -610,6 +617,30 @@ for i, (tier, (icon, label, color)) in enumerate(tier_labels.items()):
 selected_tier = st.session_state["selected_tier"]
 tier_cfg      = PORTFOLIO_TIERS[selected_tier]
 
+# ── Mode toggles (#65 Beginner/Pro, #67 Demo) ────────────────────────────────
+_mode_col1, _mode_col2, _mode_spacer = st.columns([2, 2, 6])
+with _mode_col1:
+    _pro = st.toggle(
+        "Pro Mode",
+        value=st.session_state["pro_mode"],
+        key="pro_mode_toggle",
+        help="Pro: shows all quant metrics (VaR, CVaR, Sharpe, IC…). Beginner: simplified view with plain-English explanations only.",
+    )
+    st.session_state["pro_mode"] = _pro
+with _mode_col2:
+    _demo = st.toggle(
+        "Demo / Sandbox",
+        value=st.session_state["demo_mode"],
+        key="demo_mode_toggle",
+        help="Demo mode: uses synthetic placeholder data — no real API calls made. Safe for screenshots, demos, and onboarding.",
+    )
+    st.session_state["demo_mode"] = _demo
+    if _demo:
+        st.markdown('<div style="font-size:10px;color:#FBBF24;margin-top:-6px">⚠️ DEMO — synthetic data only</div>', unsafe_allow_html=True)
+
+_pro_mode  = st.session_state["pro_mode"]
+_demo_mode = st.session_state["demo_mode"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SCREENER CACHE — defined here (module-level) so it is registered once per
@@ -652,13 +683,108 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
 
 with tab_portfolio:
     portfolio = _load_portfolio(selected_tier, portfolio_value)
-    if not portfolio:
+    if _demo_mode:
+        # Demo mode: inject synthetic portfolio data so no real API call is needed
+        metrics = {
+            "weighted_yield_pct": 6.8, "annual_return_usd": 6800, "monthly_income_usd": 567,
+            "sharpe_ratio": 1.42, "max_drawdown_pct": 8.2, "var_95_pct": 4.1,
+            "sortino_ratio": 1.85, "calmar_ratio": 0.83, "var_99_pct": 6.3,
+            "cvar_95_pct": 5.5, "diversification_ratio": 1.18,
+        }
+        holdings = [
+            {"id": "DEMO_TBILL", "name": "Demo T-Bill", "category": "US Treasuries", "chain": "Ethereum",
+             "weight_pct": 30.0, "usd_value": 30000, "current_yield_pct": 5.2, "risk_score": 2,
+             "liquidity_score": 9, "regulatory_score": 9, "score": 88, "redemption_days": 1},
+            {"id": "DEMO_CREDIT", "name": "Demo Credit", "category": "Private Credit", "chain": "Polygon",
+             "weight_pct": 25.0, "usd_value": 25000, "current_yield_pct": 9.1, "risk_score": 6,
+             "liquidity_score": 5, "regulatory_score": 7, "score": 74, "redemption_days": 30},
+            {"id": "DEMO_RE", "name": "Demo Real Estate", "category": "Real Estate", "chain": "Ethereum",
+             "weight_pct": 20.0, "usd_value": 20000, "current_yield_pct": 7.5, "risk_score": 5,
+             "liquidity_score": 4, "regulatory_score": 7, "score": 71, "redemption_days": 90},
+        ]
+        cat_sum = {
+            "US Treasuries": {"weight_pct": 30, "yield_pct": 5.2, "count": 1, "color": "#00D4FF"},
+            "Private Credit": {"weight_pct": 25, "yield_pct": 9.1, "count": 1, "color": "#F97316"},
+            "Real Estate":    {"weight_pct": 20, "yield_pct": 7.5, "count": 1, "color": "#A78BFA"},
+        }
+    elif not portfolio:
         st.warning("Loading portfolio data... Please wait or click Refresh Now.")
         metrics, holdings, cat_sum = {}, [], {}
     else:
         metrics  = portfolio.get("metrics", {})
         holdings = portfolio.get("holdings", [])
         cat_sum  = portfolio.get("category_summary", {})
+
+    # ── Portfolio Health Score (#63) ─────────────────────────────────────────
+    if metrics or holdings:
+        try:
+            from ai_agent import compute_portfolio_health_score
+            _health = compute_portfolio_health_score(metrics, holdings)
+        except Exception as _e:
+            logger.warning("Health score failed: %s", _e)
+            _health = None
+        if _health:
+            _h_score = _health["score"]
+            _h_grade = _health["grade"]
+            _h_color = _health["color"]
+            _h_bar_w = int(_h_score)
+        else:
+            _h_score, _h_grade, _h_color, _h_bar_w = 0, "—", "#6B7280", 0
+
+        st.markdown(
+            f"""<div style="background:#111827;border:1px solid #1F2937;border-radius:10px;
+                            padding:12px 18px;margin-bottom:14px;display:flex;align-items:center;gap:18px">
+                <div style="min-width:64px;text-align:center">
+                    <div style="font-size:32px;font-weight:900;color:{_h_color};line-height:1">{_h_grade}</div>
+                    <div style="font-size:10px;color:#6B7280;margin-top:2px">HEALTH</div>
+                </div>
+                <div style="flex:1">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                        <span style="font-size:13px;font-weight:600;color:#E2E8F0">Portfolio Health Score</span>
+                        <span style="font-size:13px;font-weight:700;color:{_h_color}">{_h_score:.0f} / 100</span>
+                    </div>
+                    <div style="background:#1F2937;border-radius:4px;height:8px;overflow:hidden">
+                        <div style="background:{_h_color};width:{_h_bar_w}%;height:100%;border-radius:4px;
+                                    transition:width 0.4s ease"></div>
+                    </div>
+                    <div style="font-size:10px;color:#6B7280;margin-top:4px">{_health["breakdown"]}</div>
+                </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+    # ── 30-Second AI Briefing (#64) ──────────────────────────────────────────
+    if metrics:
+        _brief_key = f"brief_{selected_tier}_{round(metrics.get('weighted_yield_pct', 0), 1)}_{round(metrics.get('sharpe_ratio', 0), 2)}_{len(holdings)}"
+        if _demo_mode:
+            _briefing_text = (
+                "Your demo portfolio is well-balanced across US Treasuries, Private Credit, and Real Estate "
+                "with a blended yield of 6.8% and a solid Sharpe ratio of 1.42. "
+                "The main opportunity is in Private Credit at 9.1% yield, while Real Estate redemption "
+                "windows of 90 days are the key liquidity risk to watch. [DEMO MODE]"
+            )
+        elif _brief_key not in st.session_state:
+            with st.spinner("Generating AI briefing…"):
+                try:
+                    from ai_agent import get_30sec_briefing
+                    _briefing_text = get_30sec_briefing(selected_tier, metrics, holdings)
+                except Exception as _be:
+                    logger.warning("Briefing failed: %s", _be)
+                    _briefing_text = ""
+                st.session_state[_brief_key] = _briefing_text
+        else:
+            _briefing_text = st.session_state[_brief_key]
+
+        if _briefing_text:
+            st.markdown(
+                f"""<div style="background:#0D1117;border:1px solid #1F2937;border-left:3px solid #6366f1;
+                                border-radius:8px;padding:12px 16px;margin-bottom:14px">
+                    <div style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.08em;
+                                margin-bottom:6px">🤖 AI BRIEFING · 30-SEC SUMMARY</div>
+                    <div style="font-size:13px;color:#D1D5DB;line-height:1.55">{_briefing_text}</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
 
     # ── KPI Row ──────────────────────────────────────────────────────────────
     k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -676,17 +802,36 @@ with tab_portfolio:
                      color="#34D399",
                      tooltip="Projected monthly income in dollars — annual income divided by 12")
     with k4:
-        _metric_card("Sharpe Ratio", f"{metrics.get('sharpe_ratio', 0):.2f}",
-                     color=_color_for_value(metrics.get("sharpe_ratio", 0), 0, 2),
-                     tooltip="Risk-adjusted return = (portfolio yield − risk-free rate) ÷ volatility. Above 1.0 is good, above 2.0 is excellent")
+        if _pro_mode:
+            _metric_card("Sharpe Ratio", f"{metrics.get('sharpe_ratio', 0):.2f}",
+                         color=_color_for_value(metrics.get("sharpe_ratio", 0), 0, 2),
+                         tooltip="Risk-adjusted return = (portfolio yield − risk-free rate) ÷ volatility. Above 1.0 is good, above 2.0 is excellent")
+        else:
+            _sr = metrics.get("sharpe_ratio", 0) or 0
+            _sr_label = "Excellent" if _sr >= 1.5 else "Good" if _sr >= 1.0 else "Fair" if _sr >= 0.5 else "Weak"
+            _sr_color = "#34D399" if _sr >= 1.5 else "#A3E635" if _sr >= 1.0 else "#FBBF24" if _sr >= 0.5 else "#EF4444"
+            _metric_card("Risk Quality", _sr_label, color=_sr_color,
+                         tooltip="Overall risk-adjusted quality: Excellent = great return for the risk taken. Fair/Weak = lower reward for the risk.")
     with k5:
-        _metric_card("Max Drawdown", _fmt_pct(metrics.get("max_drawdown_pct")),
-                     color=_color_for_value(metrics.get("max_drawdown_pct", 0), 0, 30, invert=True),
-                     tooltip="Largest estimated peak-to-trough portfolio decline under stress conditions. Lower is better. This tier targets ≤" + str(tier_cfg['max_drawdown_pct']) + "%")
+        if _pro_mode:
+            _metric_card("Max Drawdown", _fmt_pct(metrics.get("max_drawdown_pct")),
+                         color=_color_for_value(metrics.get("max_drawdown_pct", 0), 0, 30, invert=True),
+                         tooltip="Largest estimated peak-to-trough portfolio decline under stress conditions. Lower is better. This tier targets ≤" + str(tier_cfg['max_drawdown_pct']) + "%")
+        else:
+            _dd = metrics.get("max_drawdown_pct", 0) or 0
+            _dd_label = "Low Risk" if _dd <= 5 else "Moderate" if _dd <= 15 else "High Risk"
+            _dd_color = "#34D399" if _dd <= 5 else "#FBBF24" if _dd <= 15 else "#EF4444"
+            _metric_card("Downside Risk", _dd_label, color=_dd_color,
+                         tooltip="How much the portfolio could fall in a bad scenario. Low Risk = protected capital, High Risk = larger potential losses.")
     with k6:
-        _metric_card("VaR 95%", _fmt_pct(metrics.get("var_95_pct")),
-                     color=_color_for_value(metrics.get("var_95_pct", 0), 0, 20, invert=True),
-                     tooltip="Value at Risk (95%): estimated maximum portfolio loss on a bad day — this threshold is only exceeded 5% of the time")
+        if _pro_mode:
+            _metric_card("VaR 95%", _fmt_pct(metrics.get("var_95_pct")),
+                         color=_color_for_value(metrics.get("var_95_pct", 0), 0, 20, invert=True),
+                         tooltip="Value at Risk (95%): estimated maximum portfolio loss on a bad day — this threshold is only exceeded 5% of the time")
+        else:
+            _holdings_count = len(holdings)
+            _metric_card("Assets Held", str(_holdings_count),
+                         tooltip="Number of different assets in your portfolio. More assets = better diversification across risk categories.")
 
     st.markdown("<div style='margin:12px 0'></div>", unsafe_allow_html=True)
 
@@ -769,12 +914,34 @@ with tab_portfolio:
     st.markdown('<div class="section-header">Portfolio Holdings</div>', unsafe_allow_html=True)
     if holdings:
         h_df = pd.DataFrame(holdings)
-        display_col_map = {
-            "id": "ID", "name": "Name", "category": "Category", "chain": "Chain",
-            "weight_pct": "Weight %", "usd_value": "USD Value",
-            "current_yield_pct": "Yield %", "risk_score": "Risk",
-            "liquidity_score": "Liquidity", "regulatory_score": "Regulatory", "score": "Score",
-        }
+        # Add redemption label column (#66)
+        if "redemption_days" in h_df.columns:
+            def _redeem_label(d):
+                try:
+                    d = int(d)
+                    if d < 0:    return "—"
+                    if d == 0:   return "Instant"
+                    if d == 1:   return "1 day"
+                    if d <= 30:  return f"{d} days"
+                    return f"{d}d (illiquid)"
+                except Exception:
+                    return "—"
+            h_df["redemption_label"] = h_df["redemption_days"].apply(_redeem_label)
+
+        if _pro_mode:
+            display_col_map = {
+                "id": "ID", "name": "Name", "category": "Category", "chain": "Chain",
+                "weight_pct": "Weight %", "usd_value": "USD Value",
+                "current_yield_pct": "Yield %", "redemption_label": "Redeem",
+                "risk_score": "Risk", "liquidity_score": "Liquidity",
+                "regulatory_score": "Regulatory", "score": "Score",
+            }
+        else:
+            display_col_map = {
+                "name": "Asset", "category": "Category",
+                "weight_pct": "Weight %", "usd_value": "USD Value",
+                "current_yield_pct": "Yield %", "redemption_label": "Redeem",
+            }
         present_cols = [c for c in display_col_map if c in h_df.columns]
         display_df = h_df[present_cols].copy()
         display_df.columns = [display_col_map[c] for c in present_cols]
@@ -836,24 +1003,25 @@ with tab_portfolio:
                                     annotation_font_color="#A78BFA", annotation_font_size=10)
                 st.plotly_chart(_fig_ybar, use_container_width=True)
 
-    # ── Risk Metrics ──────────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">Risk Metrics</div>', unsafe_allow_html=True)
-    r1, r2, r3, r4, r5 = st.columns(5)
-    with r1:
-        _metric_card("Sortino Ratio", f"{metrics.get('sortino_ratio', 0):.2f}",
-                     tooltip="Like Sharpe but only penalizes downside volatility — better for yield-focused portfolios. Above 1.0 is solid, above 2.0 is strong")
-    with r2:
-        _metric_card("Calmar Ratio", f"{metrics.get('calmar_ratio', 0):.2f}",
-                     tooltip="Annual return ÷ max drawdown. Higher means you are earning more per unit of historical drawdown risk. Above 1.0 is good")
-    with r3:
-        _metric_card("VaR 99%", _fmt_pct(metrics.get("var_99_pct")),
-                     tooltip="Value at Risk (99%): estimated worst-case daily portfolio loss — only exceeded 1% of the time. More conservative than VaR 95%")
-    with r4:
-        _metric_card("CVaR 95%", _fmt_pct(metrics.get("cvar_95_pct")),
-                     tooltip="Conditional VaR (Expected Shortfall): the expected average loss when you are already in the worst 5% of outcomes. Best measure of true tail risk")
-    with r5:
-        _metric_card("Diversification", f"{metrics.get('diversification_ratio', 0):.2f}x",
-                     tooltip="Diversification benefit: weighted avg individual volatility ÷ portfolio volatility. Above 1.0x means your asset mix actively reduces overall risk")
+    # ── Risk Metrics (Pro mode only) ───────────────────────────────────────────
+    if _pro_mode:
+        st.markdown('<div class="section-header">Risk Metrics</div>', unsafe_allow_html=True)
+        r1, r2, r3, r4, r5 = st.columns(5)
+        with r1:
+            _metric_card("Sortino Ratio", f"{metrics.get('sortino_ratio', 0):.2f}",
+                         tooltip="Like Sharpe but only penalizes downside volatility — better for yield-focused portfolios. Above 1.0 is solid, above 2.0 is strong")
+        with r2:
+            _metric_card("Calmar Ratio", f"{metrics.get('calmar_ratio', 0):.2f}",
+                         tooltip="Annual return ÷ max drawdown. Higher means you are earning more per unit of historical drawdown risk. Above 1.0 is good")
+        with r3:
+            _metric_card("VaR 99%", _fmt_pct(metrics.get("var_99_pct")),
+                         tooltip="Value at Risk (99%): estimated worst-case daily portfolio loss — only exceeded 1% of the time. More conservative than VaR 95%")
+        with r4:
+            _metric_card("CVaR 95%", _fmt_pct(metrics.get("cvar_95_pct")),
+                         tooltip="Conditional VaR (Expected Shortfall): the expected average loss when you are already in the worst 5% of outcomes. Best measure of true tail risk")
+        with r5:
+            _metric_card("Diversification", f"{metrics.get('diversification_ratio', 0):.2f}x",
+                         tooltip="Diversification benefit: weighted avg individual volatility ÷ portfolio volatility. Above 1.0x means your asset mix actively reduces overall risk")
 
     # ── Monte Carlo ───────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Monte Carlo Simulation (10,000 scenarios)</div>',

@@ -1444,3 +1444,110 @@ def detect_portfolio_anomalies(
     # Sort by severity (HIGH first)
     anomalies.sort(key=lambda x: 0 if x["severity"] == "HIGH" else 1)
     return anomalies
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PORTFOLIO HEALTH SCORE  (#63)
+# Composite 0-100 score: Sharpe (40pts) + Regulatory (30pts) + Liquidity (30pts)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_portfolio_health_score(metrics: dict, holdings: list[dict]) -> dict:
+    """
+    Compute a composite Portfolio Health Score (0–100).
+
+    Breakdown:
+      - Sharpe contribution  (0–40 pts): Sharpe 0→0, 1→20, 2→40 (clamped)
+      - Regulatory score     (0–30 pts): avg regulatory_score (0–10) scaled to 30
+      - Liquidity score      (0–30 pts): avg liquidity_score  (0–10) scaled to 30
+
+    Returns dict with keys: score, grade, color, sharpe_pts, reg_pts, liq_pts, breakdown
+    """
+    # Sharpe component (0-40)
+    sharpe = float(metrics.get("sharpe_ratio") or 0)
+    sharpe_pts = round(min(sharpe / 2.0, 1.0) * 40, 1)
+
+    # Regulatory component (0-30) from holdings
+    reg_scores = [float(h.get("regulatory_score") or 0) for h in holdings if h.get("regulatory_score") is not None]
+    avg_reg = sum(reg_scores) / len(reg_scores) if reg_scores else 5.0
+    reg_pts = round((avg_reg / 10.0) * 30, 1)
+
+    # Liquidity component (0-30) from holdings
+    liq_scores = [float(h.get("liquidity_score") or 0) for h in holdings if h.get("liquidity_score") is not None]
+    avg_liq = sum(liq_scores) / len(liq_scores) if liq_scores else 5.0
+    liq_pts = round((avg_liq / 10.0) * 30, 1)
+
+    score = round(min(sharpe_pts + reg_pts + liq_pts, 100), 1)
+
+    if score >= 80:
+        grade, color = "A", "#34D399"
+    elif score >= 65:
+        grade, color = "B", "#A3E635"
+    elif score >= 50:
+        grade, color = "C", "#FBBF24"
+    elif score >= 35:
+        grade, color = "D", "#F97316"
+    else:
+        grade, color = "F", "#EF4444"
+
+    return {
+        "score":      score,
+        "grade":      grade,
+        "color":      color,
+        "sharpe_pts": sharpe_pts,
+        "reg_pts":    reg_pts,
+        "liq_pts":    liq_pts,
+        "breakdown":  f"Sharpe {sharpe_pts}/40 · Regulatory {reg_pts}/30 · Liquidity {liq_pts}/30",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 30-SECOND AI BRIEFING  (#64)
+# Plain-English Claude Haiku summary of current portfolio state — 5-min cache
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_30sec_briefing(tier: int, metrics: dict, holdings: list[dict]) -> str:
+    """
+    Generate a 30-second plain-English briefing of portfolio health using Claude Haiku.
+    Returns a 2-3 sentence string. Falls back to a rule-based summary if API unavailable.
+    Cached implicitly by the caller (use st.cache_data ttl=300).
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key or not _ANTHROPIC:
+        # Rule-based fallback
+        yield_pct  = metrics.get("weighted_yield_pct", 0) or 0
+        sharpe     = metrics.get("sharpe_ratio", 0) or 0
+        n_holdings = len(holdings)
+        quality    = "strong" if sharpe >= 1.5 else "moderate" if sharpe >= 0.8 else "below-target"
+        return (
+            f"Your Tier {tier} portfolio holds {n_holdings} assets with a weighted yield of "
+            f"{yield_pct:.1f}% and a {quality} Sharpe ratio of {sharpe:.2f}. "
+            f"Annual income at current yields is {metrics.get('annual_return_usd', 0):,.0f} USD. "
+            f"No AI key configured — connect ANTHROPIC_API_KEY for live briefings."
+        )
+
+    top_assets = ", ".join(h.get("name", h.get("id", "?")) for h in holdings[:5])
+    prompt = (
+        f"You are a concise portfolio analyst. Summarize this RWA portfolio in exactly 2-3 plain-English sentences. "
+        f"No bullet points, no markdown, no jargon. Suitable for a non-expert investor.\n\n"
+        f"Tier: {tier} | Yield: {metrics.get('weighted_yield_pct', 0):.1f}% | "
+        f"Sharpe: {metrics.get('sharpe_ratio', 0):.2f} | "
+        f"Max Drawdown: {metrics.get('max_drawdown_pct', 0):.1f}% | "
+        f"Holdings: {len(holdings)} assets | Top positions: {top_assets}\n\n"
+        f"Focus on: overall health, biggest opportunity, and one risk to watch."
+    )
+    try:
+        client = _anthropic.Anthropic(api_key=api_key, timeout=12.0)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=180,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return (msg.content[0].text.strip() if msg.content else "") or "Briefing unavailable."
+    except Exception as e:
+        logger.warning("[Briefing] Haiku call failed: %s", e)
+        yield_pct = metrics.get("weighted_yield_pct", 0) or 0
+        sharpe    = metrics.get("sharpe_ratio", 0) or 0
+        return (
+            f"Tier {tier} portfolio: {yield_pct:.1f}% yield, Sharpe {sharpe:.2f}. "
+            f"Briefing service temporarily unavailable."
+        )
