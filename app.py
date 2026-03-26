@@ -1090,10 +1090,13 @@ with tab_universe:
         # Text search across name, ticker/id, and issuer columns
         if search_query and search_query.strip():
             _sq = search_query.strip().lower()
-            _name_mask = filtered_df.get("name", pd.Series(dtype=str)).fillna("").str.lower().str.contains(_sq, regex=False)
-            _id_mask   = filtered_df.get("id",   pd.Series(dtype=str)).fillna("").str.lower().str.contains(_sq, regex=False)
-            _iss_mask  = filtered_df.get("issuer", pd.Series(dtype=str)).fillna("").str.lower().str.contains(_sq, regex=False) \
-                         if "issuer" in filtered_df.columns else pd.Series([False] * len(filtered_df), index=filtered_df.index)
+            _empty_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
+            _name_mask = filtered_df["name"].fillna("").str.lower().str.contains(_sq, regex=False) \
+                         if "name" in filtered_df.columns else _empty_mask
+            _id_mask   = filtered_df["id"].fillna("").str.lower().str.contains(_sq, regex=False) \
+                         if "id" in filtered_df.columns else _empty_mask
+            _iss_mask  = filtered_df["issuer"].fillna("").str.lower().str.contains(_sq, regex=False) \
+                         if "issuer" in filtered_df.columns else _empty_mask
             filtered_df = filtered_df[_name_mask | _id_mask | _iss_mask]
         if sel_cat != "All":
             filtered_df = filtered_df[filtered_df["category"] == sel_cat]
@@ -2926,8 +2929,8 @@ with tab_macro:
     }
     _pi_c = _pi_sig_colors.get(_pi_sig, "#6b7280")
     _pic1, _pic2, _pic3, _pic4 = st.columns(4)
-    _pic1.metric("111-DMA", f"${_pi.get('ma_111') or 0:,.0f}" if _pi.get("ma_111") else "N/A")
-    _pic2.metric("350-DMA×2", f"${_pi.get('ma_350x2') or 0:,.0f}" if _pi.get("ma_350x2") else "N/A")
+    _pic1.metric("111-DMA", f"${_pi.get('ma_111') or 0:,.0f}" if _pi.get("ma_111") is not None else "N/A")
+    _pic2.metric("350-DMA×2", f"${_pi.get('ma_350x2') or 0:,.0f}" if _pi.get("ma_350x2") is not None else "N/A")
     _pic3.metric("Gap %", f"{_pi.get('gap_pct') or 0:+.1f}%" if _pi.get("gap_pct") is not None else "N/A")
     _pic4.metric("Signal", _pi_sig)
     st.markdown(
