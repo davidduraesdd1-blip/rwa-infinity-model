@@ -1176,3 +1176,131 @@ def calculate_portfolio_liquidity(holdings: list, portfolio_value_usd: float = 1
         "liquidity_label":           liq_label,
         "holdings_liquidity":        sorted(holdings_liq, key=lambda x: x["liquidity_score"]),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FACTOR-BASED PORTFOLIO OPTIMIZATION  (#114)
+# Integrates macro factor signals into expected returns and covariance matrix.
+# Factor model: 4 macro factors (VIX regime, yield curve, DXY, sentiment)
+# produce tilted expected returns + stressed correlation adjustments.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_factor_tilted_portfolio(
+    holdings: list,
+    macro_factors: dict,
+    value_usd: float = 100_000,
+) -> dict:
+    """
+    Run mean-variance optimization with factor-tilted expected returns.
+
+    Takes the macro factor bias (from get_macro_factor_allocation_bias) and:
+      1. Adjusts per-asset expected returns by their category's factor tilt
+      2. Scales correlations up during high-stress regimes (VIX > 25)
+      3. Finds the max-Sharpe portfolio using random sampling
+
+    Args:
+        holdings:      list of holding dicts (same format as build_portfolio output)
+        macro_factors: output of get_macro_factor_allocation_bias()
+        value_usd:     portfolio notional for USD calculations
+
+    Returns:
+        max_sharpe_weights, expected_return, expected_vol, sharpe,
+        factor_adjustments, regime, correlation_scalar
+    """
+    if not holdings:
+        return {"error": "No holdings", "weights": {}}
+
+    adj         = macro_factors.get("adjustments", {})
+    factors     = macro_factors.get("factors", {})
+    regime      = macro_factors.get("regime", "NEUTRAL")
+    vix         = float(factors.get("vix", 18.0))
+    rationale   = macro_factors.get("rationale", "")
+
+    # Stress correlation scalar — correlations spike during market stress
+    # Research (Longin & Solnik 2001): avg pairwise correlation rises ~0.25 during VIX>30
+    if vix > 35:
+        corr_scalar = 1.45    # extreme stress: +45% correlation
+    elif vix > 25:
+        corr_scalar = 1.20    # elevated stress: +20%
+    elif vix < 13:
+        corr_scalar = 0.85    # low-vol regime: correlations slightly lower
+    else:
+        corr_scalar = 1.00    # normal regime
+
+    n = min(len(holdings), 20)
+    if n < 2:
+        return {"error": "Need at least 2 holdings", "weights": {}}
+
+    h       = holdings[:n]
+    cats    = [x.get("category", "") for x in h]
+    ids     = [x.get("id", f"asset_{i}") for i, x in enumerate(h)]
+
+    # Base yields
+    base_yields = np.array([
+        float(x.get("current_yield_pct") or x.get("expected_yield_pct", 0))
+        for x in h
+    ])
+
+    # Factor-tilted expected returns: add category adjustment (converted to %)
+    # adj values are in percentage-point deltas — convert to additive return adj
+    tilted_yields = base_yields.copy()
+    cat_adj_map: dict = {}
+    for i, cat in enumerate(cats):
+        cat_delta = adj.get(cat, 0.0) / 10.0  # scale: 10pp bias → 1% yield adj
+        tilted_yields[i] = base_yields[i] + cat_delta
+        cat_adj_map[cat] = round(cat_delta, 3)
+
+    tilted_yields = np.clip(tilted_yields, 0.1, 40.0)
+
+    # Per-asset volatilities
+    vols = np.array([_risk_to_vol(x.get("risk_score", 5), x) for x in h])
+
+    # Factor-adjusted covariance matrix
+    cov = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                cov[i, j] = vols[i] ** 2
+            else:
+                pair = (cats[i], cats[j])
+                pair_rev = (cats[j], cats[i])
+                base_corr = CATEGORY_CORRELATIONS.get(pair,
+                            CATEGORY_CORRELATIONS.get(pair_rev, 0.15))
+                # Apply stress scalar, clamp to [0.05, 0.95]
+                adj_corr = min(0.95, max(0.05, base_corr * corr_scalar))
+                cov[i, j] = adj_corr * vols[i] * vols[j]
+
+    # Random-sampling mean-variance (no scipy required)
+    rng = np.random.default_rng(42)
+    best_sharpe = -999.0
+    best_weights = np.ones(n) / n  # equal weight fallback
+
+    for _ in range(3_000):
+        w = rng.dirichlet(np.ones(n))
+        ret = float(np.dot(w, tilted_yields))
+        var = float(w @ cov @ w)
+        vol = math.sqrt(max(var, 1e-8))
+        sr  = (ret - RISK_FREE_RATE) / vol
+        if sr > best_sharpe:
+            best_sharpe = sr
+            best_weights = w
+
+    # Map weights to holding IDs
+    weight_map = {ids[i]: round(float(best_weights[i]) * 100, 2) for i in range(n)}
+
+    best_ret = float(np.dot(best_weights, tilted_yields))
+    best_var = float(best_weights @ cov @ best_weights)
+    best_vol = math.sqrt(max(best_var, 1e-8))
+
+    return {
+        "weights":             weight_map,
+        "expected_return_pct": round(best_ret, 3),
+        "expected_vol_pct":    round(best_vol, 3),
+        "sharpe":              round(best_sharpe, 3),
+        "factor_adjustments":  cat_adj_map,
+        "correlation_scalar":  round(corr_scalar, 2),
+        "regime":              regime,
+        "vix":                 round(vix, 1),
+        "rationale":           rationale,
+        "n_assets":            n,
+    }

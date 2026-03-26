@@ -2176,6 +2176,73 @@ with tab_ai:
             if rat:
                 st.caption(str(rat))
 
+    # ── Factor-Based Portfolio Optimization (#114) ───────────────────────────────
+    st.markdown('<div class="section-header">Factor-Based Portfolio Optimization</div>', unsafe_allow_html=True)
+
+    with st.expander("📐 Macro-Factor-Tilted Mean-Variance Optimizer", expanded=False):
+        from portfolio import compute_factor_tilted_portfolio
+        from data_feeds import get_macro_factor_allocation_bias
+
+        @st.cache_data(ttl=180, show_spinner=False)
+        def _load_factor_opt(tier_key: int, val: int):
+            _port = _load_portfolio(tier_key, val)
+            _holds = _port.get("holdings", []) if _port else []
+            _fb    = get_macro_factor_allocation_bias()
+            return compute_factor_tilted_portfolio(_holds, _fb, val)
+
+        if st.button("⟳ Recompute Factor Optimization", key="btn_factor_opt"):
+            _load_factor_opt.clear()
+
+        with st.spinner("Running factor-tilted optimizer…"):
+            _fopt = _load_factor_opt(selected_tier, portfolio_value)
+
+        if _fopt.get("error"):
+            st.caption(f"Factor optimizer: {_fopt['error']}")
+        else:
+            _foa, _fob, _foc, _fod = st.columns(4)
+            _foa.metric("Expected Return", f"{_fopt.get('expected_return_pct', 0):.2f}%")
+            _fob.metric("Expected Vol", f"{_fopt.get('expected_vol_pct', 0):.2f}%")
+            _foc.metric("Factor Sharpe", f"{_fopt.get('sharpe', 0):.3f}")
+            _regime_color = {"RISK_ON": "#10b981", "RISK_OFF": "#ef4444",
+                             "STAGFLATION": "#f59e0b", "NEUTRAL": "#6b7280"}.get(
+                _fopt.get("regime", "NEUTRAL"), "#6b7280")
+            _fod.markdown(
+                f'<div style="padding:8px;border-radius:8px;background:#111827;border:1px solid #1f2937">'
+                f'<div style="font-size:10px;color:#6b7280">REGIME</div>'
+                f'<div style="font-size:16px;font-weight:700;color:{_regime_color}">'
+                f'{_fopt.get("regime", "—")}</div>'
+                f'<div style="font-size:10px;color:#6b7280">VIX {_fopt.get("vix", "—")} · '
+                f'corr ×{_fopt.get("correlation_scalar", 1)}</div>'
+                f'</div>', unsafe_allow_html=True,
+            )
+
+            # Factor adjustment per category
+            _f_adjs = _fopt.get("factor_adjustments", {})
+            if _f_adjs:
+                st.markdown("**Factor Yield Adjustments by Category**")
+                _fadj_rows = [
+                    {"Category": c,
+                     "Yield Adj": f"{v:+.3f}%",
+                     "Direction": "▲ Overweight" if v > 0 else ("▼ Underweight" if v < 0 else "— Neutral")}
+                    for c, v in sorted(_f_adjs.items(), key=lambda x: -abs(x[1]))
+                    if v != 0
+                ]
+                if _fadj_rows:
+                    st.dataframe(pd.DataFrame(_fadj_rows), use_container_width=True, hide_index=True)
+
+            # Max-Sharpe weight table
+            _f_weights = _fopt.get("weights", {})
+            if _f_weights:
+                _fw_rows = [{"Asset": k, "Optimal Weight %": f"{v:.1f}%"}
+                            for k, v in sorted(_f_weights.items(), key=lambda x: -x[1])
+                            if v > 0.5]
+                if _fw_rows:
+                    st.markdown("**Factor-Optimal Weights (Max-Sharpe Portfolio)**")
+                    st.dataframe(pd.DataFrame(_fw_rows), use_container_width=True, hide_index=True)
+
+            if _fopt.get("rationale"):
+                st.caption(f"Factor rationale: {_fopt['rationale']}")
+
     # ── XRPL Intelligence + Tier 3 Status (Upgrades 10, 11, 12) ─────────────────
     st.markdown('<div class="section-header">XRPL Intelligence</div>', unsafe_allow_html=True)
 
