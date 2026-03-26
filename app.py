@@ -3172,9 +3172,16 @@ with tab_macro:
                 secondary_y=False,
             )
             # M2 annotation (full monthly timeseries would need FRED historical API)
-            fig_m2.add_hline(
-                y=m2_now, line_dash="dot", line_color="rgba(99,102,241,0.6)",
-                annotation_text=f"M2 now: ${m2_now:,.0f}B",
+            # add_hline() does not support secondary_y — use add_trace on secondary axis instead
+            fig_m2.add_trace(
+                go.Scatter(
+                    x=[btc_df.index[0], btc_df.index[-1]],
+                    y=[m2_now, m2_now],
+                    mode="lines",
+                    name=f"M2 now: ${m2_now:,.0f}B",
+                    line=dict(dash="dot", color="rgba(99,102,241,0.6)", width=1.5),
+                    showlegend=True,
+                ),
                 secondary_y=True,
             )
             fig_m2.update_layout(
@@ -3831,16 +3838,33 @@ with tab_options:
                     y=[r["call_oi"] for r in _oi5],
                     marker_color="rgba(16,185,129,0.8)",
                 ))
-                if _mp:
-                    _fig5a.add_vline(x=str(int(_mp)), line_dash="dash",
-                                     line_color="#6366f1", opacity=0.8,
-                                     annotation_text=f"Max Pain ${_mp:,.0f}",
-                                     annotation_font_size=10)
-                if _spot:
-                    _fig5a.add_vline(x=str(int(_spot)), line_dash="dot",
-                                     line_color="#f59e0b", opacity=0.6,
-                                     annotation_text="Spot",
-                                     annotation_font_size=10)
+                # add_vline() crashes on string categorical x-axes (Plotly internal _mean()
+                # fails with TypeError on str values). Use add_shape + add_annotation instead.
+                if _mp and _strikes5:
+                    _mp_str = str(int(_mp))
+                    if _mp_str in _strikes5:
+                        _mp_idx = _strikes5.index(_mp_str)
+                        _fig5a.add_shape(type="line", x0=_mp_idx - 0.5, x1=_mp_idx - 0.5,
+                                         y0=0, y1=1, yref="paper",
+                                         line=dict(dash="dash", color="#6366f1", width=1.5),
+                                         opacity=0.8)
+                        _fig5a.add_annotation(x=_mp_idx - 0.5, y=1, yref="paper",
+                                              text=f"Max Pain ${_mp:,.0f}",
+                                              showarrow=False, font=dict(size=10, color="#6366f1"),
+                                              yanchor="bottom")
+                if _spot and _strikes5:
+                    _spot_str = str(int(_spot))
+                    # Find closest strike to spot
+                    _closest = min(_strikes5, key=lambda s: abs(int(s) - int(_spot)))
+                    _spot_idx = _strikes5.index(_closest)
+                    _fig5a.add_shape(type="line", x0=_spot_idx - 0.5, x1=_spot_idx - 0.5,
+                                     y0=0, y1=1, yref="paper",
+                                     line=dict(dash="dot", color="#f59e0b", width=1.5),
+                                     opacity=0.6)
+                    _fig5a.add_annotation(x=_spot_idx - 0.5, y=0.95, yref="paper",
+                                          text="Spot",
+                                          showarrow=False, font=dict(size=10, color="#f59e0b"),
+                                          yanchor="bottom")
                 _fig5a.update_layout(
                     title="OI by Strike (Top 20)", barmode="stack",
                     height=360, paper_bgcolor="rgba(0,0,0,0)",
