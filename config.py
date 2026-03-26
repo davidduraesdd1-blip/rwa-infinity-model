@@ -3963,6 +3963,7 @@ ALLOWED_DOMAINS: frozenset = frozenset({
     "api.basescan.org",
     "api.snowtrace.io",
     "api.stlouisfed.org",
+    "fred.stlouisfed.org",    # FRED public CSV endpoint (no-key fallback for yield/M2/macro)
     "api.tiingo.com",
     "www.alphavantage.co",
     "data.messari.io",
