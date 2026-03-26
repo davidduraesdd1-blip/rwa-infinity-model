@@ -259,6 +259,14 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_agent_decisions_ts  ON agent_decisions(timestamp);
             CREATE INDEX IF NOT EXISTS idx_yield_history_asset ON yield_history(asset_id);
             CREATE INDEX IF NOT EXISTS idx_news_feed_ts        ON news_feed(timestamp);
+
+            -- UPGRADE 17: 6 additional performance indexes
+            CREATE INDEX IF NOT EXISTS idx_agent_decisions_tier_ts  ON agent_decisions(portfolio_tier, timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_news_feed_sentiment       ON news_feed(sentiment);
+            CREATE INDEX IF NOT EXISTS idx_yield_history_timestamp   ON yield_history(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_rwa_latest_chain          ON rwa_latest(chain);
+            CREATE INDEX IF NOT EXISTS idx_arb_opportunities_type_signal ON arb_opportunities(type, signal);
+            CREATE INDEX IF NOT EXISTS idx_agent_decisions_agent_ts  ON agent_decisions(agent_name, timestamp DESC);
         """)
         conn.commit()
 
@@ -539,20 +547,20 @@ def save_news(items: List[dict]):
     with _write_lock:
         conn = _get_conn()
         try:
-            seen_in_batch: set = set()
+            # UPGRADE 18: single bulk SELECT to get all existing headlines (replaces N+1 per-item queries)
+            existing: set = {
+                row[0] for row in
+                conn.execute("SELECT DISTINCT headline FROM news_feed").fetchall()
+            }
+
             for item in items:
                 headline = item.get("headline")
                 if not headline:
                     continue
-                # Deduplicate within batch first, then against DB
-                if headline in seen_in_batch:
+                if headline in existing:
                     continue
-                seen_in_batch.add(headline)
-                exists = conn.execute(
-                    "SELECT 1 FROM news_feed WHERE headline = ? LIMIT 1", (headline,)
-                ).fetchone()
-                if exists:
-                    continue
+                # Add to the set so duplicates within this batch are also caught
+                existing.add(headline)
                 cats = item.get("categories", [])
                 if isinstance(cats, list):
                     cats = json.dumps(cats)

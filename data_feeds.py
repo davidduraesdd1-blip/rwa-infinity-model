@@ -8,6 +8,7 @@ import logging
 import time
 import threading
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 import xml.etree.ElementTree as _ET
 from email.utils import parsedate_to_datetime as _parsedate
@@ -337,14 +338,13 @@ def fetch_coingecko_prices(ids: List[str] = None) -> Dict[str, dict]:
         return {}
 
     def _fetch():
-        # CoinGecko /coins/markets supports up to 250 IDs per request on both free and Pro tiers.
-        # Batch all assets into chunks of 250 to minimise API calls (free tier: 10K/month).
+        # UPGRADE 12: fetch all CoinGecko chunks in parallel (max_workers=3 respects rate limits)
         chunk_size = 250
-        all_prices = {}
-        for i in range(0, len(ids), chunk_size):
-            chunk = ids[i:i + chunk_size]
+        chunks = [ids[i:i + chunk_size] for i in range(0, len(ids), chunk_size)]
+
+        def _fetch_chunk(chunk):
             ids_str = ",".join(chunk)
-            data = _get(
+            return _get(
                 f"{COINGECKO_BASE}/coins/markets",
                 params={
                     "vs_currency": "usd",
@@ -356,23 +356,30 @@ def fetch_coingecko_prices(ids: List[str] = None) -> Dict[str, dict]:
                     "price_change_percentage": "24h,7d",
                 }
             )
-            if data:
-                for coin in data:
-                    all_prices[coin["id"]] = {
-                        "id":            coin["id"],
-                        "symbol":        coin.get("symbol", "").upper(),
-                        "name":          coin.get("name"),
-                        "price_usd":     coin.get("current_price", 0) or 0,
-                        "market_cap":    coin.get("market_cap", 0) or 0,
-                        "volume_24h":    coin.get("total_volume", 0) or 0,
-                        "change_24h":    coin.get("price_change_percentage_24h") or 0,
-                        "change_7d":     coin.get("price_change_percentage_7d_in_currency") or 0,
-                        "circulating_supply": coin.get("circulating_supply") or 0,
-                        "ath":           coin.get("ath") or 0,
-                        "atl":           coin.get("atl") or 0,
-                    }
-            if i + chunk_size < len(ids):
-                time.sleep(1.0)  # only sleep between chunks if there are more
+
+        all_prices = {}
+        with ThreadPoolExecutor(max_workers=3) as _ex:
+            _chunk_futs = {_ex.submit(_fetch_chunk, chunk): chunk for chunk in chunks}
+            for _fut in as_completed(_chunk_futs):
+                try:
+                    data = _fut.result(timeout=30)
+                    if data:
+                        for coin in data:
+                            all_prices[coin["id"]] = {
+                                "id":            coin["id"],
+                                "symbol":        coin.get("symbol", "").upper(),
+                                "name":          coin.get("name"),
+                                "price_usd":     coin.get("current_price", 0) or 0,
+                                "market_cap":    coin.get("market_cap", 0) or 0,
+                                "volume_24h":    coin.get("total_volume", 0) or 0,
+                                "change_24h":    coin.get("price_change_percentage_24h") or 0,
+                                "change_7d":     coin.get("price_change_percentage_7d_in_currency") or 0,
+                                "circulating_supply": coin.get("circulating_supply") or 0,
+                                "ath":           coin.get("ath") or 0,
+                                "atl":           coin.get("atl") or 0,
+                            }
+                except Exception as _ce:
+                    logger.warning("[CoinGecko] chunk fetch failed: %s", _ce)
         return all_prices
 
     return _cached_get("coingecko_prices", CACHE_TTL["prices"], _fetch) or {}
@@ -775,19 +782,34 @@ def refresh_all_assets(progress_callback=None) -> List[dict]:
     total_assets = len(RWA_UNIVERSE)
     enriched = []
 
-    # Pre-fetch bulk data
+    # Pre-fetch bulk data in parallel (UPGRADE 10)
     if progress_callback:
-        progress_callback(5, "Fetching CoinGecko prices...")
-    prices = fetch_coingecko_prices()
+        progress_callback(5, "Fetching market data in parallel...")
+
+    _parallel_futs = {}
+    with ThreadPoolExecutor(max_workers=3) as _ex:
+        _parallel_futs = {
+            _ex.submit(fetch_coingecko_prices):   "prices",
+            _ex.submit(fetch_defillama_protocols): "protocols",
+            _ex.submit(fetch_defillama_yields):   "yields",
+        }
+        _parallel_results = {}
+        for _fut in as_completed(_parallel_futs):
+            _k = _parallel_futs[_fut]
+            try:
+                _parallel_results[_k] = _fut.result(timeout=30)
+            except Exception as _pe:
+                logger.warning("[refresh] %s parallel fetch failed: %s", _k, _pe)
+                _parallel_results[_k] = None
+
+    prices    = _parallel_results.get("prices") or {}
+    protocols = _parallel_results.get("protocols") or []
+    yield_pools = _parallel_results.get("yields") or []
 
     if progress_callback:
-        progress_callback(20, "Fetching DeFiLlama TVL...")
-    protocols = fetch_defillama_protocols()
+        progress_callback(35, "Processing asset data...")
+
     protocol_tvl_map = {p["slug"].lower(): p for p in protocols if p.get("slug")}
-
-    if progress_callback:
-        progress_callback(35, "Fetching DeFiLlama yields...")
-    yield_pools = fetch_defillama_yields()
 
     # Build yield lookup: project → best APY pool
     yield_by_project: Dict[str, dict] = {}
@@ -1235,10 +1257,10 @@ def fetch_treasury_yield_curve() -> dict:
         }
     """
     def _fetch():
-        yields = {}
-        for tenor, series_id in _FRED_YIELD_SERIES.items():
+        # UPGRADE 11: fetch all FRED series in parallel
+        def _fetch_one_tenor(tenor_series):
+            tenor, series_id = tenor_series
             try:
-                # Use FRED API if key present, else CSV endpoint
                 if FRED_API_KEY:
                     url = "https://api.stlouisfed.org/fred/series/observations"
                     params = {
@@ -1254,10 +1276,8 @@ def fetch_treasury_yield_curve() -> dict:
                         for o in obs:
                             val = o.get("value", ".")
                             if val != ".":
-                                yields[tenor] = float(val)
-                                break
+                                return tenor, float(val)
                 else:
-                    # FRED public CSV (no key)
                     url  = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
                     resp = _session.get(url, timeout=20)
                     if resp.status_code == 200:
@@ -1265,10 +1285,22 @@ def fetch_treasury_yield_curve() -> dict:
                         for line in reversed(lines[1:]):
                             parts = line.split(",")
                             if len(parts) == 2 and parts[1].strip() not in (".", ""):
-                                yields[tenor] = float(parts[1].strip())
-                                break
+                                return tenor, float(parts[1].strip())
             except Exception as e:
                 logger.debug("[FRED] %s fetch failed: %s", series_id, e)
+            return tenor, None
+
+        yields = {}
+        with ThreadPoolExecutor(max_workers=5) as _ex:
+            _futs = {_ex.submit(_fetch_one_tenor, item): item[0]
+                     for item in _FRED_YIELD_SERIES.items()}
+            for _fut in as_completed(_futs):
+                try:
+                    _tenor, _val = _fut.result(timeout=25)
+                    if _val is not None:
+                        yields[_tenor] = _val
+                except Exception as _fe:
+                    logger.debug("[FRED] tenor fetch error: %s", _fe)
 
         if not yields:
             return {"yields": _YIELD_CURVE_FALLBACK, "source": "fallback",
@@ -1804,8 +1836,9 @@ def fetch_macro_indicators() -> dict:
         }
     """
     def _fetch():
-        result: Dict[str, Any] = {}
-        for key, series_id in _FRED_MACRO_SERIES.items():
+        # UPGRADE 11: fetch all FRED macro series in parallel
+        def _fetch_macro_one(key_series):
+            key, series_id = key_series
             try:
                 if FRED_API_KEY:
                     url = "https://api.stlouisfed.org/fred/series/observations"
@@ -1823,9 +1856,8 @@ def fetch_macro_indicators() -> dict:
                             if val != ".":
                                 v = float(val)
                                 if series_id == "WALCL":
-                                    v = v / 1000.0   # millions → billions
-                                result[key] = round(v, 2)
-                                break
+                                    v = v / 1000.0
+                                return key, round(v, 2)
                 else:
                     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
                     resp = _session.get(url, timeout=20)
@@ -1837,10 +1869,22 @@ def fetch_macro_indicators() -> dict:
                                 v = float(parts[1].strip())
                                 if series_id == "WALCL":
                                     v = v / 1000.0
-                                result[key] = round(v, 2)
-                                break
+                                return key, round(v, 2)
             except Exception as e:
                 logger.debug("[FRED Macro] %s failed: %s", series_id, e)
+            return key, None
+
+        result: Dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=5) as _ex:
+            _futs = {_ex.submit(_fetch_macro_one, item): item[0]
+                     for item in _FRED_MACRO_SERIES.items()}
+            for _fut in as_completed(_futs):
+                try:
+                    _k, _v = _fut.result(timeout=25)
+                    if _v is not None:
+                        result[_k] = _v
+                except Exception as _fe:
+                    logger.debug("[FRED Macro] fetch error: %s", _fe)
 
         if len(result) < 2:
             return None
@@ -1899,8 +1943,11 @@ def fetch_fred_extended() -> dict:
     No API key required (public CSV endpoint). Returns fallback on error.
     """
     def _fetch():
-        result: Dict[str, Any] = {}
-        for key, series_id in _FRED_EXTENDED_SERIES.items():
+        # UPGRADE 11: fetch all extended FRED series in parallel
+        _BPS_KEYS = ("ig_spread_bp", "hy_spread_bp", "em_spread_bp")
+
+        def _fetch_ext_one(key_series):
+            key, series_id = key_series
             try:
                 if FRED_API_KEY:
                     url = "https://api.stlouisfed.org/fred/series/observations"
@@ -1917,11 +1964,9 @@ def fetch_fred_extended() -> dict:
                             val = o.get("value", ".")
                             if val != ".":
                                 v = float(val)
-                                # FRED OAS series are in percent; convert to bps
-                                if key in ("ig_spread_bp", "hy_spread_bp", "em_spread_bp"):
+                                if key in _BPS_KEYS:
                                     v = v * 100
-                                result[key] = round(v, 2)
-                                break
+                                return key, round(v, 2)
                 else:
                     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
                     resp = _session.get(url, timeout=20)
@@ -1931,13 +1976,24 @@ def fetch_fred_extended() -> dict:
                             parts = line.split(",")
                             if len(parts) == 2 and parts[1].strip() not in (".", ""):
                                 v = float(parts[1].strip())
-                                # FRED OAS series are in percent; convert to bps
-                                if key in ("ig_spread_bp", "hy_spread_bp", "em_spread_bp"):
+                                if key in _BPS_KEYS:
                                     v = v * 100
-                                result[key] = round(v, 2)
-                                break
+                                return key, round(v, 2)
             except Exception as e:
                 logger.debug("[FRED Extended] %s failed: %s", series_id, e)
+            return key, None
+
+        result: Dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=5) as _ex:
+            _futs = {_ex.submit(_fetch_ext_one, item): item[0]
+                     for item in _FRED_EXTENDED_SERIES.items()}
+            for _fut in as_completed(_futs):
+                try:
+                    _k, _v = _fut.result(timeout=25)
+                    if _v is not None:
+                        result[_k] = _v
+                except Exception as _fe:
+                    logger.debug("[FRED Extended] fetch error: %s", _fe)
 
         if not result:
             return None

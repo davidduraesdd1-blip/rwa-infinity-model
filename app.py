@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+# UPGRADE 23: make_subplots lazy-loaded at each call site (3 locations below)
 import streamlit as st
 try:
     from streamlit_autorefresh import st_autorefresh as _st_autorefresh
@@ -396,6 +396,153 @@ def _load_all_portfolios(value):
         return {}, pd.DataFrame()
 
 
+# ─── UPGRADE 21: Cached chart builders ────────────────────────────────────────
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _build_pie_chart(cat_sum: dict, weighted_yield: float):
+    """Allocation by Category donut chart. Inputs are plain dicts/scalars (hashable)."""
+    labels  = list(cat_sum.keys())
+    values  = [cat_sum[c]["weight_pct"] for c in labels]
+    colors  = [cat_sum[c].get("color", "#888") for c in labels]
+    hover   = [
+        f"<b>{c}</b><br>Weight: {cat_sum[c]['weight_pct']:.1f}%<br>"
+        f"Yield: {cat_sum[c]['yield_pct']:.2f}%<br>Holdings: {cat_sum[c]['count']}"
+        for c in labels
+    ]
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values,
+        marker_colors=colors,
+        hole=0.55,
+        hovertemplate="%{customdata}<extra></extra>",
+        customdata=hover,
+        textinfo="label+percent",
+        textfont_size=11,
+    ))
+    fig.add_annotation(
+        text=f"<b>{weighted_yield:.2f}%</b><br><span style='font-size:11px'>yield</span>",
+        x=0.5, y=0.5, showarrow=False, font=dict(size=16, color="#E2E8F0"),
+    )
+    fig.update_layout(
+        paper_bgcolor="#111827", plot_bgcolor="#111827",
+        font_color="#E2E8F0",
+        margin=dict(l=0, r=0, t=20, b=0),
+        height=320,
+        legend=dict(
+            font_size=11,
+            bgcolor="#111827",
+            bordercolor="#1F2937",
+            x=1.0, xanchor="right",
+            orientation="v",
+        ),
+        showlegend=True,
+    )
+    return fig
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _build_holdings_scatter(holdings_records: list):
+    """Holdings Yield vs Risk scatter. Takes list of dicts (serializable)."""
+    h_df = pd.DataFrame(holdings_records)
+    fig = px.scatter(
+        h_df,
+        x="risk_score",
+        y="current_yield_pct",
+        size="weight_pct",
+        color="category",
+        color_discrete_map=CATEGORY_COLORS,
+        hover_data={"name": True, "weight_pct": True, "protocol": True,
+                    "current_yield_pct": True, "risk_score": True},
+        labels={"risk_score": "Risk Score (1=lowest)", "current_yield_pct": "Yield (%)"},
+        size_max=35,
+    )
+    fig.update_layout(
+        paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+        font_color="#E2E8F0",
+        margin=dict(l=40, r=20, t=20, b=40),
+        height=320,
+        xaxis=dict(gridcolor="#1F2937", range=[0, 11]),
+        yaxis=dict(gridcolor="#1F2937"),
+        legend=dict(bgcolor="#111827", bordercolor="#1F2937", font_size=10),
+    )
+    fig.add_vline(x=5, line_dash="dash", line_color="#374151",
+                  annotation_text="Risk midpoint")
+    fig.add_hline(y=4.25, line_dash="dash", line_color="#374151",
+                  annotation_text="Risk-free rate (4.25%)")
+    return fig
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _build_category_bar(cat_names: tuple, cat_counts: tuple):
+    """Asset browser category breakdown bar chart. Inputs are tuples (hashable)."""
+    fig = px.bar(
+        x=cat_names,
+        y=cat_counts,
+        color=cat_names,
+        color_discrete_map=CATEGORY_COLORS,
+        labels={"x": "Category", "y": "Count"},
+        height=200,
+    )
+    fig.update_layout(
+        paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+        font_color="#E2E8F0", showlegend=False,
+        margin=dict(l=40, r=20, t=10, b=40),
+        xaxis=dict(gridcolor="#1F2937"),
+        yaxis=dict(gridcolor="#1F2937"),
+    )
+    return fig
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _build_arb_bar(arb_records: list):
+    """Top Arbitrage Opportunities spread bar chart. Takes list of dicts."""
+    df = pd.DataFrame(arb_records)
+    fig = px.bar(
+        df,
+        x="asset_a_id",
+        y="net_spread_pct",
+        color="type",
+        color_discrete_sequence=px.colors.qualitative.Set3,
+        labels={"net_spread_pct": "Net Spread (%)", "asset_a_id": "Opportunity"},
+        title="Top Arbitrage Opportunities by Net Spread",
+        height=350,
+    )
+    fig.update_layout(
+        paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+        font_color="#E2E8F0", xaxis_tickangle=-35,
+        margin=dict(l=40, r=20, t=40, b=80),
+    )
+    return fig
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _build_tier_comparison_bar(comp_records: list, tier_colors: dict):
+    """Portfolio Tier Comparison grouped bar chart. Inputs are plain lists/dicts."""
+    fig = go.Figure()
+    for row in comp_records:
+        tier_n = int(row["Tier"])
+        color  = tier_colors.get(tier_n, "#888")
+        fig.add_trace(go.Bar(
+            name=f"{row['Icon']} {row['Name']}",
+            x=["Yield %", "Sharpe", "Sortino", "Max DD %"],
+            y=[row.get("Yield (%)") or 0,
+               (row.get("Sharpe Ratio") or 0) * 5,
+               (row.get("Sortino Ratio") or 0) * 5,
+               row.get("Max Drawdown (%)") or 0],
+            marker_color=color,
+        ))
+    fig.update_layout(
+        barmode="group",
+        paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+        font_color="#E2E8F0",
+        legend=dict(bgcolor="#111827", bordercolor="#1F2937"),
+        xaxis=dict(gridcolor="#1F2937"),
+        yaxis=dict(title="Value", gridcolor="#1F2937"),
+        margin=dict(l=40, r=20, t=20, b=40),
+        height=350,
+    )
+    return fig
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TOP HEADER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -658,6 +805,21 @@ def _load_screener_signals():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 15: Session-state guard for all-portfolios to avoid redundant rebuilds
+# within the same render cycle across multiple tabs.
+# ─────────────────────────────────────────────────────────────────────────────
+_port_now = time.time()
+if ("portfolio_data" not in st.session_state
+        or _port_now - st.session_state.get("portfolio_ts", 0) > 60
+        or st.session_state.get("portfolio_value_key") != portfolio_value):
+    _all_ports, _comp_df = _load_all_portfolios(portfolio_value)
+    st.session_state["portfolio_data"]      = _all_ports
+    st.session_state["portfolio_comp_df"]   = _comp_df
+    st.session_state["portfolio_ts"]        = _port_now
+    st.session_state["portfolio_value_key"] = portfolio_value
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -882,73 +1044,16 @@ with tab_portfolio:
     with chart_left:
         st.markdown('<div class="section-header">Allocation by Category</div>', unsafe_allow_html=True)
         if cat_sum:
-            labels  = list(cat_sum.keys())
-            values  = [cat_sum[c]["weight_pct"] for c in labels]
-            colors  = [cat_sum[c].get("color", "#888") for c in labels]
-            # Rich hover: show yield per category
-            hover   = [
-                f"<b>{c}</b><br>Weight: {cat_sum[c]['weight_pct']:.1f}%<br>"
-                f"Yield: {cat_sum[c]['yield_pct']:.2f}%<br>Holdings: {cat_sum[c]['count']}"
-                for c in labels
-            ]
-            fig_pie = go.Figure(go.Pie(
-                labels=labels, values=values,
-                marker_colors=colors,
-                hole=0.55,
-                hovertemplate="%{customdata}<extra></extra>",
-                customdata=hover,
-                textinfo="label+percent",
-                textfont_size=11,
-            ))
-            fig_pie.add_annotation(
-                text=f"<b>{_fmt_pct(metrics.get('weighted_yield_pct'))}</b><br><span style='font-size:11px'>yield</span>",
-                x=0.5, y=0.5, showarrow=False, font=dict(size=16, color="#E2E8F0"),
-            )
-            fig_pie.update_layout(
-                paper_bgcolor="#111827", plot_bgcolor="#111827",
-                font_color="#E2E8F0",
-                margin=dict(l=0, r=0, t=20, b=0),
-                height=320,
-                legend=dict(
-                    font_size=11,
-                    bgcolor="#111827",
-                    bordercolor="#1F2937",
-                    x=1.0, xanchor="right",
-                    orientation="v",
-                ),
-                showlegend=True,
-            )
+            # UPGRADE 21: use cached chart builder
+            _weighted_yield = float(metrics.get("weighted_yield_pct") or 0)
+            fig_pie = _build_pie_chart(cat_sum, _weighted_yield)
             st.plotly_chart(fig_pie, use_container_width=True)
 
     with chart_right:
         st.markdown('<div class="section-header">Holdings — Yield vs Risk</div>', unsafe_allow_html=True)
         if holdings:
-            h_df = pd.DataFrame(holdings)
-            fig_scatter = px.scatter(
-                h_df,
-                x="risk_score",
-                y="current_yield_pct",
-                size="weight_pct",
-                color="category",
-                color_discrete_map=CATEGORY_COLORS,
-                hover_data={"name": True, "weight_pct": True, "protocol": True,
-                            "current_yield_pct": True, "risk_score": True},
-                labels={"risk_score": "Risk Score (1=lowest)", "current_yield_pct": "Yield (%)"},
-                size_max=35,
-            )
-            fig_scatter.update_layout(
-                paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
-                font_color="#E2E8F0",
-                margin=dict(l=40, r=20, t=20, b=40),
-                height=320,
-                xaxis=dict(gridcolor="#1F2937", range=[0, 11]),
-                yaxis=dict(gridcolor="#1F2937"),
-                legend=dict(bgcolor="#111827", bordercolor="#1F2937", font_size=10),
-            )
-            fig_scatter.add_vline(x=5, line_dash="dash", line_color="#374151",
-                                  annotation_text="Risk midpoint")
-            fig_scatter.add_hline(y=4.25, line_dash="dash", line_color="#374151",
-                                  annotation_text="Risk-free rate (4.25%)")
+            # UPGRADE 21: use cached chart builder
+            fig_scatter = _build_holdings_scatter(holdings)
             st.plotly_chart(fig_scatter, use_container_width=True)
 
     # ── Holdings Table ────────────────────────────────────────────────────────
@@ -1015,7 +1120,7 @@ with tab_portfolio:
         _h_df_yb = pd.DataFrame(holdings)
         _yb_cols_needed = {"name", "current_yield_pct", "category", "weight_pct"}
         if _yb_cols_needed.issubset(set(_h_df_yb.columns)):
-            _yb = _h_df_yb[_h_df_yb["current_yield_pct"].fillna(0) > 0].copy()
+            _yb = _h_df_yb[_h_df_yb["current_yield_pct"].fillna(0) > 0]  # UPGRADE 22: no mutation follows, copy removed
             _yb = _yb.nlargest(12, "current_yield_pct")
             if not _yb.empty:
                 st.markdown('<div class="section-header">Top Holdings by Yield</div>', unsafe_allow_html=True)
@@ -1329,7 +1434,7 @@ with tab_universe:
                                 key="filter_sort",
                                 help="Rank assets by this metric. Composite Score = weighted blend of yield, risk, liquidity, and regulatory quality. Net APY = yield after management fees")
 
-    filtered_df = assets_df.copy() if not assets_df.empty else pd.DataFrame()
+    filtered_df = assets_df if not assets_df.empty else pd.DataFrame()  # UPGRADE 22: no copy needed — only sliced/reassigned
     if not filtered_df.empty:
         # Text search across name, ticker/id, and issuer columns
         if search_query and search_query.strip():
@@ -1355,22 +1460,11 @@ with tab_universe:
     st.caption(f"Showing {len(filtered_df)} of {len(assets_df)} assets")
 
     if not filtered_df.empty:
-        # Category breakdown
+        # Category breakdown — UPGRADE 21: use cached chart builder
         cat_counts = filtered_df["category"].value_counts()
-        fig_cats = px.bar(
-            x=cat_counts.index,
-            y=cat_counts.values,
-            color=cat_counts.index,
-            color_discrete_map=CATEGORY_COLORS,
-            labels={"x": "Category", "y": "Count"},
-            height=200,
-        )
-        fig_cats.update_layout(
-            paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
-            font_color="#E2E8F0", showlegend=False,
-            margin=dict(l=40, r=20, t=10, b=40),
-            xaxis=dict(gridcolor="#1F2937"),
-            yaxis=dict(gridcolor="#1F2937"),
+        fig_cats = _build_category_bar(
+            tuple(cat_counts.index.tolist()),
+            tuple(int(v) for v in cat_counts.values.tolist()),
         )
         st.plotly_chart(fig_cats, use_container_width=True)
 
@@ -1580,23 +1674,10 @@ with tab_arb:
     else:
         st.info("No arbitrage opportunities found. Click Rescan to update.")
 
-    # Spread chart
+    # Spread chart — UPGRADE 21: use cached chart builder
     if not arb_df.empty and len(arb_df) > 3:
-        fig_arb = px.bar(
-            arb_df.head(15),
-            x="asset_a_id",
-            y="net_spread_pct",
-            color="type",
-            color_discrete_sequence=px.colors.qualitative.Set3,
-            labels={"net_spread_pct": "Net Spread (%)", "asset_a_id": "Opportunity"},
-            title="Top Arbitrage Opportunities by Net Spread",
-            height=350,
-        )
-        fig_arb.update_layout(
-            paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
-            font_color="#E2E8F0", xaxis_tickangle=-35,
-            margin=dict(l=40, r=20, t=40, b=80),
-        )
+        _arb_slice = arb_df.head(15)[["asset_a_id", "net_spread_pct", "type"]].to_dict("records")
+        fig_arb = _build_arb_bar(_arb_slice)
         st.plotly_chart(fig_arb, use_container_width=True)
 
     # ── XRPL DEX Arbitrage Scanner (Item 15) ─────────────────────────────────
@@ -1869,35 +1950,18 @@ with tab_compare:
     st.markdown('<div class="section-header">Portfolio Tier Comparison</div>',
                 unsafe_allow_html=True)
 
-    all_ports, comp_df = _load_all_portfolios(portfolio_value)
+    # UPGRADE 15: use session-state cached result to avoid redundant rebuild
+    all_ports = st.session_state.get("portfolio_data", {})
+    comp_df   = st.session_state.get("portfolio_comp_df", pd.DataFrame())
+    if not all_ports:
+        all_ports, comp_df = _load_all_portfolios(portfolio_value)
 
     if not comp_df.empty:
-        # Radar / comparison chart
-        metrics_to_plot = ["Yield (%)", "Sharpe Ratio", "Sortino Ratio", "Holdings"]
-        fig_compare = go.Figure()
-
-        for _, row in comp_df.iterrows():
-            tier_n = int(row["Tier"])
-            color  = PORTFOLIO_TIERS[tier_n]["color"]
-            fig_compare.add_trace(go.Bar(
-                name=f"{row['Icon']} {row['Name']}",
-                x=["Yield %", "Sharpe", "Sortino", "Max DD %"],
-                y=[row.get("Yield (%)") or 0,
-                   (row.get("Sharpe Ratio") or 0) * 5,   # scale for visibility
-                   (row.get("Sortino Ratio") or 0) * 5,
-                   row.get("Max Drawdown (%)") or 0],
-                marker_color=color,
-            ))
-
-        fig_compare.update_layout(
-            barmode="group",
-            paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
-            font_color="#E2E8F0",
-            legend=dict(bgcolor="#111827", bordercolor="#1F2937"),
-            xaxis=dict(gridcolor="#1F2937"),
-            yaxis=dict(title="Value", gridcolor="#1F2937"),
-            margin=dict(l=40, r=20, t=20, b=40),
-            height=350,
+        # Radar / comparison chart — UPGRADE 21: use cached chart builder
+        _tier_colors = {int(t): cfg["color"] for t, cfg in PORTFOLIO_TIERS.items()}
+        fig_compare = _build_tier_comparison_bar(
+            comp_df.to_dict("records"),
+            _tier_colors,
         )
         st.plotly_chart(fig_compare, use_container_width=True)
 

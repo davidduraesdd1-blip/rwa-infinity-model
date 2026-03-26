@@ -9,9 +9,13 @@ Mathematical portfolio construction engine:
   - Rebalancing signal generator
 """
 
+import hashlib
+import json
 import logging
 import math
 import random
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
@@ -26,6 +30,29 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ─── Monte Carlo cache (UPGRADE 13) ───────────────────────────────────────────
+_mc_cache: Dict[str, dict] = {}
+_MC_CACHE_TTL = 600  # 10-minute TTL for Monte Carlo results
+
+
+def _mc_cache_key(portfolio: dict) -> str:
+    """Generate a stable cache key from portfolio metrics and holdings."""
+    try:
+        metrics = portfolio.get("metrics", {})
+        holdings = portfolio.get("holdings", [])
+        payload = json.dumps({
+            "tier":   portfolio.get("tier"),
+            "yield":  round(metrics.get("weighted_yield_pct", 0), 2),
+            "vol":    round(metrics.get("portfolio_volatility_pct", 0), 2),
+            "value":  portfolio.get("portfolio_value_usd", 100_000),
+            "n":      len(holdings),
+            "ids":    sorted(h.get("id", "") for h in holdings),
+        }, sort_keys=True)
+        return hashlib.md5(payload.encode()).hexdigest()
+    except Exception:
+        return ""
+
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 RISK_FREE_RATE      = 4.25  # % — 3-month T-bill yield (March 2026) — matches tokenized T-bill products yielding 4.3-4.5%
@@ -216,6 +243,85 @@ def score_asset(asset: dict) -> float:
     return round(score, 2)
 
 
+def score_assets_batch(assets_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Vectorized batch version of score_asset() for 200+ assets (UPGRADE 20).
+    Applies all scoring logic as pandas operations on the full DataFrame at once.
+    Returns the input DataFrame with an added 'score' column.
+
+    The individual score_asset() function is preserved for single-asset use cases.
+    """
+    df = assets_df.copy()
+
+    # Extract base numeric fields
+    yield_pct   = df.get("current_yield_pct", pd.Series(0.0, index=df.index)).fillna(
+                       df.get("expected_yield_pct", pd.Series(0.0, index=df.index))
+                  ).fillna(0.0)
+    risk        = df.get("risk_score", pd.Series(5, index=df.index)).fillna(5).clip(1, 10)
+    liquidity   = df.get("liquidity_score", pd.Series(5, index=df.index)).fillna(5).clip(1, 10)
+    regulatory  = df.get("regulatory_score", pd.Series(5, index=df.index)).fillna(5).clip(1, 10)
+
+    # Yield attractiveness
+    yield_spread = (yield_pct - RISK_FREE_RATE).clip(lower=0)
+    yield_score  = (yield_spread / 15).clip(upper=1.0)
+
+    # Risk-adjusted yield
+    risk_adj       = yield_pct / risk.clip(lower=1)
+    risk_adj_score = (risk_adj / 5).clip(upper=1.0)
+
+    # Base composite
+    score = (
+        yield_score    * 0.30
+        + (liquidity / 10) * 0.25
+        + (regulatory / 10) * 0.30
+        + risk_adj_score  * 0.15
+    ) * 100
+
+    # Institutional backing bonus (+5%)
+    _institutional_tags = {"blackrock", "kkr", "apollo", "hamilton-lane", "franklin-templeton",
+                            "wisdomtree", "axa", "societe-generale", "jpmorgan", "hsbc", "ubs",
+                            "citi", "state-street", "bny-mellon", "deutsche-bank", "securitize"}
+
+    def _has_institutional(tags_val):
+        if not tags_val:
+            return False
+        if isinstance(tags_val, str):
+            try:
+                import json as _json
+                tags_val = _json.loads(tags_val)
+            except Exception:
+                return False
+        if isinstance(tags_val, list):
+            return any(str(t).lower() in _institutional_tags for t in tags_val)
+        return False
+
+    _inst_mask = df.get("tags", pd.Series("", index=df.index)).apply(_has_institutional)
+    score = (score * _inst_mask.map({True: 1.05, False: 1.0})).clip(upper=100)
+
+    # Chain maturity discount (max 15%)
+    def _chain_discount(chain_val):
+        primary = str(chain_val or "Ethereum").split(" / ")[0].strip()
+        premium = CHAIN_VOL_PREMIUM.get(primary, 2.0)
+        return 1.0 - min(premium / 50.0, 0.15)
+
+    chain_disc = df.get("chain", pd.Series("Ethereum", index=df.index)).apply(_chain_discount)
+    score = score * chain_disc
+
+    # Synthetic / DEX basis risk penalty (-10%)
+    subcat = df.get("subcategory", pd.Series("", index=df.index)).fillna("").str.lower()
+    _synth_mask = subcat.str.contains("synthetic", na=False) | (
+        subcat.str.contains("dex", na=False) & subcat.str.contains("equit", na=False)
+    )
+    score = score * _synth_mask.map({True: 0.90, False: 1.0})
+
+    # Multi-chain future-readiness bonus (+5%)
+    _multichain_mask = df.get("chain", pd.Series("", index=df.index)).fillna("").str.contains(" / ", na=False)
+    score = (score * _multichain_mask.map({True: 1.05, False: 1.0})).clip(upper=100)
+
+    df["score"] = score.round(2)
+    return df
+
+
 def rank_assets_for_tier(tier: int, assets: List[dict]) -> List[dict]:
     """
     Filter and rank assets suitable for a given risk tier.
@@ -232,28 +338,54 @@ def rank_assets_for_tier(tier: int, assets: List[dict]) -> List[dict]:
     # Tier 1-2: min=5 (must be exitable within ~30 days), Tier 3: min=4, Tier 4+: min=3
     min_liquidity = {1: 5, 2: 5, 3: 4, 4: 3, 5: 3}.get(tier, 3)
 
-    eligible = []
-    for asset in assets:
-        risk = asset.get("risk_score", 5)
-        if not (min_risk <= risk <= max_risk):
-            continue
-        cat = asset.get("category", "")
-        if cat not in alloc_cats:
-            continue
-        # Liquidity gate: institutional portfolios cannot hold assets below minimum liquidity
-        if asset.get("liquidity_score", 5) < min_liquidity:
-            continue
+    # UPGRADE 20: use vectorized batch scoring for large asset lists
+    if len(assets) >= 10:
+        # Filter eligible assets first, then score in batch
+        pre_eligible = []
+        for asset in assets:
+            risk = asset.get("risk_score", 5)
+            if not (min_risk <= risk <= max_risk):
+                continue
+            cat = asset.get("category", "")
+            if cat not in alloc_cats:
+                continue
+            if asset.get("liquidity_score", 5) < min_liquidity:
+                continue
+            pre_eligible.append(asset)
 
-        score = score_asset(asset)
+        if not pre_eligible:
+            return []
 
-        # Bias bonus for preferred subcategories
-        subcat = asset.get("subcategory", "")
-        if any(b.lower() in subcat.lower() for b in bias):
-            score = min(score * 1.15, 100)
-
-        asset_copy = dict(asset)
-        asset_copy["score"] = score
-        eligible.append(asset_copy)
+        scored_df = score_assets_batch(pd.DataFrame(pre_eligible))
+        eligible = []
+        for _, row in scored_df.iterrows():
+            asset_copy = row.to_dict()
+            score = asset_copy.get("score", 0)
+            # Bias bonus for preferred subcategories
+            subcat = str(asset_copy.get("subcategory", "") or "")
+            if bias and any(b.lower() in subcat.lower() for b in bias):
+                score = min(score * 1.15, 100)
+            asset_copy["score"] = score
+            eligible.append(asset_copy)
+    else:
+        # Small lists: use original per-asset scoring
+        eligible = []
+        for asset in assets:
+            risk = asset.get("risk_score", 5)
+            if not (min_risk <= risk <= max_risk):
+                continue
+            cat = asset.get("category", "")
+            if cat not in alloc_cats:
+                continue
+            if asset.get("liquidity_score", 5) < min_liquidity:
+                continue
+            score = score_asset(asset)
+            subcat = asset.get("subcategory", "")
+            if any(b.lower() in subcat.lower() for b in bias):
+                score = min(score * 1.15, 100)
+            asset_copy = dict(asset)
+            asset_copy["score"] = score
+            eligible.append(asset_copy)
 
     return sorted(eligible, key=lambda x: x["score"], reverse=True)
 
@@ -577,10 +709,19 @@ def run_monte_carlo(portfolio: dict, n_simulations: int = MC_SIMULATIONS,
 
     Uses Geometric Brownian Motion for each asset.
     Returns distribution of final portfolio values and key percentiles.
+    Results are cached for 10 minutes (UPGRADE 13) to avoid re-running 10K
+    scenarios on every Streamlit rerun.
     """
     holdings = portfolio.get("holdings", [])
     if not holdings:
         return {}
+
+    # UPGRADE 13: check module-level cache before running expensive simulation
+    _ck = _mc_cache_key(portfolio)
+    if _ck:
+        _cached = _mc_cache.get(_ck)
+        if _cached and (time.time() - _cached.get("_ts", 0)) < _MC_CACHE_TTL:
+            return {k: v for k, v in _cached.items() if k != "_ts"}
 
     metrics = portfolio.get("metrics", {})
     initial_value = portfolio.get("portfolio_value_usd", 100_000)
@@ -648,7 +789,7 @@ def run_monte_carlo(portfolio: dict, n_simulations: int = MC_SIMULATIONS,
     hist_counts = bins[0].tolist()
     hist_edges  = bins[1].tolist()
 
-    return {
+    _result = {
         "initial_value_usd":    initial_value,
         "horizon_days":         horizon_days,
         "n_simulations":        n_simulations,
@@ -665,6 +806,10 @@ def run_monte_carlo(portfolio: dict, n_simulations: int = MC_SIMULATIONS,
         "hist_counts":          hist_counts,
         "hist_edges":           hist_edges,
     }
+    # UPGRADE 13: store in module-level cache with timestamp
+    if _ck:
+        _mc_cache[_ck] = {**_result, "_ts": time.time()}
+    return _result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -781,16 +926,28 @@ def check_rebalance_needed(portfolio: dict, current_weights: Dict[str, float]) -
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_all_portfolios(portfolio_value_usd: float = 100_000) -> Dict[int, dict]:
-    """Build all 5 portfolio tiers and return comparison dict."""
+    """Build all 5 portfolio tiers in parallel and return comparison dict (UPGRADE 14)."""
     df = _db.get_all_rwa_latest()
     assets = df.to_dict("records") if not df.empty else list(RWA_UNIVERSE)
-    portfolios = {}
-    for tier in range(1, 6):
+
+    def _build_tier(tier: int) -> tuple:
         try:
-            portfolios[tier] = build_portfolio(tier, portfolio_value_usd, assets)
+            return tier, build_portfolio(tier, portfolio_value_usd, assets)
         except Exception as e:
             logger.error("[Portfolio] build_portfolio tier %d failed: %s", tier, e)
-            portfolios[tier] = {"tier": tier, "error": str(e)}
+            return tier, {"tier": tier, "error": str(e)}
+
+    portfolios: Dict[int, dict] = {}
+    with ThreadPoolExecutor(max_workers=5) as _ex:
+        _tier_futs = {_ex.submit(_build_tier, t): t for t in range(1, 6)}
+        for _fut in _tier_futs:
+            try:
+                _tier, _port = _fut.result(timeout=60)
+                portfolios[_tier] = _port
+            except Exception as _e:
+                _t = _tier_futs[_fut]
+                logger.error("[Portfolio] tier %d parallel build failed: %s", _t, _e)
+                portfolios[_t] = {"tier": _t, "error": str(_e)}
     return portfolios
 
 

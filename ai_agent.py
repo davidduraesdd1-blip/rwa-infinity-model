@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -201,6 +202,28 @@ def _check_post_risk(actions: list, cfg: dict, portfolio_value: float) -> tuple[
 
 _decision_cache: dict = {}
 _decision_cache_lock = threading.Lock()
+_DECISION_TTL = 600  # 10-minute TTL (UPGRADE 16)
+
+
+def _decision_key(agent_name: str, portfolio: dict, arb_opps: list) -> str:
+    """
+    Stable cache key based on agent + rounded portfolio metrics + top-arb signal.
+    Avoids re-calling Claude when market state hasn't materially changed (UPGRADE 16).
+    """
+    try:
+        metrics = portfolio.get("metrics", {})
+        payload = json.dumps({
+            "agent":  agent_name,
+            "tier":   portfolio.get("tier"),
+            "yield":  round(metrics.get("weighted_yield_pct", 0), 1),
+            "vol":    round(metrics.get("portfolio_volatility_pct", 0), 1),
+            "sharpe": round(metrics.get("sharpe_ratio", 0), 1),
+            "n":      metrics.get("n_holdings", 0),
+            "arb_top": (arb_opps[0].get("signal", "") if arb_opps else ""),
+        }, sort_keys=True)
+        return hashlib.md5(payload.encode()).hexdigest()
+    except Exception:
+        return f"{agent_name}|fallback"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -326,11 +349,11 @@ def _call_claude(state: AgentState, api_key: str = "") -> tuple[str, str, float,
     arb_opps  = state["arb_opportunities"][:5]  # top 5 opportunities
     metrics   = portfolio.get("metrics", {})
 
-    # Cache key to avoid repeated identical calls
-    cache_key = f"{state['agent_name']}|{metrics.get('weighted_yield_pct', 0):.1f}|{state['cycle_number']}"
+    # UPGRADE 16: use content-hash cache key with 10-min TTL
+    cache_key = _decision_key(state["agent_name"], portfolio, arb_opps)
     with _decision_cache_lock:
         cached = _decision_cache.get(cache_key)
-        if cached and (time.time() - cached["_ts"]) < AI_CACHE_TTL:
+        if cached and (time.time() - cached["_ts"]) < _DECISION_TTL:
             return cached["decision"], cached["rationale"], cached["confidence"], cached["actions"]
 
     # Format portfolio summary (sanitized)

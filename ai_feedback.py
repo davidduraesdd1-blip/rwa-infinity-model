@@ -178,6 +178,121 @@ def _health_message(score: int, grade: str) -> str:
         return f"Agent needs more history to calibrate (Grade {grade}). Keep running cycles."
 
 
+# ─── Batch accuracy (UPGRADE 19) ──────────────────────────────────────────────
+
+def compute_accuracy_all_agents(agent_names: list) -> dict:
+    """
+    Batch version of compute_accuracy() — runs a single DB query for all agents
+    instead of N separate queries (UPGRADE 19).
+
+    Returns {agent_name: compute_accuracy_result_dict}.
+    Falls back to individual queries per agent on error.
+    """
+    conn = _db._get_conn()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS)).isoformat()
+    try:
+        rows = conn.execute(
+            """
+            SELECT agent_name, outcome, expected_return_pct, actual_return_pct, timestamp
+            FROM ai_feedback
+            WHERE timestamp >= ?
+              AND outcome IS NOT NULL
+            ORDER BY agent_name, timestamp DESC
+            LIMIT 2500
+            """,
+            (cutoff,),
+        ).fetchall()
+    except Exception as e:
+        logger.error("compute_accuracy_all_agents DB read failed: %s", e)
+        # Fallback to individual per-agent queries
+        return {name: compute_accuracy(name) for name in agent_names}
+    finally:
+        conn.close()
+
+    # Group rows by agent_name
+    from collections import defaultdict
+    grouped: dict = defaultdict(list)
+    for row in rows:
+        grouped[row[0]].append(row)
+
+    now_ts = datetime.now(timezone.utc)
+    results: dict = {}
+    for agent_name in agent_names:
+        agent_rows = grouped.get(agent_name, [])
+        if len(agent_rows) < _MIN_SAMPLES:
+            results[agent_name] = {
+                "agent_name":      agent_name,
+                "accuracy_pct":    None,
+                "avg_return_pct":  None,
+                "win_rate":        None,
+                "directional_pct": None,
+                "sample_count":    len(agent_rows),
+                "grade":           "N/A",
+                "health_score":    50,
+                "message":         f"Building history ({len(agent_rows)}/{_MIN_SAMPLES} samples). Keep running scans.",
+            }
+            continue
+
+        w_win = w_directional = w_accurate = w_total = 0.0
+        weighted_returns: list = []
+        for row in agent_rows:
+            outcome  = row[1] or "NEUTRAL"
+            expected = row[2] or 0.0
+            actual   = row[3] or 0.0
+            ts_str   = row[4] or now_ts.isoformat()
+            try:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                age_days = max(0.0, (now_ts - ts).total_seconds() / 86400)
+            except Exception:
+                age_days = 0.0
+            weight = math.exp(-age_days / _EXP_HALF_LIFE)
+            w_total += weight
+            if outcome == "WIN":
+                w_win += weight
+            if actual > 0:
+                w_directional += weight
+            if expected != 0 and abs(actual - expected) / max(abs(expected), 0.01) < _RETURN_THRESHOLD:
+                w_accurate += weight
+            weighted_returns.append((actual, weight))
+
+        if w_total == 0:
+            results[agent_name] = _empty_result(agent_name)
+            continue
+
+        win_rate        = w_win        / w_total * 100
+        directional_pct = w_directional / w_total * 100
+        accuracy_pct    = w_accurate   / w_total * 100
+        avg_return = (
+            sum(r * w for r, w in weighted_returns) / w_total
+            if weighted_returns else 0.0
+        )
+        if win_rate >= 70:   grade = "A"
+        elif win_rate >= 55: grade = "B"
+        elif win_rate >= 40: grade = "C"
+        elif win_rate >= 25: grade = "D"
+        else:                grade = "F"
+
+        health_score = min(100, int(
+            win_rate        * 0.50
+            + directional_pct * 0.30
+            + accuracy_pct    * 0.20
+        ))
+        results[agent_name] = {
+            "agent_name":      agent_name,
+            "accuracy_pct":    round(accuracy_pct, 1),
+            "avg_return_pct":  round(avg_return, 2),
+            "win_rate":        round(win_rate, 1),
+            "directional_pct": round(directional_pct, 1),
+            "sample_count":    len(agent_rows),
+            "grade":           grade,
+            "health_score":    health_score,
+            "message":         _health_message(health_score, grade),
+        }
+    return results
+
+
 # ─── Full Dashboard ────────────────────────────────────────────────────────────
 
 def get_feedback_dashboard() -> dict:
@@ -195,11 +310,11 @@ def get_feedback_dashboard() -> dict:
     """
     from config import AI_AGENTS
 
-    # Per-agent accuracy
-    per_agent = {}
+    # UPGRADE 19: use single-query batch version instead of N per-agent queries
+    per_agent = compute_accuracy_all_agents(list(AI_AGENTS))
     health_scores = []
     for agent_name in AI_AGENTS:
-        acc = compute_accuracy(agent_name)
+        acc = per_agent.get(agent_name, _empty_result(agent_name))
         per_agent[agent_name] = acc
         if acc["health_score"] is not None:
             health_scores.append(acc["health_score"])
