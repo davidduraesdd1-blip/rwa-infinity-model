@@ -296,16 +296,17 @@ def _execute_agent_tool(name: str) -> dict:
     return {"error": f"unknown tool: {name}"}
 
 
-def _call_claude(state: AgentState) -> tuple[str, str, float, list]:
+def _call_claude(state: AgentState, api_key: str = "") -> tuple[str, str, float, list]:
     """
     Call Claude claude-sonnet-4-6 to make a portfolio decision using tool_use.
     Claude calls data tools as needed, then returns a structured JSON decision.
     Returns (decision, rationale, confidence_pct, proposed_actions).
+    api_key: optional override; falls back to ANTHROPIC_API_KEY env var.
     """
     if not _ANTHROPIC:
         return "HOLD", "Anthropic SDK not installed", 50.0, []
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    api_key = (api_key or os.environ.get("ANTHROPIC_API_KEY", "")).strip()
     if not api_key:
         return "HOLD", "ANTHROPIC_API_KEY not configured", 0.0, []
 
@@ -733,7 +734,7 @@ def _node_claude_decide(state: AgentState) -> AgentState:
         return state
 
     try:
-        decision, rationale, confidence, actions = _call_claude(state)
+        decision, rationale, confidence, actions = _call_claude(state, api_key=state.get("api_key", ""))
         state["claude_decision"]   = decision
         state["claude_rationale"]  = rationale
         state["claude_confidence"] = confidence
@@ -944,10 +945,12 @@ def _get_graph():
 # AGENT CYCLE RUNNER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_agent_cycle(agent_name: str, dry_run: bool = True, cycle_number: int = 0) -> dict:
+def run_agent_cycle(agent_name: str, dry_run: bool = True, cycle_number: int = 0,
+                    api_key: str = "") -> dict:
     """
     Run one complete agent decision cycle.
     Returns the final state dict.
+    api_key: optional override for ANTHROPIC_API_KEY (used when key is session-only).
     """
     agent_cfg = AI_AGENTS.get(agent_name)
     if not agent_cfg:
@@ -974,6 +977,7 @@ def run_agent_cycle(agent_name: str, dry_run: bool = True, cycle_number: int = 0
         "cycle_number":      cycle_number,
         "is_dry_run":        dry_run,
         "error":             None,
+        "api_key":           api_key,  # session-supplied key override; empty = use env var
     }
 
     graph = _get_graph()
@@ -1063,12 +1067,14 @@ def evaluate_past_decisions(agent_name: str, lookback_cycles: int = 10):
         logger.error("[Agent] evaluate_past_decisions: %s", e)
 
 
-def get_agent_insights(agent_name: str) -> dict:
-    """Get AI-generated insights for the current market state."""
+def get_agent_insights(agent_name: str, api_key: str = "") -> dict:
+    """Get AI-generated insights for the current market state.
+    api_key: optional override for ANTHROPIC_API_KEY (used when key is session-only).
+    """
     if not _ANTHROPIC:
         return {"insights": "Anthropic SDK not installed", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    api_key = (api_key or os.environ.get("ANTHROPIC_API_KEY", "")).strip()
     if not api_key:
         return {"insights": "ANTHROPIC_API_KEY not configured", "timestamp": datetime.now(timezone.utc).isoformat()}
 

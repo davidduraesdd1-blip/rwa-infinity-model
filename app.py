@@ -262,6 +262,7 @@ _ss("agent_dry_run",    True)
 _ss("show_mc",          False)
 _ss("tab_index",        0)
 _ss("api_key_set",      bool(os.environ.get("ANTHROPIC_API_KEY")))
+_ss("user_anthropic_key", "")  # per-session user-supplied key — never written to os.environ
 _ss("ai_news_brief",    "")
 
 # ── Shareable URL params — read ?tier=X&value=Y on page load ─────────────────
@@ -1653,13 +1654,18 @@ with tab_compare:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_ai:
-    # API Key check
-    api_key_env = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    # API Key check — session key takes priority over env; never mutate os.environ at runtime
+    def _get_effective_claude_key() -> str:
+        return (st.session_state.get("user_anthropic_key") or
+                os.environ.get("ANTHROPIC_API_KEY", "")).strip()
+
+    api_key_env = _get_effective_claude_key()
     if not api_key_env:
         st.warning("⚠️ ANTHROPIC_API_KEY not set. AI features require the key in your environment.")
         user_key = st.text_input("Enter API Key (session only)", type="password", key="api_key_input")
         if user_key and st.button("Apply Key", key="apply_key"):
-            os.environ["ANTHROPIC_API_KEY"] = user_key
+            st.session_state["user_anthropic_key"] = user_key  # session-scoped only
+            st.session_state["api_key_set"] = True
             st.success("Key applied for this session")
             st.rerun()
 
@@ -1740,7 +1746,8 @@ with tab_ai:
         if st.button("⚡ Run Now (1 cycle)", use_container_width=True, key="btn_one_cycle",
                      help="Execute one analysis cycle immediately — the agent reads live market data, calls Claude for a decision (HOLD/REBALANCE/DEPLOY/REDUCE), and logs the result. Great for testing without starting the full scheduler."):
             with st.spinner(f"Running {agent_detail['name']} cycle...", show_time=True):
-                result = _agent.run_agent_cycle(selected_agent, dry_run=dry_run, cycle_number=0)
+                result = _agent.run_agent_cycle(selected_agent, dry_run=dry_run, cycle_number=0,
+                                               api_key=_get_effective_claude_key())
             st.success(f"Cycle complete: {result.get('claude_decision', 'UNKNOWN')}")
             st.rerun()
 
@@ -1781,7 +1788,7 @@ with tab_ai:
     st.markdown('<div class="section-header">AI Market Insights</div>', unsafe_allow_html=True)
     if st.button(f"🧠 Generate {agent_detail['name']} Insights", key="btn_insights"):
         with st.spinner("Analyzing RWA market with Claude claude-sonnet-4-6...", show_time=True):
-            insights = _agent.get_agent_insights(selected_agent)
+            insights = _agent.get_agent_insights(selected_agent, api_key=_get_effective_claude_key())
         st.markdown(f"""
         <div class="metric-card">
             <div style="font-size:12px;color:{agent_detail['color']};font-weight:700;margin-bottom:8px">
