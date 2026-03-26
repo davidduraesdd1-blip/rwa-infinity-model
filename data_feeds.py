@@ -2597,7 +2597,8 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
             return (rsi_score + ema_score) / 2.0
 
         # Weights: 1H noise-filter, 4H entry-timing, 1D primary, 1W macro-trend
-        TF_WEIGHTS = {"1H": 0.05, "4H": 0.15, "1D": 0.40, "1W": 0.40}
+        # (QuantPedia D1H1 research: 1H:10% 4H:20% 1D:35% 1W:35% → Sharpe 0.33→0.80)
+        TF_WEIGHTS = {"1H": 0.10, "4H": 0.20, "1D": 0.35, "1W": 0.35}
         tf_scores = {
             "1H": _tf_score(bars_1h, 20,  50),
             "4H": _tf_score(bars_4h, 20,  50),
