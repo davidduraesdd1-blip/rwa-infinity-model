@@ -31,6 +31,7 @@ from config import (
     DUNE_API_KEY,
     SANTIMENT_API_KEY, FRED_API_KEY, COINALYZE_API_KEY,
     XRPL_NODE_URL, XRPL_RLUSD_ISSUER,
+    ETHERSCAN_API_KEY, ZERION_API_KEY,
     get_asset_fee_bps,
     ALLOWED_DOMAINS,
 )
@@ -3972,6 +3973,10 @@ _ERC4626_VAULTS: dict = {
 
 _ETHERSCAN_RPC = "https://api.etherscan.io/api"
 
+_ERC4626_CACHE: dict = {}
+_ERC4626_LOCK  = threading.Lock()
+_ERC4626_TTL   = 300  # 5 min
+
 
 def _etherscan_call(contract: str, data: str) -> Optional[str]:
     """Call eth_call via Etherscan proxy (no web3 needed)."""
@@ -3998,7 +4003,7 @@ def fetch_erc4626_vault_data(symbol: str) -> dict:
     Falls back to "unavailable" if Etherscan key missing or call fails.
 
     Returns:
-        symbol, address, price_per_share, total_assets_usd, decimals, source
+        symbol, address, price_per_share, total_assets, decimals, source
     """
     vault = _ERC4626_VAULTS.get(symbol)
     if not vault:
@@ -4006,13 +4011,15 @@ def fetch_erc4626_vault_data(symbol: str) -> dict:
 
     addr     = vault["address"]
     decimals = vault.get("decimals", 18)
-    result   = {"symbol": symbol, "address": addr, "price_per_share": None,
-                 "total_assets": None, "decimals": decimals, "source": "unavailable"}
 
     cache_key = f"erc4626:{symbol}"
-    cached    = _cached_get(cache_key, 300)  # 5-min cache
-    if cached:
-        return cached
+    with _ERC4626_LOCK:
+        cached = _ERC4626_CACHE.get(cache_key)
+        if cached and (time.time() - cached["_ts"]) < _ERC4626_TTL:
+            return {k: v for k, v in cached.items() if k != "_ts"}
+
+    result = {"symbol": symbol, "address": addr, "price_per_share": None,
+              "total_assets": None, "decimals": decimals, "source": "unavailable"}
 
     # pricePerShare()
     raw_pps = _etherscan_call(addr, _ERC4626_PRICE_PER_SHARE)
@@ -4031,7 +4038,9 @@ def fetch_erc4626_vault_data(symbol: str) -> dict:
         except (ValueError, ZeroDivisionError):
             pass
 
-    _cache_set(cache_key, result, 300)
+    with _ERC4626_LOCK:
+        _ERC4626_CACHE[cache_key] = {**result, "_ts": time.time()}
+
     return result
 
 
@@ -4137,7 +4146,7 @@ def fetch_xrpl_mpt_data() -> dict:
             "method": "ledger_data",
             "params": [{"ledger_index": "validated", "type": "mpt_issuance", "limit": 50}],
         }
-        r = _SESSION.post(_XRPL_RPC_URL, json=payload, timeout=10)
+        r = _session.post(_XRPL_RPC_URL, json=payload, timeout=10)
         if r.status_code == 200:
             data = r.json().get("result", {})
             objs = data.get("state", [])
@@ -4153,7 +4162,7 @@ def fetch_xrpl_mpt_data() -> dict:
             "method": "gateway_balances",
             "params": [{"account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh", "ledger_index": "validated"}],
         }
-        r = _SESSION.post(_XRPL_RPC_URL, json=payload, timeout=8)
+        r = _session.post(_XRPL_RPC_URL, json=payload, timeout=8)
         if r.status_code == 200:
             obligations = r.json().get("result", {}).get("obligations", {})
             rlusd = obligations.get("RLUSD") or obligations.get("USD")
@@ -4306,7 +4315,7 @@ def fetch_zerion_portfolio(wallet_address: str) -> dict:
 
     try:
         url = f"{_ZERION_BASE}/wallets/{wallet_address}/positions/"
-        r   = _SESSION.get(
+        r   = _session.get(
             url,
             headers={"Authorization": f"Basic {auth_token}", "Accept": "application/json"},
             params={"filter[position_types]": "wallet", "currency": "usd", "sort": "-value"},
@@ -4320,7 +4329,7 @@ def fetch_zerion_portfolio(wallet_address: str) -> dict:
             for item in data:
                 attrs  = item.get("attributes", {})
                 value  = float(attrs.get("value") or 0)
-                chain  = attrs.get("relationships", {}).get("chain", {}).get("data", {}).get("id", "unknown")
+                chain  = item.get("relationships", {}).get("chain", {}).get("data", {}).get("id", "unknown")
                 symbol = (attrs.get("fungible_info") or {}).get("symbol", "?")
                 positions.append({
                     "symbol":  symbol,
@@ -4382,7 +4391,7 @@ def fetch_wormhole_rwa_vaa(
 
     vaas = []
     try:
-        r = _SESSION.get(
+        r = _session.get(
             f"{_WORMHOLE_API}/vaas",
             params={
                 "chainId": emitter_chain_id,

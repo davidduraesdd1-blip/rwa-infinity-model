@@ -3439,9 +3439,8 @@ with tab_onchain:
     if _mpt.get("error") and not _mpt.get("issuances") and not _mpt.get("rlusd_gateway_supply"):
         st.caption(f"MPT data unavailable: {_mpt.get('error')}")
     else:
-        _mpt_iss   = _mpt.get("issuances", [])
-        _mpt_rlusd = _mpt.get("rlusd_gateway_supply")
-        _mpt_total = _mpt.get("total_issuances", 0)
+        _mpt_rlusd = _mpt.get("rlusd_supply")
+        _mpt_total = _mpt.get("mpt_issuance_count", 0)
         _mpt_a, _mpt_b = st.columns(2)
         with _mpt_a:
             _rlusd_fmt = f"${_mpt_rlusd/1e6:.1f}M" if _mpt_rlusd and _mpt_rlusd >= 1e6 else (f"${_mpt_rlusd:,.0f}" if _mpt_rlusd else "—")
@@ -3460,16 +3459,6 @@ with tab_onchain:
   <div style="font-size:11px;color:#6b7280;margin-top:6px">XLS-33d MPT objects on ledger</div>
 </div>
 """, unsafe_allow_html=True)
-        if _mpt_iss:
-            _mpt_rows = []
-            for _iss in _mpt_iss[:10]:
-                _mpt_rows.append({
-                    "Issuer": (_iss.get("issuer") or "")[:16] + "…",
-                    "Max Amount": _iss.get("maximum_amount", "—"),
-                    "Outstanding": _iss.get("outstanding_amount", "—"),
-                    "Flags": _iss.get("flags", 0),
-                })
-            st.dataframe(pd.DataFrame(_mpt_rows), use_container_width=True, hide_index=True)
 
     # ─── Chainlink Reference Price Feeds (#108 + #109) ───────────────────────
     st.markdown("---")
@@ -3485,9 +3474,7 @@ with tab_onchain:
         _cl_data = _cl_prices()
         if _cl_data:
             _cl_cols = st.columns(len(_cl_data))
-            for _ci, (_pair, _cprice) in enumerate(_cl_data.items()):
-                _err = _cprice.get("error")
-                _pv  = _cprice.get("price_usd")
+            for _ci, (_pair, _pv) in enumerate(_cl_data.items()):
                 _pv_fmt = f"${_pv:,.4f}" if _pv else "—"
                 _clr = "#10b981" if _pv else "#6b7280"
                 with _cl_cols[_ci]:
@@ -3519,7 +3506,7 @@ with tab_onchain:
         for _vi, (_sym, _vd) in enumerate(_vaults.items()):
             _err    = _vd.get("error")
             _pps    = _vd.get("price_per_share")
-            _ta     = _vd.get("total_assets_usd")
+            _ta     = _vd.get("total_assets")
             _pps_s  = f"${_pps:.6f}" if _pps else "—"
             _ta_s   = (f"${_ta/1e9:.2f}B" if _ta and _ta >= 1e9 else f"${_ta/1e6:.1f}M" if _ta else "—")
             _vc     = "#10b981" if _pps else "#6b7280"
@@ -3550,7 +3537,7 @@ with tab_onchain:
         _redeems = _redeem_data()
         _rd_cols = st.columns(2)
         for _ri, (_sym, _rd) in enumerate(_redeems.items()):
-            _pending = _rd.get("pending_redemptions_usd")
+            _pending = _rd.get("pending_redemptions")
             _p_s     = (f"${_pending/1e6:.1f}M" if _pending and _pending >= 1e6 else
                         f"${_pending:,.0f}" if _pending else "—")
             _rc2     = "#f59e0b" if _pending and _pending > 0 else "#10b981"
@@ -3584,11 +3571,15 @@ with tab_onchain:
     st.markdown("##### 🛡️ ERC-3643 / T-REX On-Chain Compliance")
     st.caption("Etherscan eth_call · isVerified(address) on BUIDL/OUSG — institutional compliance registry")
 
+    _ERC3643_ADDRS = {
+        "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
+        "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbe39B",
+    }
     if _wallet_addr and (feature_enabled("onchainid") or feature_enabled("etherscan")):
         @st.cache_data(ttl=300, show_spinner=False)
         def _compliance_check(wallet):
-            return {sym: _df.fetch_erc3643_compliance(sym, wallet)
-                    for sym in ["BUIDL", "OUSG"]}
+            return {sym: _df.fetch_erc3643_compliance(addr, wallet)
+                    for sym, addr in _ERC3643_ADDRS.items()}
 
         _compl = _compliance_check(_wallet_addr)
         _co_cols = st.columns(len(_compl))
@@ -3623,7 +3614,7 @@ with tab_onchain:
             st.caption(f"Zerion unavailable: {_zp.get('error')}")
         else:
             _za, _zb, _zc = st.columns(3)
-            _z_total  = _zp.get("total_value_usd", 0)
+            _z_total  = _zp.get("total_usd", 0)
             _z_chains = _zp.get("chain_distribution", {})
             _z_npos   = len(_zp.get("positions", []))
             with _za:
@@ -3640,8 +3631,8 @@ with tab_onchain:
                     _z_rows.append({
                         "Asset":  _zr.get("symbol", "—"),
                         "Chain":  _zr.get("chain", "—"),
-                        "Value":  f"${_zr.get('value_usd', 0):,.2f}",
-                        "Amount": f"{_zr.get('quantity', 0):.4f}",
+                        "Value":  f"${_zr.get('value', 0):,.2f}",
+                        "Amount": f"{_zr.get('qty', 0):.4f}",
                     })
                 st.dataframe(pd.DataFrame(_z_rows), use_container_width=True, hide_index=True)
     elif not _wallet_addr:
