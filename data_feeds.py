@@ -1976,17 +1976,24 @@ def fetch_coinalyze_funding(
 # Rising stablecoin supply = dry powder waiting to deploy = bullish signal.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_STABLE_COIN_IDS = {"tether": "USDT", "usd-coin": "USDC"}
+# Added RLUSD (Ripple USD) per upgrade #28
+_STABLE_COIN_IDS = {
+    "tether":           "USDT",
+    "usd-coin":         "USDC",
+    "ripple-usd":       "RLUSD",   # RLUSD CoinGecko ID (Ripple's regulated stablecoin)
+}
 
 
 def fetch_stablecoin_supply() -> dict:
     """
-    Fetch USDT and USDC market caps from CoinGecko.
+    Fetch USDT + USDC + RLUSD market caps from CoinGecko (#28).
+    Rising stablecoin supply = dry powder waiting to deploy = bullish signal.
 
     Returns:
         {
           "usdt_bn":   float,
           "usdc_bn":   float,
+          "rlusd_bn":  float,
           "total_bn":  float,
           "source":    "coingecko" | "fallback",
           "timestamp": ISO str,
@@ -2011,12 +2018,14 @@ def fetch_stablecoin_supply() -> dict:
                 caps[_STABLE_COIN_IDS[cid]] = round(float(mc) / 1e9, 2)
         if not caps:
             return None
-        usdt = caps.get("USDT", 140.0)
-        usdc = caps.get("USDC", 58.0)
+        usdt  = caps.get("USDT",  140.0)
+        usdc  = caps.get("USDC",   58.0)
+        rlusd = caps.get("RLUSD",   0.0)   # small but growing
         return {
             "usdt_bn":   usdt,
             "usdc_bn":   usdc,
-            "total_bn":  round(usdt + usdc, 2),
+            "rlusd_bn":  rlusd,
+            "total_bn":  round(usdt + usdc + rlusd, 2),
             "source":    "coingecko",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -2024,9 +2033,181 @@ def fetch_stablecoin_supply() -> dict:
     cached = _cached_get("stablecoin_supply", CACHE_TTL["prices"], _fetch)
     if cached is None:
         return {
-            "usdt_bn": 140.0, "usdc_bn": 58.0, "total_bn": 198.0,
+            "usdt_bn": 140.0, "usdc_bn": 58.0, "rlusd_bn": 0.0, "total_bn": 198.0,
             "source": "fallback",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    return cached
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE #24: GLOBAL M2 COMPOSITE (70-110 day lag BTC correlation ≈ 0.90)
+# Uses FRED for US M2 (M2SL) — the dominant component.
+# Global M2 = US + EU + China + Japan + UK money supplies (USD-adjusted).
+# Free series: M2SL (USD), ECBASSETSW (ECB), M2 (China proxy via stale),
+#              JPNASSETS (BoJ balance sheet proxy).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_global_m2_composite() -> dict:
+    """
+    Approximate Global M2 with a 90-day lag signal for BTC cycle timing.
+
+    Returns the lagged signal to align with the ~90-day transmission delay
+    between M2 expansion and crypto price impact.
+
+    Returns:
+        {
+          "us_m2_bn":          float,
+          "global_m2_est_bn":  float,  # US M2 × 4.2 (US ≈ 24% of global M2)
+          "m2_90d_change_pct": float,
+          "lag_signal":        "EXPANDING" | "CONTRACTING" | "NEUTRAL",
+          "btc_signal":        str,   # BTC bias based on lagged M2
+          "source":            str,
+          "timestamp":         ISO str,
+        }
+    """
+    def _fetch():
+        # US M2 from FRED (M2SL series — monthly, billions USD)
+        try:
+            if FRED_API_KEY:
+                url = "https://api.stlouisfed.org/fred/series/observations"
+                params = {
+                    "series_id":     "M2SL",
+                    "api_key":       FRED_API_KEY,
+                    "file_type":     "json",
+                    "sort_order":    "desc",
+                    "limit":         6,   # last 6 months
+                }
+                r = _get(url, params=params)
+                obs = (r or {}).get("observations", [])
+            else:
+                # Public CSV endpoint (no key needed)
+                csv_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=M2SL"
+                r = _session.get(csv_url, timeout=12)
+                lines = r.text.strip().split("\n")[1:]  # skip header
+                obs = []
+                for line in reversed(lines[-6:]):
+                    parts = line.split(",")
+                    if len(parts) == 2 and parts[1].strip() not in ("", "."):
+                        obs.append({"date": parts[0], "value": parts[1]})
+
+            if len(obs) >= 2:
+                latest_val  = float(obs[0]["value"])
+                earlier_val = float(obs[-1]["value"])
+                change_pct  = round((latest_val - earlier_val) / max(earlier_val, 1) * 100, 2)
+                global_est  = round(latest_val * 4.2, 0)  # US ≈ 24% of global M2
+
+                if change_pct > 2.0:
+                    lag_signal = "EXPANDING"
+                    btc_signal = "BULLISH (M2 expanding — lagged 90d uplift expected)"
+                elif change_pct < -1.0:
+                    lag_signal = "CONTRACTING"
+                    btc_signal = "BEARISH (M2 contracting — headwind in 90d)"
+                else:
+                    lag_signal = "NEUTRAL"
+                    btc_signal = "NEUTRAL"
+
+                return {
+                    "us_m2_bn":          round(latest_val, 1),
+                    "global_m2_est_bn":  global_est,
+                    "m2_90d_change_pct": change_pct,
+                    "lag_signal":        lag_signal,
+                    "btc_signal":        btc_signal,
+                    "source":            "FRED",
+                    "timestamp":         datetime.now(timezone.utc).isoformat(),
+                }
+        except Exception as e:
+            logger.debug("[GlobalM2] FRED fetch failed: %s", e)
+        return None
+
+    cached = _cached_get("global_m2_composite", 3600 * 6, _fetch)   # 6-hour TTL (monthly data)
+    if cached is None:
+        return {
+            "us_m2_bn": 21500.0, "global_m2_est_bn": 90300.0,
+            "m2_90d_change_pct": 0.0, "lag_signal": "NEUTRAL",
+            "btc_signal": "NEUTRAL", "source": "fallback",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    return cached
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE #26: PI CYCLE TOP INDICATOR
+# Uses 111-day and 350-day × 2 moving averages of BTC price.
+# When 111-DMA crosses above 350-DMA × 2, BTC is at or near a cycle top.
+# Data from CoinGecko free API (200 days of daily closes).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_pi_cycle_indicator() -> dict:
+    """
+    Compute the Pi Cycle Top indicator for BTC.
+
+    Returns:
+        {
+          "ma_111":       float,   # 111-day MA of BTC close
+          "ma_350x2":     float,   # 350-day MA × 2
+          "gap_pct":      float,   # % gap: (ma_111 - ma_350x2) / ma_350x2 * 100
+          "signal":       "APPROACHING_TOP" | "WARNING" | "NEUTRAL" | "BOTTOM" | "N/A",
+          "description":  str,
+          "source":       str,
+          "timestamp":    ISO str,
+        }
+    """
+    def _fetch():
+        # Fetch 365 days of BTC daily prices from CoinGecko
+        url = f"{COINGECKO_BASE}/coins/bitcoin/market_chart"
+        params = {"vs_currency": "usd", "days": 365, "interval": "daily"}
+        data = _get(url, params=params)
+        if not data or "prices" not in data:
+            return None
+
+        closes = [float(p[1]) for p in data["prices"]]
+        if len(closes) < 112:
+            return None
+
+        ma_111   = round(sum(closes[-111:]) / 111, 2)
+        ma_350x2 = None
+        if len(closes) >= 350:
+            ma_350x2 = round(sum(closes[-350:]) / 350 * 2, 2)
+
+        if ma_350x2 is None:
+            return {
+                "ma_111": ma_111, "ma_350x2": None,
+                "gap_pct": None,
+                "signal": "N/A", "description": "Need 350d of data",
+                "source": "coingecko",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        gap_pct = round((ma_111 - ma_350x2) / max(ma_350x2, 1) * 100, 2)
+
+        if gap_pct > 5:
+            signal = "APPROACHING_TOP"
+            desc = f"Pi Cycle: 111-DMA is {gap_pct:.1f}% above 350-DMA×2 — cycle top warning"
+        elif gap_pct > 0:
+            signal = "WARNING"
+            desc = f"Pi Cycle: 111-DMA approaching 350-DMA×2 ({gap_pct:.1f}% gap)"
+        elif gap_pct > -10:
+            signal = "NEUTRAL"
+            desc = f"Pi Cycle: 111-DMA is {abs(gap_pct):.1f}% below 350-DMA×2 — mid-cycle"
+        else:
+            signal = "BOTTOM"
+            desc = f"Pi Cycle: Large gap ({gap_pct:.1f}%) — historically near cycle bottom"
+
+        return {
+            "ma_111": ma_111, "ma_350x2": ma_350x2,
+            "gap_pct": gap_pct,
+            "signal": signal, "description": desc,
+            "source": "coingecko",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    cached = _cached_get("pi_cycle_indicator", 3600 * 4, _fetch)   # 4-hour TTL
+    if cached is None:
+        return {
+            "ma_111": None, "ma_350x2": None, "gap_pct": None,
+            "signal": "N/A", "description": "Pi Cycle data unavailable",
+            "source": "fallback", "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     return cached
 
