@@ -781,6 +781,40 @@ with tab_portfolio:
         )
         st.dataframe(styled, use_container_width=True, height=min(400, 55 + 35 * len(display_df)))
 
+    # ── Yield Breakdown Bar Chart (Phase 7 UI) ───────────────────────────────
+    if holdings:
+        _h_df_yb = pd.DataFrame(holdings)
+        _yb_cols_needed = {"name", "current_yield_pct", "category", "weight_pct"}
+        if _yb_cols_needed.issubset(set(_h_df_yb.columns)):
+            _yb = _h_df_yb[_h_df_yb["current_yield_pct"].fillna(0) > 0].copy()
+            _yb = _yb.nlargest(12, "current_yield_pct")
+            if not _yb.empty:
+                st.markdown('<div class="section-header">Top Holdings by Yield</div>', unsafe_allow_html=True)
+                _bar_colors = [CATEGORY_COLORS.get(c, "#6366f1") for c in _yb["category"]]
+                _fig_ybar = go.Figure(go.Bar(
+                    x=_yb["name"],
+                    y=_yb["current_yield_pct"],
+                    marker_color=_bar_colors,
+                    text=[f"{v:.1f}%" for v in _yb["current_yield_pct"]],
+                    textposition="outside",
+                    customdata=_yb[["category", "weight_pct"]].values,
+                    hovertemplate="<b>%{x}</b><br>Yield: %{y:.2f}%<br>Category: %{customdata[0]}<br>Weight: %{customdata[1]:.1f}%<extra></extra>",
+                ))
+                _fig_ybar.update_layout(
+                    paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+                    font_color="#E2E8F0",
+                    margin=dict(l=40, r=20, t=30, b=80),
+                    height=280,
+                    xaxis=dict(gridcolor="#1F2937", tickangle=-35, tickfont_size=10),
+                    yaxis=dict(gridcolor="#1F2937", ticksuffix="%"),
+                    showlegend=False,
+                )
+                _fig_ybar.add_hline(y=metrics.get("weighted_yield_pct", 0), line_dash="dash",
+                                    line_color="#A78BFA", opacity=0.7,
+                                    annotation_text=f"Portfolio avg {metrics.get('weighted_yield_pct', 0):.1f}%",
+                                    annotation_font_color="#A78BFA", annotation_font_size=10)
+                st.plotly_chart(_fig_ybar, use_container_width=True)
+
     # ── Risk Metrics ──────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Risk Metrics</div>', unsafe_allow_html=True)
     r1, r2, r3, r4, r5 = st.columns(5)
@@ -1028,15 +1062,19 @@ with tab_universe:
                 unsafe_allow_html=True)
 
     # Filters
-    f1, f2, f3, f4 = st.columns(4)
+    _fsearch_col, f1, f2, f3, f4 = st.columns([2, 2, 1, 1, 2])
+    with _fsearch_col:
+        search_query = st.text_input("Search", placeholder="e.g. ONDO, treasury, real estate…",
+                                     key="filter_search",
+                                     help="Filter by asset name, ticker, or issuer (case-insensitive)")
     with f1:
         categories = ["All"] + sorted(assets_df["category"].dropna().unique().tolist()) \
                      if not assets_df.empty else ["All"]
         sel_cat = st.selectbox("Category", categories, key="filter_cat",
                                help="Filter by asset class (Government Bonds, Private Credit, Real Estate, Commodities, etc.)")
     with f2:
-        risk_filter = st.slider("Max Risk Score", 1, 10, 10, key="filter_risk",
-                                help="Show only assets with a risk score at or below this value. 1 = safest (overnight T-bills), 10 = highest risk (early-stage equity or illiquid alternatives)")
+        risk_filter = st.slider("Max Risk", 1, 10, 10, key="filter_risk",
+                                help="Show only assets with a risk score at or below this value. 1 = safest, 10 = highest risk")
     with f3:
         min_yield = st.number_input("Min Yield %", 0.0, 50.0, 0.0, 0.5, key="filter_yield",
                                     help="Show only assets with a gross or expected yield at or above this percentage per year")
@@ -1049,6 +1087,14 @@ with tab_universe:
 
     filtered_df = assets_df.copy() if not assets_df.empty else pd.DataFrame()
     if not filtered_df.empty:
+        # Text search across name, ticker/id, and issuer columns
+        if search_query and search_query.strip():
+            _sq = search_query.strip().lower()
+            _name_mask = filtered_df.get("name", pd.Series(dtype=str)).fillna("").str.lower().str.contains(_sq, regex=False)
+            _id_mask   = filtered_df.get("id",   pd.Series(dtype=str)).fillna("").str.lower().str.contains(_sq, regex=False)
+            _iss_mask  = filtered_df.get("issuer", pd.Series(dtype=str)).fillna("").str.lower().str.contains(_sq, regex=False) \
+                         if "issuer" in filtered_df.columns else pd.Series([False] * len(filtered_df), index=filtered_df.index)
+            filtered_df = filtered_df[_name_mask | _id_mask | _iss_mask]
         if sel_cat != "All":
             filtered_df = filtered_df[filtered_df["category"] == sel_cat]
         filtered_df = filtered_df[filtered_df["risk_score"].fillna(10) <= risk_filter]
