@@ -51,6 +51,27 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+# ─── Security Audit Logger (#15) ───────────────────────────────────────────────
+# Dedicated logger for user-action events (API key changes, settings saves, etc.)
+# Writes to rwa_audit.log alongside app.py; does NOT write to root logger.
+_audit_handler = logging.FileHandler(
+    os.path.join(os.path.dirname(__file__), "rwa_audit.log"),
+    encoding="utf-8",
+)
+_audit_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [AUDIT] %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ"
+))
+_audit_log = logging.getLogger("rwa.audit")
+_audit_log.addHandler(_audit_handler)
+_audit_log.setLevel(logging.INFO)
+_audit_log.propagate = False  # keep audit events out of the root logger
+
+
+def audit(event: str, **ctx) -> None:
+    """Log a security-relevant user action to the audit trail."""
+    extra = " ".join(f"{k}={v!r}" for k, v in ctx.items())
+    _audit_log.info("%s %s", event, extra)
+
 # ─── Imports ───────────────────────────────────────────────────────────────────
 import database as _db
 import scheduler as _sched

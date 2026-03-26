@@ -37,6 +37,29 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# ─── Rate Limiter (token bucket — #11 security hardening) ────────────────────
+class _RateLimiter:
+    """Thread-safe token bucket rate limiter. Prevents API quota abuse."""
+    def __init__(self, calls_per_second: float = 2.0):
+        self._interval = 1.0 / max(calls_per_second, 0.01)
+        self._lock     = threading.Lock()
+        self._last     = 0.0
+
+    def acquire(self) -> None:
+        with self._lock:
+            now  = time.time()
+            wait = self._interval - (now - self._last)
+            if wait > 0:
+                time.sleep(wait)
+            self._last = time.time()
+
+# Per-API limiters (calls per second)
+_coingecko_limiter  = _RateLimiter(0.5)   # 30 req/min on free tier
+_defillama_limiter  = _RateLimiter(2.0)   # generous free tier
+_binance_limiter    = _RateLimiter(5.0)   # 1200 req/min weight limit
+_fred_limiter       = _RateLimiter(2.0)   # FRED: 120 req/min
+_default_limiter    = _RateLimiter(2.0)   # fallback for all other APIs
+
 # ─── HTTP Session with retry adapter ─────────────────────────────────────────
 _retry_strategy = Retry(
     total=MAX_RETRIES,
