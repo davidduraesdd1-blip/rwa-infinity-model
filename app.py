@@ -2837,6 +2837,80 @@ with tab_macro:
 
     st.markdown("---")
 
+    # ── Global M2 Composite + 90-Day Lag Signal ────────────────────────────────
+    st.markdown("#### Global M2 Composite — 90-Day Lag BTC Signal")
+    st.caption("US M2 × 4.2 scaling (US ≈ 24% of global M2). Rising M2 typically precedes BTC rallies by ~90 days.")
+
+    @st.cache_data(ttl=21600, show_spinner=False)   # 6-hour TTL (monthly data)
+    def _load_global_m2():
+        return _df.fetch_global_m2_composite()
+
+    _m2 = _load_global_m2()
+    _m2_sig = _m2.get("lag_signal", "NEUTRAL")
+    _m2_sig_colors = {"EXPANDING": "#10b981", "CONTRACTING": "#ef4444", "NEUTRAL": "#6b7280"}
+    _m2_c = _m2_sig_colors.get(_m2_sig, "#6b7280")
+    _m2c1, _m2c2, _m2c3, _m2c4 = st.columns(4)
+    _m2c1.metric("US M2", f"${_m2.get('us_m2_bn', 21500.0):,.0f}B")
+    _m2c2.metric("Global M2 Est.", f"${_m2.get('global_m2_est_bn', 90300.0):,.0f}B")
+    _m2c3.metric("90d Change", f"{_m2.get('m2_90d_change_pct', 0.0):+.2f}%")
+    _m2c4.metric("Lag Signal", _m2_sig)
+    st.markdown(
+        f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_m2_c};"
+        f"border-radius:8px;padding:12px 16px;font-size:13px;color:{_m2_c};margin-top:8px'>"
+        f"<b>BTC Signal:</b> {_m2.get('btc_signal','NEUTRAL')}</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Source: {_m2.get('source','fallback')} · Updated: {_m2.get('timestamp','')[:19]}")
+
+    st.markdown("---")
+
+    # ── Pi Cycle Top Indicator ────────────────────────────────────────────────
+    st.markdown("#### Pi Cycle Top Indicator")
+    st.caption("111-DMA vs 350-DMA×2 of BTC close. When 111-DMA crosses above 350-DMA×2, BTC is near a cycle top.")
+
+    @st.cache_data(ttl=86400, show_spinner=False)   # daily TTL
+    def _load_pi_cycle():
+        return _df.fetch_pi_cycle_indicator()
+
+    _pi = _load_pi_cycle()
+    _pi_sig = _pi.get("signal", "N/A")
+    _pi_sig_colors = {
+        "APPROACHING_TOP": "#ef4444", "WARNING": "#f59e0b",
+        "NEUTRAL": "#6b7280", "BOTTOM": "#10b981", "N/A": "#6b7280",
+    }
+    _pi_c = _pi_sig_colors.get(_pi_sig, "#6b7280")
+    _pic1, _pic2, _pic3, _pic4 = st.columns(4)
+    _pic1.metric("111-DMA", f"${_pi.get('ma_111') or 0:,.0f}" if _pi.get("ma_111") else "N/A")
+    _pic2.metric("350-DMA×2", f"${_pi.get('ma_350x2') or 0:,.0f}" if _pi.get("ma_350x2") else "N/A")
+    _pic3.metric("Gap %", f"{_pi.get('gap_pct') or 0:+.1f}%" if _pi.get("gap_pct") is not None else "N/A")
+    _pic4.metric("Signal", _pi_sig)
+    st.markdown(
+        f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_pi_c};"
+        f"border-radius:8px;padding:12px 16px;font-size:13px;color:{_pi_c};margin-top:8px'>"
+        f"{_pi.get('description', 'Pi Cycle data unavailable.')}</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+
+    # ── Stablecoin Supply (USDT + USDC + RLUSD) ───────────────────────────────
+    st.markdown("#### Stablecoin Supply — Dry Powder Indicator")
+    st.caption("Rising stablecoin supply = capital waiting on the sidelines = bullish setup when deployed.")
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _load_stable():
+        return _df.fetch_stablecoin_supply()
+
+    _stb = _load_stable()
+    _stb_c1, _stb_c2, _stb_c3, _stb_c4 = st.columns(4)
+    _stb_c1.metric("USDT", f"${_stb.get('usdt_bn', 140.0):.1f}B")
+    _stb_c2.metric("USDC", f"${_stb.get('usdc_bn', 58.0):.1f}B")
+    _stb_c3.metric("RLUSD", f"${_stb.get('rlusd_bn', 0.0):.2f}B")
+    _stb_c4.metric("Total", f"${_stb.get('total_bn', 198.0):.1f}B")
+    st.caption(f"Source: {_stb.get('source','fallback')} · Updated: {_stb.get('timestamp','')[:19]}")
+
+    st.markdown("---")
+
     # ── Macro Regime ───────────────────────────────────────────────────────────
     st.markdown("#### Macro Regime Classifier")
     regime_data = market.get("macro_regime", "NEUTRAL")

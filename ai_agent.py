@@ -271,7 +271,8 @@ def _execute_agent_tool(name: str) -> dict:
             fetch_fear_greed_index, fetch_macro_indicators,
             fetch_treasury_yield_curve, fetch_coinmetrics_onchain,
             fetch_xrpl_stats, get_macro_factor_allocation_bias,
-            fetch_stablecoin_supply,
+            fetch_stablecoin_supply, fetch_global_m2_composite,
+            fetch_pi_cycle_indicator,
         )
         if name == "get_fear_greed":
             fg = fetch_fear_greed_index()
@@ -280,13 +281,22 @@ def _execute_agent_tool(name: str) -> dict:
         if name == "get_macro_indicators":
             m = fetch_macro_indicators()
             s = fetch_stablecoin_supply()
+            m2 = fetch_global_m2_composite()
             return {**m, "stablecoin_total_bn": s.get("total_bn"),
-                    "usdt_bn": s.get("usdt_bn"), "usdc_bn": s.get("usdc_bn")}
+                    "usdt_bn": s.get("usdt_bn"), "usdc_bn": s.get("usdc_bn"),
+                    "rlusd_bn": s.get("rlusd_bn", 0.0),
+                    "global_m2_lag_signal": m2.get("lag_signal"),
+                    "global_m2_btc_signal": m2.get("btc_signal"),
+                    "m2_90d_change_pct": m2.get("m2_90d_change_pct")}
         if name == "get_yield_curve":
             return fetch_treasury_yield_curve()
         if name == "get_onchain_data":
             oc = fetch_coinmetrics_onchain(days=400)
-            return {k: v for k, v in oc.items() if k not in ("mvrv_history", "sopr_history")}
+            pi = fetch_pi_cycle_indicator()
+            return {**{k: v for k, v in oc.items() if k not in ("mvrv_history", "sopr_history")},
+                    "pi_cycle_signal": pi.get("signal"),
+                    "pi_cycle_gap_pct": pi.get("gap_pct"),
+                    "pi_cycle_desc": pi.get("description")}
         if name == "get_xrpl_data":
             return fetch_xrpl_stats()
         if name == "get_factor_bias":
