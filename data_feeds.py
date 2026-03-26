@@ -64,6 +64,7 @@ _default_limiter    = _RateLimiter(2.0)   # fallback for all other APIs
 # ─── HTTP Session with retry adapter ─────────────────────────────────────────
 _retry_strategy = Retry(
     total=MAX_RETRIES,
+    read=0,               # don't retry on read-timeouts — fail fast, use cached/fallback data
     backoff_factor=RETRY_BACKOFF,
     status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=["GET"],
@@ -1258,7 +1259,7 @@ def fetch_treasury_yield_curve() -> dict:
                 else:
                     # FRED public CSV (no key)
                     url  = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-                    resp = _session.get(url, timeout=10)
+                    resp = _session.get(url, timeout=20)
                     if resp.status_code == 200:
                         lines = resp.text.strip().split("\n")
                         for line in reversed(lines[1:]):
@@ -1827,7 +1828,7 @@ def fetch_macro_indicators() -> dict:
                                 break
                 else:
                     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-                    resp = _session.get(url, timeout=10)
+                    resp = _session.get(url, timeout=20)
                     if resp.status_code == 200:
                         lines = resp.text.strip().split("\n")
                         for line in reversed(lines[1:]):
@@ -1923,7 +1924,7 @@ def fetch_fred_extended() -> dict:
                                 break
                 else:
                     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-                    resp = _session.get(url, timeout=10)
+                    resp = _session.get(url, timeout=20)
                     if resp.status_code == 200:
                         lines = resp.text.strip().split("\n")
                         for line in reversed(lines[1:]):
