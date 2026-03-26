@@ -106,43 +106,32 @@ def _get(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> Optio
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_defillama_protocols() -> List[dict]:
-    """Fetch all protocol TVL data from DeFiLlama."""
+    """Fetch all protocol TVL data from DeFiLlama.
+
+    Returns ALL protocols (unfiltered) so that the slug lookup in
+    refresh_all_assets can match any defillama_slug set in config.py.
+    """
     def _fetch():
         data = _get(f"{DEFILLAMA_BASE}/protocols")
         if not data:
             return []
-        # Filter for RWA-relevant protocols
-        rwa_keywords = [
-            "rwa", "treasury", "bond", "real estate", "credit", "gold",
-            "centrifuge", "maple", "goldfinch", "truefi", "ondo", "maker",
-            "backed", "superstate", "mountain", "openeden", "tangible",
-            "realtoken", "lofty", "credix", "parcl", "toucan", "klima",
-            "nexus", "polytrade", "blocksquare",
-            # New 2024-2026 protocols
-            "pendle", "morpho", "usual", "agora", "huma", "kamino",
-            "ethena", "term", "notional", "clearpool", "sky", "kinesis",
-            "plume", "mantra", "noble", "swarm", "dinari", "spiko",
-            "hashnote", "archax", "gains-network", "synthetix", "enzyme",
-            "flowcarbon", "agrotoken", "bucket", "thala",
-        ]
         results = []
         for p in data:
-            name_lower = (p.get("name") or "").lower()
-            slug_lower = (p.get("slug") or "").lower()
-            cats = [c.lower() for c in (p.get("category") or "").split(",")]
-            if any(k in name_lower or k in slug_lower or k in " ".join(cats) for k in rwa_keywords):
-                results.append({
-                    "name":         p.get("name"),
-                    "slug":         p.get("slug"),
-                    "tvl":          p.get("tvl", 0) or 0,
-                    "change_1d":    p.get("change_1d"),
-                    "change_7d":    p.get("change_7d"),
-                    "chains":       p.get("chains", []),
-                    "category":     p.get("category"),
-                    "description":  p.get("description", ""),
-                    "logo":         p.get("logo"),
-                    "url":          p.get("url"),
-                })
+            slug = p.get("slug")
+            if not slug:
+                continue
+            results.append({
+                "name":         p.get("name"),
+                "slug":         slug,
+                "tvl":          p.get("tvl", 0) or 0,
+                "change_1d":    p.get("change_1d"),
+                "change_7d":    p.get("change_7d"),
+                "chains":       p.get("chains", []),
+                "category":     p.get("category"),
+                "description":  p.get("description", ""),
+                "logo":         p.get("logo"),
+                "url":          p.get("url"),
+            })
         return results
     return _cached_get("defillama_protocols", CACHE_TTL["tvl"], _fetch) or []
 
@@ -281,7 +270,9 @@ def fetch_coingecko_prices(ids: List[str] = None) -> Dict[str, dict]:
         return {}
 
     def _fetch():
-        chunk_size = 250 if COINGECKO_API_KEY else 50  # Pro: 250/req, Free: 50/req
+        # CoinGecko /coins/markets supports up to 250 IDs per request on both free and Pro tiers.
+        # Batch all assets into chunks of 250 to minimise API calls (free tier: 10K/month).
+        chunk_size = 250
         all_prices = {}
         for i in range(0, len(ids), chunk_size):
             chunk = ids[i:i + chunk_size]
@@ -292,7 +283,7 @@ def fetch_coingecko_prices(ids: List[str] = None) -> Dict[str, dict]:
                     "vs_currency": "usd",
                     "ids": ids_str,
                     "order": "market_cap_desc",
-                    "per_page": min(chunk_size, 250),  # match chunk size; Pro allows up to 250
+                    "per_page": 250,
                     "page": 1,
                     "sparkline": False,
                     "price_change_percentage": "24h,7d",
@@ -313,7 +304,8 @@ def fetch_coingecko_prices(ids: List[str] = None) -> Dict[str, dict]:
                         "ath":           coin.get("ath") or 0,
                         "atl":           coin.get("atl") or 0,
                     }
-            time.sleep(0.5)  # rate limit courtesy
+            if i + chunk_size < len(ids):
+                time.sleep(1.0)  # only sleep between chunks if there are more
         return all_prices
 
     return _cached_get("coingecko_prices", CACHE_TTL["prices"], _fetch) or {}
@@ -776,8 +768,19 @@ def refresh_all_assets(progress_callback=None) -> List[dict]:
 
         # ── TVL from DeFiLlama ──
         tvl_usd = 0.0
-        if dl_slug and dl_slug in protocol_tvl_map:
-            tvl_usd = protocol_tvl_map[dl_slug].get("tvl", 0) or 0
+        if dl_slug:
+            # 1. Exact slug match
+            if dl_slug in protocol_tvl_map:
+                tvl_usd = protocol_tvl_map[dl_slug].get("tvl", 0) or 0
+            else:
+                # 2. Prefix match — e.g. "ondo-finance" matches slug "ondo-finance-v2"
+                for slug_key, pdata in protocol_tvl_map.items():
+                    if slug_key.startswith(dl_slug) or dl_slug.startswith(slug_key):
+                        tvl_usd = pdata.get("tvl", 0) or 0
+                        break
+        # 3. Static TVL fallback from config (for unlisted or institutional-only assets)
+        if tvl_usd == 0 and asset_cfg.get("tvl_usd"):
+            tvl_usd = float(asset_cfg["tvl_usd"])
 
         # ── Yield from DeFiLlama pools ──
         live_yield = None
@@ -2894,7 +2897,7 @@ def fetch_deribit_options_chain(currency: str = "BTC") -> dict:
             if not data:
                 return {"error": "empty response", "source": "deribit"}
 
-            now  = _dt2.utcnow()
+            now  = _dt2.now(_tz2.utc)
             spot = None
             oi_by_strike: dict = {}
             expiry_data:  dict = {}
@@ -2905,10 +2908,10 @@ def fetch_deribit_options_chain(currency: str = "BTC") -> dict:
                 if len(parts) < 4:
                     continue
                 try:
-                    exp = _dt2.strptime(parts[1], "%d%b%y")
+                    exp = _dt2.strptime(parts[1], "%d%b%y").replace(tzinfo=_tz2.utc)
                 except ValueError:
                     try:
-                        exp = _dt2.strptime(parts[1], "%d%b%Y")
+                        exp = _dt2.strptime(parts[1], "%d%b%Y").replace(tzinfo=_tz2.utc)
                     except ValueError:
                         continue
                 dte = (exp - now).days

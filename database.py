@@ -306,7 +306,7 @@ def get_all_rwa_latest() -> pd.DataFrame:
     """Return all assets from rwa_latest as DataFrame."""
     conn = _get_conn()
     try:
-        df = pd.read_sql_query("SELECT * FROM rwa_latest ORDER BY composite_score DESC NULLS LAST", conn)
+        df = pd.read_sql_query("SELECT * FROM rwa_latest ORDER BY COALESCE(composite_score, -1) DESC", conn)
         return df
     except Exception as e:
         logger.error("[DB] get_all_rwa_latest failed: %s", e)
@@ -319,7 +319,7 @@ def get_rwa_by_category(category: str) -> pd.DataFrame:
     conn = _get_conn()
     try:
         df = pd.read_sql_query(
-            "SELECT * FROM rwa_latest WHERE category = ? ORDER BY composite_score DESC NULLS LAST",
+            "SELECT * FROM rwa_latest WHERE category = ? ORDER BY COALESCE(composite_score, -1) DESC",
             conn, params=(category,)
         )
         return df

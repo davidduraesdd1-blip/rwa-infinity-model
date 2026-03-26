@@ -439,11 +439,15 @@ Call tools first to gather intelligence, then respond with ONLY the JSON object.
         if not raw_text:
             return "HOLD", "Empty response from Claude after tool loop", 30.0, []
 
-        # Extract JSON from response
+        # Extract JSON from response (safe split — guard against malformed fences)
         if "```json" in raw_text:
-            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+            parts = raw_text.split("```json")
+            if len(parts) >= 2:
+                raw_text = parts[1].split("```")[0].strip()
         elif "```" in raw_text:
-            raw_text = raw_text.split("```")[1].split("```")[0].strip()
+            parts = raw_text.split("```")
+            if len(parts) >= 3:
+                raw_text = parts[1].strip()  # content between first pair of fences
 
         parsed = json.loads(raw_text)
         decision   = str(parsed.get("decision", "HOLD")).upper()
@@ -1125,7 +1129,10 @@ Format as plain text bullet points, no markdown."""
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
-        insights = response.content[0].text.strip()
+        text_blocks = [b for b in response.content if hasattr(b, "text")]
+        if not text_blocks:
+            return {"insights": "No insights available.", "timestamp": datetime.now(timezone.utc).isoformat(), "agent": agent_name}
+        insights = text_blocks[0].text.strip()
 
         result = {
             "insights":  insights,

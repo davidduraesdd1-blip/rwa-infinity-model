@@ -2015,7 +2015,7 @@ with tab_news:
                     live = fetch_live_rss_news()
                     news_df_tmp = _load_news()
                     all_headlines = (
-                        [i["headline"] for i in live] +
+                        [i.get("headline", "") for i in live if i.get("headline")] +
                         (news_df_tmp["headline"].tolist() if not news_df_tmp.empty else [])
                     )
                     brief = get_ai_news_brief(all_headlines[:15])
