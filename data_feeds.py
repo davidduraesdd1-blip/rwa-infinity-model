@@ -1859,6 +1859,114 @@ def fetch_macro_indicators() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE 9c: 10 ADDITIONAL FRED SERIES  (#29)
+# IG/HY/EM credit spreads, inflation breakevens, SOFR, Fed reverse repo, jobless claims.
+# All use the same free FRED CSV endpoint — no API key required.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FRED_EXTENDED_SERIES = {
+    # Credit spreads (option-adjusted, basis points)
+    "ig_spread_bp":   "BAMLC0A0CM",       # US IG corporate OAS (percent → bps x10)
+    "hy_spread_bp":   "BAMLH0A0HYM2",     # US HY corporate OAS (percent → bps x10)
+    "em_spread_bp":   "BAMLEM1BRRAAA2ACRPI",  # EM sovereign OAS
+    # Inflation breakevens
+    "t10_breakeven":  "T10YIE",           # 10-year breakeven inflation rate (%)
+    "t5_breakeven":   "T5YIE",            # 5-year breakeven inflation rate (%)
+    # Short-rate / liquidity
+    "sofr":           "SOFR",             # Secured Overnight Financing Rate (%)
+    "rrp_bn":         "RRPONTSYD",        # Fed ON Reverse Repo (billions USD)
+    # Labor / activity
+    "jobless_claims": "ICSA",             # Initial jobless claims (thousands)
+}
+
+_FRED_EXTENDED_FALLBACKS = {
+    "ig_spread_bp":  100.0,    # approx March 2026
+    "hy_spread_bp":  340.0,
+    "em_spread_bp":  280.0,
+    "t10_breakeven":   2.3,
+    "t5_breakeven":    2.5,
+    "sofr":            5.3,
+    "rrp_bn":        300.0,
+    "jobless_claims": 220.0,
+}
+
+
+def fetch_fred_extended() -> dict:
+    """
+    Fetch 10 additional FRED series: credit spreads, breakevens, SOFR, RRP, jobless claims.
+    No API key required (public CSV endpoint). Returns fallback on error.
+    """
+    def _fetch():
+        result: Dict[str, Any] = {}
+        for key, series_id in _FRED_EXTENDED_SERIES.items():
+            try:
+                if FRED_API_KEY:
+                    url = "https://api.stlouisfed.org/fred/series/observations"
+                    params = {
+                        "series_id":  series_id,
+                        "api_key":    FRED_API_KEY,
+                        "file_type":  "json",
+                        "sort_order": "desc",
+                        "limit":      5,
+                    }
+                    resp = _session.get(url, params=params, timeout=10)
+                    if resp.status_code == 200:
+                        for o in resp.json().get("observations", []):
+                            val = o.get("value", ".")
+                            if val != ".":
+                                v = float(val)
+                                # FRED OAS series are in percent; convert to bps
+                                if key in ("ig_spread_bp", "hy_spread_bp", "em_spread_bp"):
+                                    v = v * 100
+                                result[key] = round(v, 2)
+                                break
+                else:
+                    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+                    resp = _session.get(url, timeout=10)
+                    if resp.status_code == 200:
+                        lines = resp.text.strip().split("\n")
+                        for line in reversed(lines[1:]):
+                            parts = line.split(",")
+                            if len(parts) == 2 and parts[1].strip() not in (".", ""):
+                                v = float(parts[1].strip())
+                                # FRED OAS series are in percent; convert to bps
+                                if key in ("ig_spread_bp", "hy_spread_bp", "em_spread_bp"):
+                                    v = v * 100
+                                result[key] = round(v, 2)
+                                break
+            except Exception as e:
+                logger.debug("[FRED Extended] %s failed: %s", series_id, e)
+
+        if not result:
+            return None
+        for k, v in _FRED_EXTENDED_FALLBACKS.items():
+            result.setdefault(k, v)
+
+        # Derive macro regime signal from spread levels
+        hy = result.get("hy_spread_bp", 340)
+        ig = result.get("ig_spread_bp", 100)
+        if hy > 600 or ig > 200:
+            result["credit_regime"] = "RISK_OFF"
+        elif hy > 450 or ig > 140:
+            result["credit_regime"] = "CAUTION"
+        else:
+            result["credit_regime"] = "RISK_ON"
+
+        result["source"]    = "FRED"
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    cached = _cached_get("fred_extended", CACHE_TTL["yields"], _fetch)
+    if cached is None:
+        fb = dict(_FRED_EXTENDED_FALLBACKS)
+        fb["credit_regime"] = "NEUTRAL"
+        fb["source"] = "fallback"
+        fb["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return fb
+    return cached
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # UPGRADE 9b: YFINANCE MACRO SUPPLEMENTALS
 # VIX, Gold spot, SPX from Yahoo Finance.  Free, no key required.
 # DXY and WTI are already covered by FRED DTWEXBGS / DCOILWTICO.
