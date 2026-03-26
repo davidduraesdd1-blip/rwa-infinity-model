@@ -3884,3 +3884,94 @@ def get_asset_trust_score(asset_id: str, category: str = "") -> dict:
             "cusip_isin":       cusip_score,
         },
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE FLAGS — auto-enabled by API key presence (zero code changes needed)
+# Add an API key → the feature lights up automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+FEATURES: dict = {
+    # Data sources
+    "coingecko_pro":        bool(COINGECKO_API_KEY),
+    "coinmarketcap":        bool(COINMARKETCAP_API_KEY),
+    "fred_macro":           bool(FRED_API_KEY),
+    "dune_analytics":       bool(DUNE_API_KEY),
+    "santiment":            bool(SANTIMENT_API_KEY),
+    "coinalyze_funding":    bool(COINALYZE_API_KEY),
+    "newsapi":              bool(NEWSAPI_API_KEY),
+    "cryptopanic":          bool(CRYPTOPANIC_API_KEY),
+    # AI / Agent
+    "ai_agent":             bool(_os.environ.get("ANTHROPIC_API_KEY") or _os.environ.get("RWA_ANTHROPIC_API_KEY")),
+    # CEX data feeds
+    "binance_auth":         bool(BINANCE_API_KEY),
+    "coinbase_auth":        bool(COINBASE_API_KEY),
+    "kraken_auth":          bool(KRAKEN_API_KEY),
+    # Block explorers
+    "etherscan":            bool(ETHERSCAN_API_KEY),
+    "polygonscan":          bool(POLYGONSCAN_API_KEY),
+    # Web3 / On-chain
+    "alchemy":              bool(ALCHEMY_API_KEY),
+    "infura":               bool(INFURA_API_KEY),
+    "the_graph":            bool(THE_GRAPH_API_KEY),
+    # RWA platform APIs
+    "centrifuge_api":       bool(CENTRIFUGE_API_KEY),
+    "maple_api":            bool(MAPLE_API_KEY),
+    "ondo_api":             bool(ONDO_API_KEY),
+    "pendle_api":           bool(PENDLE_API_KEY),
+    # CDP / AgentKit (Tier 3 Web3)
+    "cdp_agentkit":         bool(CDP_API_KEY_ID and CDP_API_KEY_SECRET),
+    # XRPL
+    "xrpl":                 bool(XRPL_NODE_URL),
+    # Error monitoring
+    "sentry":               bool(_os.environ.get("RWA_SENTRY_DSN")),
+}
+
+SENTRY_DSN: str | None = _os.environ.get("RWA_SENTRY_DSN")
+
+
+def feature_enabled(name: str) -> bool:
+    """Return True if the named feature is available (API key set or built-in free)."""
+    return FEATURES.get(name, False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECURITY — SSRF allowlist
+# Only these domain suffixes are permitted for outbound HTTP requests.
+# data_feeds.py validates URLs against this list before fetching.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ALLOWED_DOMAINS: frozenset = frozenset({
+    "api.coingecko.com",
+    "pro-api.coingecko.com",
+    "api.llama.fi",
+    "yields.llama.fi",
+    "api.binance.com",
+    "api.binance.us",
+    "api.coinbase.com",
+    "api.kraken.com",
+    "api.bybit.com",
+    "www.okx.com",
+    "api.kucoin.com",
+    "api-futures.kucoin.com",
+    "api.gateio.ws",
+    "pro-api.coinmarketcap.com",
+    "api.etherscan.io",
+    "api.polygonscan.com",
+    "api.arbiscan.io",
+    "api.bscscan.com",
+    "api.basescan.org",
+    "api.snowtrace.io",
+    "api.stlouisfed.org",
+    "api.tiingo.com",
+    "www.alphavantage.co",
+    "data.messari.io",
+    "newsapi.org",
+    "cryptopanic.com",
+    "api.alternative.me",
+    "app.rwa.xyz",
+    "s1.ripple.com",
+    "xrpl-facilitator-mainnet.t54.ai",
+    "api.dune.com",
+    "dogechain.info",
+})

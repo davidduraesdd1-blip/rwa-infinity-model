@@ -261,6 +261,17 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_news_feed_ts        ON news_feed(timestamp);
         """)
         conn.commit()
+
+        # DB integrity check — detect corruption early
+        try:
+            result = conn.execute("PRAGMA integrity_check").fetchone()
+            if result and result[0] != "ok":
+                logger.error("[DB] Integrity check FAILED: %s", result[0])
+            else:
+                logger.info("[DB] Integrity check OK")
+        except Exception as e:
+            logger.warning("[DB] Integrity check error: %s", e)
+
         logger.info("[DB] Schema initialized")
 
 

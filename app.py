@@ -60,8 +60,22 @@ import pdf_export as _pdf
 from config import (
     PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
     RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
-    XRPL_RLUSD_ISSUER,
+    XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled,
 )
+
+# ─── Sentry error monitoring (free tier — only loads when DSN is set) ──────────
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            traces_sample_rate=0.05,   # 5% performance tracing (free tier budget)
+            send_default_pii=False,    # NEVER send PII
+            before_send=lambda event, hint: event,
+        )
+        logger.info("[App] Sentry error monitoring active")
+    except ImportError:
+        logger.debug("[App] sentry-sdk not installed — skipping error monitoring")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INITIALIZATION (once per process)

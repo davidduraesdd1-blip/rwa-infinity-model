@@ -15,6 +15,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List, Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from urllib.parse import urlparse
 
 import database as _db
 from config import (
@@ -29,12 +32,23 @@ from config import (
     SANTIMENT_API_KEY, FRED_API_KEY, COINALYZE_API_KEY,
     XRPL_NODE_URL, XRPL_RLUSD_ISSUER,
     get_asset_fee_bps,
+    ALLOWED_DOMAINS,
 )
 
 logger = logging.getLogger(__name__)
 
-# ─── HTTP Session (reuses TCP connections) ────────────────────────────────────
+# ─── HTTP Session with retry adapter ─────────────────────────────────────────
+_retry_strategy = Retry(
+    total=MAX_RETRIES,
+    backoff_factor=RETRY_BACKOFF,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+    raise_on_status=False,
+)
+_adapter = HTTPAdapter(max_retries=_retry_strategy)
 _session = requests.Session()
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
 _session.headers.update({
     "Accept": "application/json",
     "Accept-Encoding": "gzip, deflate",
@@ -44,6 +58,32 @@ _session.headers.update({
 if COINGECKO_API_KEY:
     _session.headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
     logger.info("[DataFeeds] CoinGecko Pro API key loaded")
+
+
+def _is_allowed_url(url: str) -> bool:
+    """SSRF guard — only permit requests to pre-approved domains."""
+    try:
+        host = urlparse(url).hostname or ""
+        return any(host == d or host.endswith("." + d) for d in ALLOWED_DOMAINS)
+    except Exception:
+        return False
+
+
+def validate_api_key(key: str | None, prefix: str = "", min_length: int = 8) -> bool:
+    """
+    Validate an API key meets basic format requirements.
+    Returns False (and logs a warning) if the key looks invalid.
+    """
+    if not key:
+        return False
+    stripped = key.strip()
+    if len(stripped) < min_length:
+        logger.warning("[Security] API key too short (len=%d, prefix=%r)", len(stripped), prefix)
+        return False
+    if prefix and not stripped.startswith(prefix):
+        logger.warning("[Security] API key has wrong prefix (expected %r)", prefix)
+        return False
+    return True
 
 # ─── In-memory cache ──────────────────────────────────────────────────────────
 _cache: Dict[str, dict] = {}
@@ -79,7 +119,10 @@ def _cached_get(key: str, ttl: int, fetch_fn):
 
 
 def _get(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> Optional[dict]:
-    """GET with exponential retry."""
+    """GET with exponential retry and SSRF allowlist check."""
+    if not _is_allowed_url(url):
+        logger.warning("[DataFeeds] SSRF blocked: %s", url)
+        return None
     for attempt in range(MAX_RETRIES):
         try:
             r = _session.get(url, params=params, timeout=timeout)
