@@ -942,7 +942,7 @@ RWA_UNIVERSE = [
         "id": "NBO",
         "name": "Toucan Protocol Nature Carbon Tonne",
         "category": "Carbon Credits",
-        "subcategory": "Nature-Based",
+        "subcategory": "Nature-Based Solutions",
         "chain": "Polygon",
         "protocol": "Toucan Protocol",
         "token_symbol": "NCT",
@@ -1260,7 +1260,7 @@ RWA_UNIVERSE = [
         "id": "FLOWCARBON_GNT",
         "name": "Flowcarbon Goodness Nature Token",
         "category": "Carbon Credits",
-        "subcategory": "Nature-Based",
+        "subcategory": "Nature-Based Solutions",
         "chain": "Polygon",
         "protocol": "Flowcarbon",
         "token_symbol": "GNT",
@@ -2758,6 +2758,62 @@ RWA_UNIVERSE = [
         "description": "Pendle Finance tokenizes yield-bearing assets into Principal Tokens (PT) and Yield Tokens (YT). PT gives fixed rates of 2–19% APY on RWA assets (USDY, USDM, sUSDe, wstETH). $5.7B avg TVL. Leading yield-stripping protocol.",
         "tags": ["retail", "defi-yield", "yield-tokenization", "fixed-rate", "pendle", "pt", "yt", "rwa-native", "multi-chain"],
     },
+    # ── Pendle Boros — Yield Derivatives (#45) ─────────────────────────────────
+    {
+        "id": "PENDLE_BOROS",
+        "name": "Pendle Boros — Leveraged Fixed-Rate Yield Positions",
+        "category": "DeFi Yield",
+        "subcategory": "Yield Derivatives",
+        "chain": "Ethereum / Arbitrum",
+        "protocol": "Pendle Finance",
+        "token_symbol": "PENDLE",
+        "coingecko_id": "pendle",
+        "defillama_slug": "pendle",
+        "expected_yield_pct": 28.00,    # leveraged yield: 2–5× base PT yield
+        "risk_score": 6,                # higher risk — leveraged & liquidation possible
+        "liquidity_score": 7,
+        "regulatory_score": 6,
+        "min_investment_usd": 1,
+        "inception_date": "2025-01-01",
+        "tvl_usd": 400_000_000,         # Boros TVL as of Mar 2026 (within Pendle total)
+        "description": (
+            "Pendle Boros enables borrowing against YT tokens for leveraged yield exposure. "
+            "Users can take up to 3× leveraged fixed-rate positions on RWA yields (T-bills, "
+            "sUSDe, USDY). Highest yield potential in the Pendle ecosystem with liquidation risk. "
+            "Part of Pendle's v3 architecture (launched Q4 2024–Q1 2025)."
+        ),
+        "tags": ["institutional", "defi-yield", "yield-derivatives", "leveraged", "boros", "pendle", "fixed-rate"],
+        "jurisdiction": "N/A (DeFi)",
+        "audit_score": 8,    # Pendle audited by multiple firms (Dedaub, Ackee, etc.)
+    },
+    # ── Soil Protocol (XRPL) — Agricultural RWA (#42) ──────────────────────────
+    {
+        "id": "SOIL_XRPL",
+        "name": "Soil Protocol — Tokenized Agricultural Credit (XRPL)",
+        "category": "Private Credit",
+        "subcategory": "Agricultural Finance",
+        "chain": "XRPL",
+        "protocol": "Soil Protocol",
+        "token_symbol": "SOIL",
+        "coingecko_id": None,
+        "defillama_slug": None,
+        "expected_yield_pct": 12.50,    # target yield on agricultural loan pools
+        "risk_score": 6,
+        "liquidity_score": 4,
+        "regulatory_score": 7,
+        "min_investment_usd": 100,
+        "inception_date": "2024-06-01",
+        "tvl_usd": 50_000_000,          # estimated TVL Mar 2026
+        "description": (
+            "Soil Protocol issues tokenized credit instruments backed by agricultural loans "
+            "on the XRPL ledger. Borrowers are vetted agricultural businesses; investors earn "
+            "12–15% APY in stablecoins. First agricultural-focused RWA protocol native to XRPL. "
+            "Uses XLS-20 NFT standard for loan certificates."
+        ),
+        "tags": ["institutional", "private-credit", "agricultural", "xrpl", "developing-markets", "nft-backed"],
+        "jurisdiction": "EU / Switzerland",
+        "audit_score": 6,
+    },
     {
         "id": "MORPHO_METAMORPHO",
         "name": "Morpho MetaMorpho Curated Lending Vaults",
@@ -3083,7 +3139,7 @@ PORTFOLIO_TIERS = {
             "Insurance":         3,
             "Trade Finance":     2,
         },
-        "subcategory_bias": ["Emerging Market Loans", "Pre-IPO / Secondary", "Music Royalties", "Nature-Based", "Renewable Energy"],
+        "subcategory_bias": ["Emerging Market Loans", "Pre-IPO / Secondary", "Music Royalties", "Nature-Based Solutions", "Renewable Energy"],
         "min_risk_score": 5,
         "max_risk_score": 10,
         "rebalance_frequency": "daily",
