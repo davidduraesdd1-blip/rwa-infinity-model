@@ -2244,7 +2244,7 @@ def get_macro_regime() -> dict:
         macro = fetch_macro_indicators()
         curve = fetch_treasury_yield_curve()
 
-        fg_val   = fg["current"]["value"]
+        fg_val   = fg.get("current", {}).get("value", 50)
         wti      = macro.get("wti_crude", 67.5)
         dxy      = macro.get("dxy", 104.0)
         m2       = macro.get("m2_supply_bn", 21_500.0)
@@ -2255,7 +2255,7 @@ def get_macro_regime() -> dict:
 
         signals = {
             "fear_greed":           fg_val,
-            "fg_label":             fg["current"].get("label", ""),
+            "fg_label":             fg.get("current", {}).get("label", ""),
             "wti_crude":            wti,
             "dxy":                  dxy,
             "m2_bn":                m2,

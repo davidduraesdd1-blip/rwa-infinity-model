@@ -122,6 +122,7 @@ class AgentState(TypedDict):
     cycle_notes:        list
     cycle_number:       int
     is_dry_run:         bool
+    api_key:            str             # session-supplied override; empty = use env var
     error:              Optional[str]
 
 
