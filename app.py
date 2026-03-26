@@ -835,6 +835,46 @@ with tab_portfolio:
 
     st.markdown("<div style='margin:12px 0'></div>", unsafe_allow_html=True)
 
+    # ── Represented Asset Value (#94) ─────────────────────────────────────────
+    # On-chain RWA TVL vs the $360B off-chain tokenizable universe
+    _OFF_CHAIN_TAM_B = 360.0  # $360B total addressable market (Boston Consulting Group / RWA.xyz 2025 estimate)
+    try:
+        _rwa_tvl = data_feeds.get_total_rwa_tvl() if not _demo_mode else 18_400_000_000
+    except Exception:
+        _rwa_tvl = 0.0
+    if _rwa_tvl > 0:
+        _rwa_tvl_b  = _rwa_tvl / 1e9
+        _pen_pct    = round(_rwa_tvl_b / _OFF_CHAIN_TAM_B * 100, 2)
+        _pen_color  = "#34D399" if _pen_pct >= 5 else "#FBBF24" if _pen_pct >= 1 else "#9CA3AF"
+        st.markdown(
+            f"""<div style="background:linear-gradient(135deg,#111827,#0D1117);
+                            border:1px solid #1F2937;border-radius:10px;
+                            padding:12px 18px;margin-bottom:14px;
+                            display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+                <div style="min-width:54px;text-align:center">
+                    <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.6px">On-Chain</div>
+                    <div style="font-size:18px;font-weight:800;color:{_pen_color}">${_rwa_tvl_b:.1f}B</div>
+                </div>
+                <div style="flex:1;min-width:180px">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                        <span style="font-size:12px;font-weight:600;color:#E2E8F0">Represented Asset Value</span>
+                        <span style="font-size:12px;color:{_pen_color};font-weight:700">{_pen_pct:.2f}% of TAM</span>
+                    </div>
+                    <div style="background:#1F2937;border-radius:3px;height:5px;overflow:hidden">
+                        <div style="background:linear-gradient(90deg,{_pen_color},{_pen_color}88);
+                                    width:{min(_pen_pct*4, 100):.0f}%;height:100%;border-radius:3px"></div>
+                    </div>
+                    <div style="font-size:10px;color:#4B5563;margin-top:3px">
+                        ${_rwa_tvl_b:.1f}B on-chain vs ${_OFF_CHAIN_TAM_B:.0f}B total addressable real-world asset market
+                    </div>
+                </div>
+                <div style="font-size:10px;color:#374151;text-align:right;min-width:80px">
+                    Source:<br>DeFiLlama RWA<br>BCG/RWA.xyz 2025
+                </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
     # ── Charts Row ───────────────────────────────────────────────────────────
     chart_left, chart_right = st.columns([5, 7])
 
