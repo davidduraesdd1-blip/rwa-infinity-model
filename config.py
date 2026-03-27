@@ -3995,6 +3995,12 @@ FEATURES: dict = {
     "wormhole":             True,  # public API, no key needed (#113)
     "erc4626":              bool(_os.environ.get("RWA_ALCHEMY_API_KEY") or _os.environ.get("RWA_INFURA_API_KEY")),  # (#103)
     "multicall3":           bool(_os.environ.get("RWA_ALCHEMY_API_KEY") or _os.environ.get("RWA_INFURA_API_KEY")),  # (#109)
+    # Phase 13 Market Data
+    "cme_futures":          True,   # CME futures via yfinance (no key needed)
+    "lbma_prices":          True,   # LBMA gold/silver via FRED (public CSV)
+    "global_indices":       True,   # Global equity ETFs via yfinance (no key needed)
+    "tokenized_stocks":     True,   # Tokenized stock reference prices via yfinance (no key needed)
+    "coinmarketcap_global": bool(COINMARKETCAP_API_KEY),  # CMC global metrics (key required)
 }
 
 SENTRY_DSN: str | None = _os.environ.get("RWA_SENTRY_DSN")

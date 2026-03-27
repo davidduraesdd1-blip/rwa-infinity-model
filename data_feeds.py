@@ -4477,3 +4477,391 @@ def fetch_wormhole_rwa_vaa(
         _WH_CACHE[cache_key] = {"data": vaas, "_ts": time.time()}
 
     return vaas
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 13 — NEW MARKET DATA SOURCES
+# 1. CME Futures via yfinance
+# 2. LBMA Gold/Silver via FRED public CSV
+# 3. Global Stock Index ETFs via yfinance
+# 4. Tokenized Stock Reference Prices via yfinance
+# 5. CoinMarketCap Global Metrics (requires COINMARKETCAP_API_KEY)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 1. CME Futures ────────────────────────────────────────────────────────────
+
+_CME_FUTURES_LOCK  = threading.Lock()
+_CME_FUTURES_CACHE: dict = {"ts": 0, "data": None}
+_CME_FUTURES_TTL   = 300  # 5 minutes
+
+_CME_FUTURES_SYMBOLS = {
+    "GC=F":  "Gold Futures",
+    "CL=F":  "WTI Crude Oil Futures",
+    "ZN=F":  "10Y Treasury Note Futures",
+    "ZB=F":  "30Y Treasury Bond Futures",
+    "SI=F":  "Silver Futures",
+    "HG=F":  "Copper Futures",
+    "ES=F":  "S&P 500 E-mini Futures",
+}
+
+
+def fetch_cme_futures() -> dict:
+    """
+    Fetch CME futures prices via yfinance.
+
+    Returns:
+        {symbol: {"price": float, "change_pct": float, "name": str}}
+        e.g. {"GC=F": {"price": 2950.0, "change_pct": 0.35, "name": "Gold Futures"}}
+    Returns {} if yfinance is not installed or all fetches fail.
+    Cached 5 minutes.
+    """
+    with _CME_FUTURES_LOCK:
+        cached = _CME_FUTURES_CACHE
+        if cached["data"] is not None and (time.time() - cached["ts"]) < _CME_FUTURES_TTL:
+            return cached["data"]
+
+    result: Dict[str, Any] = {}
+    try:
+        import yfinance as yf  # optional dependency — graceful fallback if absent
+    except ImportError:
+        logger.debug("[CME Futures] yfinance not installed — skipping")
+        return result
+
+    for symbol, name in _CME_FUTURES_SYMBOLS.items():
+        try:
+            hist = yf.Ticker(symbol).history(period="5d")
+            if hist.empty:
+                continue
+            closes = hist["Close"].dropna()
+            if len(closes) < 1:
+                continue
+            price = round(float(closes.iloc[-1]), 4)
+            change_pct = 0.0
+            if len(closes) >= 2:
+                prev = float(closes.iloc[-2])
+                if prev != 0:
+                    change_pct = round((price - prev) / prev * 100, 4)
+            result[symbol] = {
+                "price":      price,
+                "change_pct": change_pct,
+                "name":       name,
+            }
+        except Exception as e:
+            logger.debug("[CME Futures] %s failed: %s", symbol, e)
+
+    with _CME_FUTURES_LOCK:
+        _CME_FUTURES_CACHE["data"] = result
+        _CME_FUTURES_CACHE["ts"]   = time.time()
+
+    return result
+
+
+# ── 2. LBMA Gold/Silver via FRED ──────────────────────────────────────────────
+
+_LBMA_LOCK  = threading.Lock()
+_LBMA_CACHE: dict = {"ts": 0, "data": None}
+_LBMA_TTL   = 3600  # 60 minutes (FRED publishes daily data)
+
+_LBMA_FRED_SERIES = {
+    "gold_usd_oz":   "GOLDAMGBD228NLBM",  # LBMA Gold AM Fix, USD/troy oz
+    "silver_usd_oz": "SLVPRUSD",           # Silver Price, USD/troy oz
+}
+
+_LBMA_FALLBACKS = {
+    "gold_usd_oz":   2950.0,
+    "silver_usd_oz": 33.0,
+}
+
+
+def fetch_lbma_prices() -> dict:
+    """
+    Fetch LBMA gold and silver fix prices from FRED public CSV endpoint.
+    No API key required; uses FRED_API_KEY when available for higher rate limits.
+
+    Returns:
+        {
+          "gold_usd_oz":   float,   # LBMA gold AM fix (USD/troy oz)
+          "silver_usd_oz": float,   # Silver USD/troy oz
+          "source":        "FRED" | "fallback",
+          "timestamp":     ISO str,
+        }
+    """
+    with _LBMA_LOCK:
+        cached = _LBMA_CACHE
+        if cached["data"] is not None and (time.time() - cached["ts"]) < _LBMA_TTL:
+            return cached["data"]
+
+    result: Dict[str, Any] = {}
+
+    def _fetch_one_lbma(key_series):
+        key, series_id = key_series
+        try:
+            if FRED_API_KEY:
+                url = "https://api.stlouisfed.org/fred/series/observations"
+                params = {
+                    "series_id":  series_id,
+                    "api_key":    FRED_API_KEY,
+                    "file_type":  "json",
+                    "sort_order": "desc",
+                    "limit":      5,
+                }
+                resp = _session.get(url, params=params, timeout=10)
+                if resp.status_code == 200:
+                    for obs in resp.json().get("observations", []):
+                        val = obs.get("value", ".")
+                        if val not in (".", ""):
+                            return key, round(float(val), 4)
+            else:
+                url  = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+                resp = _session.get(url, timeout=10)
+                if resp.status_code == 200:
+                    lines = resp.text.strip().split("\n")
+                    for line in reversed(lines[1:]):
+                        parts = line.split(",")
+                        if len(parts) == 2 and parts[1].strip() not in (".", ""):
+                            return key, round(float(parts[1].strip()), 4)
+        except Exception as e:
+            logger.debug("[LBMA] %s fetch failed: %s", series_id, e)
+        return key, None
+
+    with ThreadPoolExecutor(max_workers=2) as _ex:
+        _futs = {_ex.submit(_fetch_one_lbma, item): item[0]
+                 for item in _LBMA_FRED_SERIES.items()}
+        for _fut in as_completed(_futs):
+            try:
+                k, v = _fut.result(timeout=15)
+                if v is not None:
+                    result[k] = v
+            except Exception as e:
+                logger.debug("[LBMA] future error: %s", e)
+
+    if not result:
+        data = dict(_LBMA_FALLBACKS)
+        data["source"]    = "fallback"
+        data["timestamp"] = datetime.now(timezone.utc).isoformat()
+    else:
+        for k, v in _LBMA_FALLBACKS.items():
+            result.setdefault(k, v)
+        result["source"]    = "FRED"
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        data = result
+
+    with _LBMA_LOCK:
+        _LBMA_CACHE["data"] = data
+        _LBMA_CACHE["ts"]   = time.time()
+
+    return data
+
+
+# ── 3. Global Stock Index ETFs ────────────────────────────────────────────────
+
+_GLOBAL_IDX_LOCK  = threading.Lock()
+_GLOBAL_IDX_CACHE: dict = {"ts": 0, "data": None}
+_GLOBAL_IDX_TTL   = 300  # 5 minutes
+
+_GLOBAL_IDX_SYMBOLS = {
+    "SPY":  "SPDR S&P 500 ETF (USA)",
+    "QQQ":  "Invesco Nasdaq-100 ETF (USA Tech)",
+    "EWJ":  "iShares MSCI Japan ETF",
+    "EWZ":  "iShares MSCI Brazil ETF",
+    "FXI":  "iShares China Large-Cap ETF",
+    "EWG":  "iShares MSCI Germany ETF",
+    "EWU":  "iShares MSCI United Kingdom ETF",
+    "EWC":  "iShares MSCI Canada ETF",
+    "EWA":  "iShares MSCI Australia ETF",
+    "EWY":  "iShares MSCI South Korea ETF",
+    "INDA": "iShares MSCI India ETF",
+    "EWP":  "iShares MSCI Spain ETF",
+}
+
+
+def fetch_global_indices() -> dict:
+    """
+    Fetch global equity index ETF prices via yfinance.
+
+    Returns:
+        {symbol: {"price": float, "change_pct": float, "name": str}}
+    Returns {} if yfinance is not installed or all fetches fail.
+    Cached 5 minutes.
+    """
+    with _GLOBAL_IDX_LOCK:
+        cached = _GLOBAL_IDX_CACHE
+        if cached["data"] is not None and (time.time() - cached["ts"]) < _GLOBAL_IDX_TTL:
+            return cached["data"]
+
+    result: Dict[str, Any] = {}
+    try:
+        import yfinance as yf
+    except ImportError:
+        logger.debug("[Global Indices] yfinance not installed — skipping")
+        return result
+
+    for symbol, name in _GLOBAL_IDX_SYMBOLS.items():
+        try:
+            hist = yf.Ticker(symbol).history(period="5d")
+            if hist.empty:
+                continue
+            closes = hist["Close"].dropna()
+            if len(closes) < 1:
+                continue
+            price = round(float(closes.iloc[-1]), 4)
+            change_pct = 0.0
+            if len(closes) >= 2:
+                prev = float(closes.iloc[-2])
+                if prev != 0:
+                    change_pct = round((price - prev) / prev * 100, 4)
+            result[symbol] = {
+                "price":      price,
+                "change_pct": change_pct,
+                "name":       name,
+            }
+        except Exception as e:
+            logger.debug("[Global Indices] %s failed: %s", symbol, e)
+
+    with _GLOBAL_IDX_LOCK:
+        _GLOBAL_IDX_CACHE["data"] = result
+        _GLOBAL_IDX_CACHE["ts"]   = time.time()
+
+    return result
+
+
+# ── 4. Tokenized Stock Reference Prices ──────────────────────────────────────
+
+_TOK_STOCK_LOCK  = threading.Lock()
+_TOK_STOCK_CACHE: dict = {"ts": 0, "data": None}
+_TOK_STOCK_TTL   = 300  # 5 minutes
+
+_TOKENIZED_STOCK_SYMBOLS = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA",
+    "NVDA", "META", "NFLX", "AMD",  "INTC",
+    "COIN", "MSTR", "JPM",  "GS",   "BAC",
+    "XOM",  "CVX",  "JNJ",  "V",    "MA",
+]
+
+
+def fetch_tokenized_stock_prices() -> dict:
+    """
+    Fetch underlying stock prices for the top-20 tokenized equities via yfinance.
+    Provides reference prices for dShares (Dinari), Backed Finance, Mirror Protocol etc.
+
+    Returns:
+        {symbol: {"price": float, "change_pct": float, "market_cap": float}}
+    Returns {} if yfinance is not installed or all fetches fail.
+    Cached 5 minutes.
+    """
+    with _TOK_STOCK_LOCK:
+        cached = _TOK_STOCK_CACHE
+        if cached["data"] is not None and (time.time() - cached["ts"]) < _TOK_STOCK_TTL:
+            return cached["data"]
+
+    result: Dict[str, Any] = {}
+    try:
+        import yfinance as yf
+    except ImportError:
+        logger.debug("[Tokenized Stocks] yfinance not installed — skipping")
+        return result
+
+    for symbol in _TOKENIZED_STOCK_SYMBOLS:
+        try:
+            ticker = yf.Ticker(symbol)
+            hist   = ticker.history(period="5d")
+            if hist.empty:
+                continue
+            closes = hist["Close"].dropna()
+            if len(closes) < 1:
+                continue
+            price = round(float(closes.iloc[-1]), 4)
+            change_pct = 0.0
+            if len(closes) >= 2:
+                prev = float(closes.iloc[-2])
+                if prev != 0:
+                    change_pct = round((price - prev) / prev * 100, 4)
+            # market_cap from fast_info (lighter-weight than .info dict)
+            market_cap = 0.0
+            try:
+                fi = ticker.fast_info
+                mc = getattr(fi, "market_cap", None)
+                if mc is not None:
+                    market_cap = float(mc)
+            except Exception:
+                pass
+            result[symbol] = {
+                "price":      price,
+                "change_pct": change_pct,
+                "market_cap": market_cap,
+            }
+        except Exception as e:
+            logger.debug("[Tokenized Stocks] %s failed: %s", symbol, e)
+
+    with _TOK_STOCK_LOCK:
+        _TOK_STOCK_CACHE["data"] = result
+        _TOK_STOCK_CACHE["ts"]   = time.time()
+
+    return result
+
+
+# ── 5. CoinMarketCap Global Metrics ──────────────────────────────────────────
+
+_CMC_GLOBAL_LOCK  = threading.Lock()
+_CMC_GLOBAL_CACHE: dict = {"ts": 0, "data": None}
+_CMC_GLOBAL_TTL   = 300  # 5 minutes
+
+
+def fetch_cmc_global_metrics() -> dict:
+    """
+    Fetch global crypto market metrics from CoinMarketCap free tier.
+    Requires COINMARKETCAP_API_KEY (RWA_COINMARKETCAP_API_KEY env var).
+
+    Returns:
+        {
+          "total_market_cap_usd": float,
+          "btc_dominance":        float,   # percent
+          "eth_dominance":        float,   # percent
+          "total_volume_24h":     float,
+          "source":               "coinmarketcap",
+          "timestamp":            ISO str,
+        }
+    Returns {} if no API key is configured.
+    Cached 5 minutes.
+    """
+    if not COINMARKETCAP_API_KEY:
+        return {}
+
+    with _CMC_GLOBAL_LOCK:
+        cached = _CMC_GLOBAL_CACHE
+        if cached["data"] is not None and (time.time() - cached["ts"]) < _CMC_GLOBAL_TTL:
+            return cached["data"]
+
+    data: dict = {}
+    try:
+        resp = _session.get(
+            f"{COINMARKETCAP_BASE}/global-metrics/quotes/latest",
+            headers={
+                "X-CMC_PRO_API_KEY": COINMARKETCAP_API_KEY,
+                "Accept":            "application/json",
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            payload = resp.json()
+            q = (payload.get("data") or {}).get("quote", {}).get("USD", {})
+            raw = payload.get("data") or {}
+            data = {
+                "total_market_cap_usd": round(float(q.get("total_market_cap",      0)), 2),
+                "total_volume_24h":     round(float(q.get("total_volume_24h",       0)), 2),
+                "btc_dominance":        round(float(raw.get("btc_dominance",         0)), 4),
+                "eth_dominance":        round(float(raw.get("eth_dominance",         0)), 4),
+                "source":               "coinmarketcap",
+                "timestamp":            datetime.now(timezone.utc).isoformat(),
+            }
+        else:
+            logger.warning("[CMC Global] HTTP %s: %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.warning("[CMC Global] fetch failed: %s", e)
+
+    if data:
+        with _CMC_GLOBAL_LOCK:
+            _CMC_GLOBAL_CACHE["data"] = data
+            _CMC_GLOBAL_CACHE["ts"]   = time.time()
+
+    return data
