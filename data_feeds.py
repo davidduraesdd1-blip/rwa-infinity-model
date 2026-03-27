@@ -76,9 +76,9 @@ _session = requests.Session()
 _session.mount("https://", _adapter)
 _session.mount("http://", _adapter)
 _session.headers.update({
-    "Accept": "application/json",
+    "Accept":          "application/json",
     "Accept-Encoding": "gzip, deflate",
-    "User-Agent": "RWA-Infinity-Model/1.0",
+    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 })
 # Attach CoinGecko Pro key when available (higher rate limits)
 if COINGECKO_API_KEY:
@@ -3283,7 +3283,7 @@ def fetch_coinmetrics_onchain(days: int = 400) -> Dict[str, Any]:
                 }
             resp = _session.get(url, params=params, timeout=15)
             if resp.status_code == 403 and not api_key:
-                return {"error": "HTTP 403 — add RWA_COIN_METRICS_API_KEY (free at coinmetrics.io/free-community-data)", "source": "coinmetrics"}
+                return {"error": "HTTP 403 — Streamlit Cloud IP blocked by CoinMetrics. Add RWA_COIN_METRICS_API_KEY (free at coinmetrics.io) to use the authenticated endpoint.", "source": "coinmetrics"}
             if resp.status_code != 200:
                 return {"error": f"HTTP {resp.status_code}", "source": "coinmetrics"}
             rows = resp.json().get("data", [])
