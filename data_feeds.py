@@ -32,7 +32,7 @@ from config import (
     DUNE_API_KEY,
     SANTIMENT_API_KEY, FRED_API_KEY, COINALYZE_API_KEY,
     XRPL_NODE_URL, XRPL_RLUSD_ISSUER,
-    ETHERSCAN_API_KEY, ZERION_API_KEY,
+    ETHERSCAN_API_KEY, ZERION_API_KEY, COIN_METRICS_API_KEY,
     get_asset_fee_bps,
     ALLOWED_DOMAINS,
 )
@@ -3267,15 +3267,23 @@ def fetch_coinmetrics_onchain(days: int = 400) -> Dict[str, Any]:
 
     def _fetch():
         try:
-            url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
-            params = {
-                "assets":     "btc",
-                "metrics":    "CapMrktCurUSD,CapRealUSD,SoprNtv,AdrActCnt",
-                "start_time": start,
-                "frequency":  "1d",
-                "page_size":  days + 10,
-            }
+            api_key = (COIN_METRICS_API_KEY or "").strip()
+            if api_key:
+                url = "https://api.coinmetrics.io/v4/timeseries/asset-metrics"
+                params = {
+                    "assets": "btc", "metrics": "CapMrktCurUSD,CapRealUSD,SoprNtv,AdrActCnt",
+                    "start_time": start, "frequency": "1d", "page_size": days + 10,
+                    "api_key": api_key,
+                }
+            else:
+                url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+                params = {
+                    "assets": "btc", "metrics": "CapMrktCurUSD,CapRealUSD,SoprNtv,AdrActCnt",
+                    "start_time": start, "frequency": "1d", "page_size": days + 10,
+                }
             resp = _session.get(url, params=params, timeout=15)
+            if resp.status_code == 403 and not api_key:
+                return {"error": "HTTP 403 — add RWA_COIN_METRICS_API_KEY (free at coinmetrics.io/free-community-data)", "source": "coinmetrics"}
             if resp.status_code != 200:
                 return {"error": f"HTTP {resp.status_code}", "source": "coinmetrics"}
             rows = resp.json().get("data", [])
