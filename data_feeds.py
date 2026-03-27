@@ -125,15 +125,23 @@ CACHE_TTL = {
 
 
 def _cached_get(key: str, ttl: int, fetch_fn):
-    """Generic TTL cache wrapper."""
+    """Generic TTL cache wrapper. Only caches non-None results so a failed
+    fetch does not lock out retries for the full TTL period."""
     with _cache_lock:
         cached = _cache.get(key)
         if cached and (time.time() - cached["_ts"]) < ttl:
             return cached["data"]
     try:
         data = fetch_fn()
-        with _cache_lock:
-            _cache[key] = {"data": data, "_ts": time.time()}
+        if data is not None:
+            with _cache_lock:
+                _cache[key] = {"data": data, "_ts": time.time()}
+        else:
+            # Return stale value if available; do not overwrite with None
+            with _cache_lock:
+                cached = _cache.get(key)
+                if cached:
+                    return cached["data"]
         return data
     except Exception as e:
         logger.warning("[DataFeeds] %s fetch failed: %s", key, e)
@@ -2604,15 +2612,15 @@ def fetch_macro_regime() -> dict:
     """
     def _classify():
         try:
-            macro  = fetch_macro_indicators()
-            curve  = fetch_treasury_yield_curve()
-            ext    = fetch_fred_extended()
+            macro  = fetch_macro_indicators() or {}
+            curve  = fetch_treasury_yield_curve() or {}
+            ext    = fetch_fred_extended() or {}
 
             dxy     = float(macro.get("dxy",          104.0))
             m2      = float(macro.get("m2_supply_bn", 21_500.0))
             fed_bal = float(macro.get("fed_balance_bn", 6_800.0))
-            y10     = float(curve.get("yields", {}).get("10y", 4.25))
-            y2      = float(curve.get("yields", {}).get("2y",  4.05))
+            y10     = float((curve.get("yields") or {}).get("10y", 4.25))
+            y2      = float((curve.get("yields") or {}).get("2y",  4.05))
             hy_bp   = float(ext.get("hy_spread_bp",   340.0))
             ig_bp   = float(ext.get("ig_spread_bp",   100.0))
 
