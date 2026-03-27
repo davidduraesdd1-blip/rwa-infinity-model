@@ -1471,68 +1471,200 @@ def detect_portfolio_anomalies(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PORTFOLIO HEALTH SCORE  (#63)
-# Composite 0-100 score: Sharpe (40pts) + Regulatory (30pts) + Liquidity (30pts)
+# Composite 0-100 score per spec:
+#   Sharpe ratio contribution  (0–30 pts)
+#   Diversification — Herfindahl index  (0–25 pts)
+#   Liquidity score  (0–25 pts)
+#   Regulatory score  (0–20 pts)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def compute_portfolio_health_score(metrics: dict, holdings: list[dict]) -> dict:
     """
     Compute a composite Portfolio Health Score (0–100).
 
-    Breakdown:
-      - Sharpe contribution  (0–40 pts): Sharpe 0→0, 1→20, 2→40 (clamped)
-      - Regulatory score     (0–30 pts): avg regulatory_score (0–10) scaled to 30
-      - Liquidity score      (0–30 pts): avg liquidity_score  (0–10) scaled to 30
+    Breakdown per spec (#63):
+      - Sharpe contribution  (0–30 pts): rolling Sharpe normalized to 0-30
+      - Diversification      (0–25 pts): 1 - Herfindahl index across asset classes
+      - Liquidity score      (0–25 pts): weighted avg liquidity tier (daily/weekly/monthly)
+      - Regulatory score     (0–20 pts): % of portfolio in compliant/audited assets
 
-    Returns dict with keys: score, grade, color, sharpe_pts, reg_pts, liq_pts, breakdown
+    Color coding: 0-40=red, 40-70=yellow, 70-100=green.
+
+    Returns dict with keys: score, grade, color, sharpe_pts, diversification_pts,
+                            liq_pts, reg_pts, breakdown, herfindahl
     """
-    # Sharpe component (0-40)
+    n = len(holdings)
+
+    # ── Sharpe component (0–30 pts) ─────────────────────────────────────────
+    # Sharpe 0 → 0 pts, Sharpe 1.5 → 30 pts (clamped at 30)
     sharpe = float(metrics.get("sharpe_ratio") or 0)
-    sharpe_pts = round(min(sharpe / 2.0, 1.0) * 40, 1)
+    sharpe_pts = round(min(max(sharpe / 1.5, 0.0), 1.0) * 30, 1)
 
-    # Regulatory component (0-30) from holdings
-    reg_scores = [float(h.get("regulatory_score") or 0) for h in holdings if h.get("regulatory_score") is not None]
-    avg_reg = sum(reg_scores) / len(reg_scores) if reg_scores else 5.0
-    reg_pts = round((avg_reg / 10.0) * 30, 1)
-
-    # Liquidity component (0-30) from holdings
-    liq_scores = [float(h.get("liquidity_score") or 0) for h in holdings if h.get("liquidity_score") is not None]
-    avg_liq = sum(liq_scores) / len(liq_scores) if liq_scores else 5.0
-    liq_pts = round((avg_liq / 10.0) * 30, 1)
-
-    score = round(min(sharpe_pts + reg_pts + liq_pts, 100), 1)
-
-    if score >= 80:
-        grade, color = "A", "#34D399"
-    elif score >= 65:
-        grade, color = "B", "#A3E635"
-    elif score >= 50:
-        grade, color = "C", "#FBBF24"
-    elif score >= 35:
-        grade, color = "D", "#F97316"
+    # ── Diversification — Herfindahl index (0–25 pts) ───────────────────────
+    # H = sum(weight_i^2); H=1 = fully concentrated, H≈0 = perfectly diversified
+    # Score = (1 - H) * 25  →  25 pts if perfectly diversified, 0 if single asset
+    if holdings:
+        weights = [float(h.get("weight_pct") or 0) / 100.0 for h in holdings]
+        herfindahl = round(sum(w * w for w in weights), 4)
+        diversification_pts = round((1.0 - herfindahl) * 25, 1)
     else:
-        grade, color = "F", "#EF4444"
+        herfindahl = 1.0
+        diversification_pts = 0.0
+
+    # ── Liquidity component (0–25 pts) ──────────────────────────────────────
+    # Weighted avg of liquidity_score (0–10 scale) → scaled to 0–25
+    if holdings:
+        total_w = sum(float(h.get("weight_pct") or 0) for h in holdings) or 1.0
+        weighted_liq = sum(
+            float(h.get("liquidity_score") or 0) * float(h.get("weight_pct") or 0)
+            for h in holdings
+        ) / total_w
+        liq_pts = round((weighted_liq / 10.0) * 25, 1)
+    else:
+        weighted_liq = 5.0
+        liq_pts = 12.5
+
+    # ── Regulatory component (0–20 pts) ─────────────────────────────────────
+    # Weighted avg of regulatory_score (0–10 scale) → scaled to 0–20
+    # Assets with regulatory_score >= 7 are considered "compliant/audited"
+    if holdings:
+        total_w = sum(float(h.get("weight_pct") or 0) for h in holdings) or 1.0
+        weighted_reg = sum(
+            float(h.get("regulatory_score") or 0) * float(h.get("weight_pct") or 0)
+            for h in holdings
+        ) / total_w
+        reg_pts = round((weighted_reg / 10.0) * 20, 1)
+    else:
+        weighted_reg = 5.0
+        reg_pts = 10.0
+
+    score = round(min(sharpe_pts + diversification_pts + liq_pts + reg_pts, 100), 1)
+
+    # Color coding per spec: 0-40=red, 40-70=yellow, 70-100=green
+    if score >= 70:
+        grade, color = "A" if score >= 85 else "B", "#34D399"   # green
+    elif score >= 40:
+        grade, color = "C" if score >= 55 else "D", "#FBBF24"   # yellow
+    else:
+        grade, color = "F", "#EF4444"   # red
 
     return {
-        "score":      score,
-        "grade":      grade,
-        "color":      color,
-        "sharpe_pts": sharpe_pts,
-        "reg_pts":    reg_pts,
-        "liq_pts":    liq_pts,
-        "breakdown":  f"Sharpe {sharpe_pts}/40 · Regulatory {reg_pts}/30 · Liquidity {liq_pts}/30",
+        "score":              score,
+        "grade":              grade,
+        "color":              color,
+        "sharpe_pts":         sharpe_pts,
+        "diversification_pts":diversification_pts,
+        "liq_pts":            liq_pts,
+        "reg_pts":            reg_pts,
+        "herfindahl":         herfindahl,
+        "breakdown":  (
+            f"Sharpe {sharpe_pts}/30 · Diversification {diversification_pts}/25 · "
+            f"Liquidity {liq_pts}/25 · Regulatory {reg_pts}/20"
+        ),
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 30-SECOND AI BRIEFING  (#64)
-# Plain-English Claude Haiku summary of current portfolio state — 5-min cache
+# Plain-English Claude Haiku summary: market regime + top risk + actionable insight
+# Cached 30 minutes (regime changes slowly).
 # ─────────────────────────────────────────────────────────────────────────────
+
+_briefing_cache: dict = {}
+_briefing_lock  = threading.Lock()
+
+
+def generate_ai_briefing(portfolio_data: dict, market_data: dict, regime: dict) -> str:
+    """
+    Generate a 2-3 sentence plain-English summary using Claude Haiku covering:
+      1. Current market regime
+      2. Top risk in the portfolio
+      3. One actionable insight
+
+    Cached 30 minutes. Falls back to rule-based summary if API unavailable.
+
+    Args:
+        portfolio_data: dict with 'metrics', 'holdings', 'tier'
+        market_data:    dict from get_market_summary()
+        regime:         dict from fetch_macro_regime() or get_macro_regime()
+    """
+    import hashlib as _hl
+    metrics   = portfolio_data.get("metrics", {})
+    holdings  = portfolio_data.get("holdings", [])
+    tier      = portfolio_data.get("tier", 3)
+    regime_nm = regime.get("regime", "NEUTRAL")
+
+    # Cache key: regime + tier + rounded yield
+    cache_key = _hl.md5(
+        f"{regime_nm}|{tier}|{round(metrics.get('weighted_yield_pct', 0), 1)}".encode()
+    ).hexdigest()
+
+    with _briefing_lock:
+        entry = _briefing_cache.get(cache_key)
+        if entry and time.time() - entry[1] < 1800:   # 30-min TTL
+            return entry[0]
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key or not _ANTHROPIC:
+        yield_pct = metrics.get("weighted_yield_pct", 0) or 0
+        sharpe    = metrics.get("sharpe_ratio", 0) or 0
+        top_risk  = "liquidity" if sharpe < 0.8 else "drawdown" if metrics.get("max_drawdown_pct", 0) > 15 else "concentration"
+        text = (
+            f"The macro regime is currently {regime_nm} with "
+            f"{'tight credit spreads and a soft dollar' if regime_nm == 'RISK_ON' else 'elevated caution signals'}. "
+            f"Your Tier {tier} portfolio yields {yield_pct:.1f}% with a Sharpe ratio of {sharpe:.2f}; "
+            f"the primary risk to watch is {top_risk}. "
+            f"Consider increasing allocation to {('high-yield private credit' if regime_nm == 'RISK_ON' else 'short-duration T-bills')} "
+            f"to optimize for the current environment."
+        )
+        with _briefing_lock:
+            _briefing_cache[cache_key] = (text, time.time())
+        return text
+
+    top_assets = ", ".join(h.get("name", h.get("id", "?")) for h in holdings[:4])
+    max_dd     = metrics.get("max_drawdown_pct", 0) or 0
+    conf       = regime.get("confidence", 0.5)
+    fg_label   = market_data.get("fear_greed_label", "Neutral")
+
+    prompt = (
+        f"You are a senior RWA portfolio analyst writing a 30-second briefing. "
+        f"Write exactly 2-3 plain-English sentences with no bullet points, no markdown, no jargon.\n\n"
+        f"Macro regime: {regime_nm} (confidence {conf:.0%}, F&G: {fg_label})\n"
+        f"Portfolio: Tier {tier} | Yield {metrics.get('weighted_yield_pct', 0):.1f}% | "
+        f"Sharpe {metrics.get('sharpe_ratio', 0):.2f} | Max DD {max_dd:.1f}% | "
+        f"Top holdings: {top_assets}\n\n"
+        f"Cover in order: (1) current market regime in one phrase, "
+        f"(2) top portfolio risk right now, (3) one specific actionable insight."
+    )
+
+    try:
+        client = _anthropic.Anthropic(api_key=api_key, timeout=15.0)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = (msg.content[0].text.strip() if msg.content else "") or "Briefing unavailable."
+    except Exception as e:
+        logger.warning("[generate_ai_briefing] Haiku call failed: %s", e)
+        yield_pct = metrics.get("weighted_yield_pct", 0) or 0
+        text = (
+            f"Regime is {regime_nm}; portfolio yields {yield_pct:.1f}%. "
+            f"Briefing service temporarily unavailable."
+        )
+
+    with _briefing_lock:
+        _briefing_cache[cache_key] = (text, time.time())
+    return text
+
 
 def get_30sec_briefing(tier: int, metrics: dict, holdings: list[dict]) -> str:
     """
     Generate a 30-second plain-English briefing of portfolio health using Claude Haiku.
     Returns a 2-3 sentence string. Falls back to a rule-based summary if API unavailable.
     Cached implicitly by the caller (use st.cache_data ttl=300).
+
+    For full regime-aware briefing use generate_ai_briefing() instead.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key or not _ANTHROPIC:

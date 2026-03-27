@@ -368,6 +368,22 @@ def _load_briefing(tier: int, metrics_key: str, n_holdings: int) -> str:
 def _load_news():
     return _db.get_recent_news(20)
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_macro_regime() -> dict:
+    """Load fetch_macro_regime() with 1-hour cache (regime changes slowly).
+    Falls back to empty dict so callers can degrade gracefully."""
+    import concurrent.futures
+    try:
+        from data_feeds import fetch_macro_regime
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+            _fut = _ex.submit(fetch_macro_regime)
+            try:
+                return _fut.result(timeout=8)
+            except concurrent.futures.TimeoutError:
+                return {}
+    except Exception:
+        return {}
+
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_market_summary():
     """Fetch market summary with a hard 6-second timeout to keep the UI responsive.
@@ -602,6 +618,7 @@ st.markdown('<hr style="border:none;border-top:1px solid #1F2937;margin:8px 0 16
 # ─────────────────────────────────────────────────────────────────────────────
 
 market = _load_market_summary()
+_macro_regime_data = _load_macro_regime()   # fetch_macro_regime() — enhanced signal-scored classifier
 assets_df = _load_assets()
 
 ticker_items = [
@@ -624,7 +641,10 @@ if not assets_df.empty:
 _fg_val   = market.get("fear_greed_value", 50)
 _fg_lbl   = market.get("fear_greed_label", "Neutral")
 _fg_sig   = market.get("fear_greed_signal", "NEUTRAL")
-_regime   = market.get("macro_regime", "NEUTRAL")
+# Use fetch_macro_regime() when available; fall back to get_market_summary() value
+_regime   = _macro_regime_data.get("regime") or market.get("macro_regime", "NEUTRAL")
+_regime_confidence  = _macro_regime_data.get("confidence", 0.0)
+_regime_score       = _macro_regime_data.get("score", 0)
 _stable   = market.get("stablecoin_total_bn", 0)
 _fg_emoji = {"STRONG_BUY": "🟢", "BUY": "🟡", "NEUTRAL": "⚪", "SELL": "🟠", "STRONG_SELL": "🔴"}.get(_fg_sig, "⚪")
 ticker_items.extend([
@@ -682,12 +702,15 @@ with _mac_col1:
     """, unsafe_allow_html=True)
 
 with _mac_col2:
+    _conf_pct = int(_regime_confidence * 100) if _regime_confidence else 0
+    _score_lbl = f"Score: {_regime_score:+d}" if _regime_score != 0 else "Score: 0"
     st.markdown(f"""
     <div style="background:{_rc[0]};border:1px solid {_rc[1]}40;border-radius:8px;
                 padding:10px 14px;text-align:center;">
         <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.1em">Macro Regime</div>
-        <div style="font-size:20px;font-weight:800;color:{_rc[1]}">{_rc[2]} {_regime}</div>
+        <div style="font-size:18px;font-weight:800;color:{_rc[1]}">{_rc[2]} {_regime}</div>
         <div style="font-size:11px;color:{_rc[1]}">Bias: {_bias}</div>
+        <div style="font-size:10px;color:#9CA3AF;margin-top:2px">{_score_lbl} · Confidence: {_conf_pct}%</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -918,7 +941,11 @@ with tab_portfolio:
 
     # ── 30-Second AI Briefing (#64) ──────────────────────────────────────────
     if metrics:
-        _brief_key = f"brief_{selected_tier}_{round(metrics.get('weighted_yield_pct', 0), 1)}_{round(metrics.get('sharpe_ratio', 0), 2)}_{len(holdings)}"
+        _regime_nm  = _regime  # captured above from fetch_macro_regime / market fallback
+        _brief_key  = (
+            f"brief_{selected_tier}_{round(metrics.get('weighted_yield_pct', 0), 1)}"
+            f"_{round(metrics.get('sharpe_ratio', 0), 2)}_{len(holdings)}_{_regime_nm}"
+        )
         if _demo_mode:
             _briefing_text = (
                 "Your demo portfolio is well-balanced across US Treasuries, Private Credit, and Real Estate "
@@ -929,18 +956,32 @@ with tab_portfolio:
         elif _brief_key not in st.session_state:
             with st.spinner("Generating AI briefing…"):
                 try:
-                    from ai_agent import get_30sec_briefing
-                    _briefing_text = get_30sec_briefing(selected_tier, metrics, holdings)
+                    from ai_agent import generate_ai_briefing
+                    _portfolio_data = {"tier": selected_tier, "metrics": metrics, "holdings": holdings}
+                    _briefing_text = generate_ai_briefing(
+                        portfolio_data=_portfolio_data,
+                        market_data=market,
+                        regime=_macro_regime_data,
+                    )
                 except Exception as _be:
                     logger.warning("Briefing failed: %s", _be)
-                    _briefing_text = ""
+                    # Fall back to legacy briefing
+                    try:
+                        from ai_agent import get_30sec_briefing
+                        _briefing_text = get_30sec_briefing(selected_tier, metrics, holdings)
+                    except Exception:
+                        _briefing_text = ""
                 st.session_state[_brief_key] = _briefing_text
         else:
             _briefing_text = st.session_state[_brief_key]
 
         if _briefing_text:
+            _brief_accent = {
+                "RISK_ON": "#34D399", "RISK_OFF": "#F97316",
+                "STAGFLATION": "#FBBF24", "LIQUIDITY_CRUNCH": "#818CF8",
+            }.get(_regime_nm, "#6366f1")
             st.markdown(
-                f"""<div style="background:#0D1117;border:1px solid #1F2937;border-left:3px solid #6366f1;
+                f"""<div style="background:#0D1117;border:1px solid #1F2937;border-left:3px solid {_brief_accent};
                                 border-radius:8px;padding:12px 16px;margin-bottom:14px">
                     <div style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.08em;
                                 margin-bottom:6px">🤖 AI BRIEFING · 30-SEC SUMMARY</div>
