@@ -2282,6 +2282,13 @@ def fetch_global_m2_composite() -> dict:
                         obs.append({"date": parts[0], "value": parts[1]})
 
             if len(obs) >= 2:
+                # API path: sort_order=desc → obs[0] is newest, obs[-1] is oldest
+                # CSV path: chronological order → obs[-1] is newest, obs[0] is oldest
+                # Both paths now build obs in chronological order (CSV path: lines[-6:],
+                # API path: we reverse below to unify indexing)
+                if FRED_API_KEY:
+                    # API returns desc, reverse to chronological
+                    obs = list(reversed(obs))
                 latest_val  = float(obs[-1]["value"])
                 earlier_val = float(obs[0]["value"])
                 change_pct  = round((latest_val - earlier_val) / max(earlier_val, 1) * 100, 2)
