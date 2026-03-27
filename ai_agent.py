@@ -1322,7 +1322,7 @@ def run_scenario_simulation(scenario: str, portfolio_snapshot: dict) -> dict:
           "source":       "claude" | "error",
         }
     """
-    if not _ANTHROPIC_AVAILABLE:
+    if not _ANTHROPIC:
         return {"scenario": scenario, "source": "error", "error": "anthropic SDK not installed"}
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()

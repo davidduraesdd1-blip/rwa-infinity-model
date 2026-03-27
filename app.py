@@ -1002,7 +1002,7 @@ with tab_portfolio:
     # On-chain RWA TVL vs the $360B off-chain tokenizable universe
     _OFF_CHAIN_TAM_B = 360.0  # $360B total addressable market (Boston Consulting Group / RWA.xyz 2025 estimate)
     try:
-        _rwa_tvl = data_feeds.get_total_rwa_tvl() if not _demo_mode else 18_400_000_000
+        _rwa_tvl = _df.get_total_rwa_tvl() if not _demo_mode else 18_400_000_000
     except Exception:
         _rwa_tvl = 0.0
     if _rwa_tvl > 0:
