@@ -4595,31 +4595,26 @@ def fetch_lbma_prices() -> dict:
 
     def _fetch_one_lbma(key_series):
         key, series_id = key_series
+        if not FRED_API_KEY:
+            # FRED public CSV endpoint (fredgraph.csv?id=) is Cloudflare-gated
+            # and requires authentication — skip and use fallback.
+            logger.debug("[LBMA] no FRED_API_KEY — using fallback for %s", series_id)
+            return key, None
         try:
-            if FRED_API_KEY:
-                url = "https://api.stlouisfed.org/fred/series/observations"
-                params = {
-                    "series_id":  series_id,
-                    "api_key":    FRED_API_KEY,
-                    "file_type":  "json",
-                    "sort_order": "desc",
-                    "limit":      5,
-                }
-                resp = _session.get(url, params=params, timeout=10)
-                if resp.status_code == 200:
-                    for obs in resp.json().get("observations", []):
-                        val = obs.get("value", ".")
-                        if val not in (".", ""):
-                            return key, round(float(val), 4)
-            else:
-                url  = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-                resp = _session.get(url, timeout=10)
-                if resp.status_code == 200:
-                    lines = resp.text.strip().split("\n")
-                    for line in reversed(lines[1:]):
-                        parts = line.split(",")
-                        if len(parts) == 2 and parts[1].strip() not in (".", ""):
-                            return key, round(float(parts[1].strip()), 4)
+            url = "https://api.stlouisfed.org/fred/series/observations"
+            params = {
+                "series_id":  series_id,
+                "api_key":    FRED_API_KEY,
+                "file_type":  "json",
+                "sort_order": "desc",
+                "limit":      5,
+            }
+            resp = _session.get(url, params=params, timeout=10)
+            if resp.status_code == 200:
+                for obs in resp.json().get("observations", []):
+                    val = obs.get("value", ".")
+                    if val not in (".", ""):
+                        return key, round(float(val), 4)
         except Exception as e:
             logger.debug("[LBMA] %s fetch failed: %s", series_id, e)
         return key, None
@@ -4847,10 +4842,10 @@ def fetch_cmc_global_metrics() -> dict:
             q = (payload.get("data") or {}).get("quote", {}).get("USD", {})
             raw = payload.get("data") or {}
             data = {
-                "total_market_cap_usd": round(float(q.get("total_market_cap",      0)), 2),
-                "total_volume_24h":     round(float(q.get("total_volume_24h",       0)), 2),
-                "btc_dominance":        round(float(raw.get("btc_dominance",         0)), 4),
-                "eth_dominance":        round(float(raw.get("eth_dominance",         0)), 4),
+                "total_market_cap_usd": round(float(q.get("total_market_cap")      or 0), 2),
+                "total_volume_24h":     round(float(q.get("total_volume_24h")       or 0), 2),
+                "btc_dominance":        round(float(raw.get("btc_dominance")         or 0), 4),
+                "eth_dominance":        round(float(raw.get("eth_dominance")         or 0), 4),
                 "source":               "coinmarketcap",
                 "timestamp":            datetime.now(timezone.utc).isoformat(),
             }
