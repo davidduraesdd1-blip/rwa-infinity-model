@@ -1493,6 +1493,8 @@ def compute_portfolio_health_score(metrics: dict, holdings: list[dict]) -> dict:
     Returns dict with keys: score, grade, color, sharpe_pts, diversification_pts,
                             liq_pts, reg_pts, breakdown, herfindahl
     """
+    metrics  = metrics  if isinstance(metrics,  dict) else {}
+    holdings = holdings if isinstance(holdings, list) else []
     n = len(holdings)
 
     # ── Sharpe component (0–30 pts) ─────────────────────────────────────────
@@ -1589,8 +1591,11 @@ def generate_ai_briefing(portfolio_data: dict, market_data: dict, regime: dict) 
         regime:         dict from fetch_macro_regime() or get_macro_regime()
     """
     import hashlib as _hl
-    metrics   = portfolio_data.get("metrics", {})
-    holdings  = portfolio_data.get("holdings", [])
+    portfolio_data = portfolio_data if isinstance(portfolio_data, dict) else {}
+    market_data    = market_data    if isinstance(market_data,    dict) else {}
+    regime         = regime         if isinstance(regime,         dict) else {}
+    metrics   = portfolio_data.get("metrics", {}) or {}
+    holdings  = portfolio_data.get("holdings", []) or []
     tier      = portfolio_data.get("tier", 3)
     regime_nm = regime.get("regime", "NEUTRAL")
 
@@ -1666,6 +1671,8 @@ def get_30sec_briefing(tier: int, metrics: dict, holdings: list[dict]) -> str:
 
     For full regime-aware briefing use generate_ai_briefing() instead.
     """
+    metrics  = metrics  if isinstance(metrics,  dict) else {}
+    holdings = holdings if isinstance(holdings, list) else []
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key or not _ANTHROPIC:
         # Rule-based fallback

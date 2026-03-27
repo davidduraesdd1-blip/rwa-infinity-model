@@ -383,6 +383,9 @@ def fetch_coingecko_prices(ids: List[str] = None) -> Dict[str, dict]:
                     data = _fut.result(timeout=30)
                     if data:
                         for coin in data:
+                            coin_id = coin.get("id")
+                            if not coin_id:
+                                continue  # skip malformed entries — id is required key
                             # total_value_locked: CoinGecko returns this for DeFi/RWA protocols
                             # It may be a dict {"usd": N} or a float or None
                             _tvl_raw = coin.get("total_value_locked")
@@ -396,8 +399,8 @@ def fetch_coingecko_prices(ids: List[str] = None) -> Dict[str, dict]:
                             else:
                                 tvl_val = 0.0
 
-                            all_prices[coin["id"]] = {
-                                "id":                 coin["id"],
+                            all_prices[coin_id] = {
+                                "id":                 coin_id,
                                 "symbol":             coin.get("symbol", "").upper(),
                                 "name":               coin.get("name"),
                                 "price_usd":          coin.get("current_price", 0) or 0,
