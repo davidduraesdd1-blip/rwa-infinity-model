@@ -3973,9 +3973,8 @@ FEATURES: dict = {
     "binance_auth":         bool(BINANCE_API_KEY),
     "coinbase_auth":        bool(COINBASE_API_KEY),
     "kraken_auth":          bool(KRAKEN_API_KEY),
-    # Block explorers
+    # Block explorers — V2 API: one key covers all EVM chains
     "etherscan":            bool(ETHERSCAN_API_KEY),
-    "polygonscan":          bool(POLYGONSCAN_API_KEY),
     # Web3 / On-chain
     "alchemy":              bool(ALCHEMY_API_KEY),
     "infura":               bool(INFURA_API_KEY),
