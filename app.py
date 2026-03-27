@@ -82,6 +82,7 @@ from config import (
     PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
     RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
     XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled,
+    get_redemption_window,
 )
 
 # ─── Sentry error monitoring (free tier — only loads when DSN is set) ──────────
@@ -1180,7 +1181,7 @@ with tab_portfolio:
                     font_color="#E2E8F0",
                     margin=dict(l=40, r=20, t=30, b=80),
                     height=280,
-                    xaxis=dict(gridcolor="#1F2937", tickangle=-35, tickfont_size=10),
+                    xaxis=dict(gridcolor="#1F2937", tickangle=-35, tickfont=dict(size=10)),
                     yaxis=dict(gridcolor="#1F2937", ticksuffix="%"),
                     showlegend=False,
                 )
@@ -1542,12 +1543,18 @@ with tab_universe:
             filtered_df["exit_label"]     = "MODERATE"
             filtered_df["trust_score"]    = 5.0
 
+        # Add redemption_window column (#66) — "Yield | Redemption" display
+        def _redeem_window(row):
+            return get_redemption_window(row.get("id", ""), row.get("category", ""))
+        filtered_df["redemption_window"] = filtered_df.apply(_redeem_window, axis=1)
+
         # Asset table
         show_cols = {
             "id": "ID", "name": "Name", "category": "Category",
             "chain": "Chain", "protocol": "Protocol",
             "current_yield_pct": "Gross Yield %",
             "net_apy_pct": "Net APY %",
+            "redemption_window": "Redemption",
             "tvl_usd": "TVL",
             "risk_score": "Risk",
             "liq_score_comp": "Liq Score",
@@ -1585,6 +1592,84 @@ with tab_universe:
             use_container_width=True,
             height=min(600, 55 + 35 * len(table_df)),
         )
+
+        # ── NAV Premium / Discount Tracker (#56) ─────────────────────────────
+        st.markdown('<div class="section-header">NAV Premium / Discount Tracker</div>',
+                    unsafe_allow_html=True)
+        st.caption("Compares secondary-market price vs published NAV ($1.00 for tokenized T-bill / MM funds). "
+                   "Green = trading at premium above NAV. Red = discount below NAV. Key RWA risk signal.")
+
+        @st.cache_data(ttl=900, show_spinner=False)
+        def _load_nav_premiums():
+            return _df.fetch_nav_premiums()
+
+        _nav_data = _load_nav_premiums()
+        if _nav_data:
+            # Filter out NO_DATA entries for the main table display
+            _nav_display = [r for r in _nav_data if r["status"] != "NO_DATA"]
+            if _nav_display:
+                _nav_cols = st.columns(min(len(_nav_display), 5))
+                for _ni, _nr in enumerate(_nav_display[:5]):
+                    _col_idx = _ni % 5
+                    with _nav_cols[_col_idx]:
+                        _pr_pct = _nr["premium_pct"]
+                        _status = _nr["status"]
+                        if _status == "PREMIUM":
+                            _nav_color = "#34D399"
+                            _nav_bg    = "#064E3B"
+                            _nav_arrow = "▲"
+                        elif _status == "DISCOUNT":
+                            _nav_color = "#EF4444"
+                            _nav_bg    = "#7F1D1D"
+                            _nav_arrow = "▼"
+                        else:
+                            _nav_color = "#9CA3AF"
+                            _nav_bg    = "#1F2937"
+                            _nav_arrow = "●"
+                        _nav_mkt = _nr["market_price"]
+                        _nav_nav = _nr["nav"]
+                        st.markdown(f"""
+<div style="background:{_nav_bg};border:1px solid {_nav_color}40;border-radius:8px;padding:12px;text-align:center;margin-bottom:8px">
+  <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.08em">{_nr['symbol']}</div>
+  <div style="font-size:20px;font-weight:800;color:{_nav_color}">{_nav_arrow} {_pr_pct:+.4f}%</div>
+  <div style="font-size:10px;color:#9CA3AF;margin-top:2px">Mkt: ${_nav_mkt:.4f}</div>
+  <div style="font-size:10px;color:#6B7280">NAV: ${_nav_nav:.4f}</div>
+  <div style="font-size:10px;color:{_nav_color};margin-top:2px;font-weight:600">{_status}</div>
+</div>""", unsafe_allow_html=True)
+
+                # Show the rest in a compact table
+                if len(_nav_display) > 5:
+                    _nav_df = pd.DataFrame(_nav_display)
+                    _nav_table = _nav_df[["symbol", "market_price", "nav", "premium_pct", "status", "source"]].copy()
+                    _nav_table.columns = ["Symbol", "Market Price", "NAV", "Premium %", "Status", "Source"]
+
+                    def _nav_status_color(val):
+                        if val == "PREMIUM":  return "color: #34D399"
+                        if val == "DISCOUNT": return "color: #EF4444"
+                        return "color: #9CA3AF"
+
+                    def _nav_pct_color(val):
+                        try:
+                            v = float(val)
+                            if v > 0.1:  return "color: #34D399"
+                            if v < -0.1: return "color: #EF4444"
+                        except Exception:
+                            pass
+                        return "color: #9CA3AF"
+
+                    st.dataframe(
+                        _nav_table.style
+                            .format({"Market Price": "${:.6f}", "NAV": "${:.6f}", "Premium %": "{:+.4f}%"})
+                            .map(_nav_status_color, subset=["Status"])
+                            .map(_nav_pct_color, subset=["Premium %"])
+                            .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
+                        use_container_width=True,
+                        height=min(400, 55 + 35 * len(_nav_table)),
+                    )
+            else:
+                st.info("NAV data loading... CoinGecko prices required for market price comparison.")
+        else:
+            st.info("NAV Premium tracker unavailable — CoinGecko price data required.")
 
         # ── Exit Velocity Legend ──────────────────────────────────────────────
         with st.expander("📖 Exit Score & Trust Score Guide", expanded=False):
@@ -3147,6 +3232,123 @@ with tab_macro:
     src_label = fred_data.get("source", "fallback")
     yf_src    = yf_data.get("source", "fallback")
     st.caption(f"FRED source: **{src_label}** · yfinance source: **{yf_src}** · Cached 30 min")
+
+    st.markdown("---")
+
+    # ── FRED Extended Series (#29) ─────────────────────────────────────────────
+    st.markdown("#### Credit Spreads · Inflation Breakevens · SOFR · Jobless Claims")
+    st.caption("FRED extended series — key risk signals for RWA credit quality and macro stress")
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _load_fred_extended():
+        return _df.fetch_fred_extended()
+
+    _fred_ext = _load_fred_extended()
+
+    _fe1, _fe2, _fe3, _fe4, _fe5, _fe6, _fe7, _fe8 = st.columns(8)
+    _t10_be  = _fred_ext.get("t10_breakeven", 2.3)
+    _t5_be   = _fred_ext.get("t5_breakeven",  2.5)
+    _sofr    = _fred_ext.get("sofr",           5.3)
+    _rrp     = _fred_ext.get("rrp_bn",         300.0)
+    _jclaims = _fred_ext.get("jobless_claims", 220.0)
+    _hy_sp   = _fred_ext.get("hy_spread_bp",   340.0)
+    _ig_sp   = _fred_ext.get("ig_spread_bp",   100.0)
+    _fed_ass = _fred_ext.get("fed_assets_mn",  6_800_000.0)
+
+    _fe1.metric("10Y Breakeven", f"{_t10_be:.2f}%",
+                help="10-year inflation breakeven (T10YIE). Market's 10-year inflation expectation.")
+    _fe2.metric("5Y Breakeven",  f"{_t5_be:.2f}%",
+                help="5-year inflation breakeven (T5YIE). Near-term inflation expectation.")
+    _fe3.metric("SOFR",          f"{_sofr:.2f}%",
+                help="Secured Overnight Financing Rate — the benchmark short-term US dollar rate.")
+    _fe4.metric("ON RRP ($B)",   f"${_rrp:.0f}B",
+                help="Fed Overnight Reverse Repo facility — measures excess liquidity parked at the Fed.")
+    _fe5.metric("Jobless Claims", f"{_jclaims:.0f}K",
+                help="Initial jobless claims (ICSA). Rising = labor market weakening.")
+    _fe6.metric("HY Spread (bp)", f"{_hy_sp:.0f}",
+                help="US High Yield OAS spread (BAMLH0A0HYM2). Rising = credit stress, risk-off.")
+    _fe7.metric("IG Spread (bp)", f"{_ig_sp:.0f}",
+                help="US Investment Grade OAS spread (BAMLC0A0CM). Rising = credit tightening.")
+    _fed_ass_bn = _fed_ass / 1000.0   # convert millions → billions
+    _fe8.metric("Fed Assets ($B)", f"${_fed_ass_bn:,.0f}B",
+                help="Fed total balance sheet assets (WTREGEN). Rising = QE / liquidity injection.")
+
+    _credit_regime = _fred_ext.get("credit_regime", "NEUTRAL")
+    _cr_color = {"RISK_ON": "#34D399", "CAUTION": "#FBBF24", "RISK_OFF": "#EF4444", "NEUTRAL": "#9CA3AF"}.get(_credit_regime, "#9CA3AF")
+    st.markdown(
+        f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_cr_color}40;"
+        f"border-radius:6px;padding:8px 14px;font-size:12px;color:{_cr_color};margin-top:4px'>"
+        f"<b>Credit Regime:</b> {_credit_regime} "
+        f"&nbsp;·&nbsp; Source: <b>{_fred_ext.get('source','fallback')}</b>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+
+    # ── Fear & Greed — 30-Day Sparkline (#27) ─────────────────────────────────
+    st.markdown("#### Fear & Greed Index — 30-Day History")
+    st.caption("Crypto Fear & Greed Index (alternative.me) — daily value over the past 30 days. "
+               "0 = Extreme Fear (buy signal), 100 = Extreme Greed (sell signal).")
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _load_fg_history():
+        return _df.fetch_fear_greed_index(limit=30)
+
+    _fg_full = _load_fg_history()
+    _fg_history = _fg_full.get("history", [])
+    _fg_current = _fg_full.get("current", {})
+
+    if _fg_history:
+        # Reverse so oldest → newest (API returns newest first)
+        _fg_rev = list(reversed(_fg_history))
+        _fg_vals  = [h.get("value", 50) for h in _fg_rev]
+        _fg_dates = [h.get("date", "") for h in _fg_rev]
+
+        import plotly.graph_objects as go
+
+        # Colour each bar by F&G zone
+        def _fg_bar_color(v):
+            if v <= 20:  return "#8B5CF6"   # Extreme Fear — purple
+            if v <= 40:  return "#F97316"   # Fear — orange
+            if v <= 60:  return "#9CA3AF"   # Neutral — grey
+            if v <= 80:  return "#FBBF24"   # Greed — yellow
+            return "#34D399"                 # Extreme Greed — green
+
+        _bar_colors = [_fg_bar_color(v) for v in _fg_vals]
+
+        fig_fg = go.Figure(go.Bar(
+            x=_fg_dates,
+            y=_fg_vals,
+            marker_color=_bar_colors,
+            hovertemplate="<b>%{x}</b><br>F&G: %{y}<extra></extra>",
+        ))
+        fig_fg.add_hline(y=25, line_dash="dot", line_color="rgba(239,68,68,0.5)",
+                         annotation_text="Extreme Fear ≤25", annotation_font_size=10)
+        fig_fg.add_hline(y=75, line_dash="dot", line_color="rgba(52,211,153,0.5)",
+                         annotation_text="Extreme Greed ≥75", annotation_font_size=10)
+        fig_fg.update_layout(
+            height=220,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#e2e8f0"),
+            margin=dict(l=0, r=0, t=10, b=0),
+            yaxis=dict(range=[0, 100], gridcolor="rgba(255,255,255,0.07)", ticksuffix=""),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickangle=-45, tickfont=dict(size=9)),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_fg, use_container_width=True)
+        _fg_now_val = _fg_current.get("value", _fg_val)
+        _fg_now_lbl = _fg_current.get("label", _fg_lbl)
+        st.caption(
+            f"Current: **{_fg_now_val}/100** ({_fg_now_lbl}) · "
+            f"Signal: **{_fg_full.get('signal','NEUTRAL')}** · "
+            f"Source: {_fg_full.get('source','fallback')}"
+        )
+    else:
+        # Fallback: show single value card when no history
+        st.metric("Fear & Greed", f"{_fg_val}/100", delta=_fg_lbl)
+        st.caption("30-day history unavailable — requires alternative.me API connection.")
 
     st.markdown("---")
 

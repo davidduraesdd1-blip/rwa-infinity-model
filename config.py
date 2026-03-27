@@ -227,6 +227,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 10,
         "min_investment_usd": 5_000_000,
         "inception_date": "2024-03-20",
+        "redemption_window": "Monthly",
         "description": "BlackRock's tokenized money market fund backed by US Treasury bills. Institutional grade, $100+ billion AUM manager.",
         "tags": ["institutional", "treasury", "money-market", "accredited"],
     },
@@ -246,6 +247,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 10,
         "min_investment_usd": 0,
         "inception_date": "2021-04-04",
+        "redemption_window": "Daily",
         "description": "First US-registered fund to use public blockchain for transaction processing. US govt securities + overnight repos.",
         "tags": ["retail", "treasury", "money-market", "registered-fund"],
     },
@@ -284,6 +286,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 8,
         "min_investment_usd": 100_000,
         "inception_date": "2023-01-10",
+        "redemption_window": "T+1",
         "description": "24/7 T-bill yield vault with daily liquidity. Licensed in Singapore, backed by US short-duration Treasuries.",
         "tags": ["institutional", "treasury", "defi-native", "singapore"],
     },
@@ -303,6 +306,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 9,
         "min_investment_usd": 100_000,
         "inception_date": "2023-01-04",
+        "redemption_window": "Daily",
         "description": "Tokenized BlackRock iShares Short Treasury Bond ETF. $2.5B+ TVL (March 2026). Multi-chain, daily NAV updates, KYC required. Ondo Markets perps launched. ADGM regulatory approval.",
         "tags": ["institutional", "treasury", "multi-chain", "accredited"],
     },
@@ -360,6 +364,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 8,
         "min_investment_usd": 500,
         "inception_date": "2023-08-01",
+        "redemption_window": "24-48 hours",
         "description": "Tokenized note backed by US bank demand deposits and Treasuries. Transferable after 40-day lockup. ADGM approved. Multi-chain: Ethereum, Solana, Mantle, Aptos.",
         "tags": ["retail", "stablecoin", "treasury", "yield-bearing"],
     },
@@ -555,6 +560,7 @@ RWA_UNIVERSE = [
         "regulatory_score": 9,
         "min_investment_usd": 1_000,
         "inception_date": "2020-07-01",
+        "redemption_window": "Daily",
         "description": "SEC-registered digital fund combining US Treasuries with a small credit allocation. Daily NAV.",
         "tags": ["institutional", "treasury", "credit-blend", "registered-fund"],
     },
@@ -3474,6 +3480,91 @@ def get_asset_fee_bps(asset_id: str, category: str = "") -> int:
         asset_id,
         _CATEGORY_FEE_BPS_DEFAULT.get(category, 25)
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REDEMPTION WINDOW — human-readable liquidity label for each asset (#66)
+# Sources: published fund documents, issuer websites (March 2026).
+# ─────────────────────────────────────────────────────────────────────────────
+
+_REDEMPTION_WINDOW_MAP: dict = {
+    # Government Bonds / Money Market
+    "BUIDL":        "Monthly",
+    "BENJI":        "Daily",
+    "OUSG":         "Daily",
+    "USDY":         "24-48 hours",
+    "TBILL":        "T+1",
+    "USTB":         "T+1",
+    "USDM":         "Instant",    # rebasing stablecoin, DEX-liquid
+    "STBT":         "T+1",
+    "OMMF":         "T+1",
+    "MTBILL":       "T+1",
+    "MBASIS":       "T+1",
+    "USYC":         "T+1",
+    # Private Credit
+    "ARCA_DIGITAL": "Daily",
+    "MAPLE_USDC":   "30 days",
+    "MAPLE_HIGH_YIELD": "30 days",
+    "GFI_SENIOR":   "90 days",
+    "GFI_TRANCHED": "90 days",
+    "TRUEFI_SECURED": "30 days",
+    "CFG_TINLAKE":  "90 days",
+    # Commodities
+    "PAXG":         "Instant",
+    "XAUT":         "Instant",
+    # Tokenized Equities
+    "BACKED_CSPX":  "T+2",
+    "SWARM_TSLA":   "T+2",
+    "SWARM_AAPL":   "T+2",
+    # Liquid Staking
+    "EIGENLAYER":   "7 days",
+}
+
+# Category-level fallback windows
+_REDEMPTION_WINDOW_CATEGORY_DEFAULT: dict = {
+    "Government Bonds":   "T+1",
+    "Private Credit":     "30-90 days",
+    "Real Estate":        "30+ days",
+    "Commodities":        "Instant",
+    "Tokenized Equities": "T+2",
+    "Liquid Staking":     "7 days",
+    "DeFi Yield":         "Instant",
+    "PayFi":              "T+1",
+}
+
+
+def get_redemption_window(asset_id: str, category: str = "") -> str:
+    """Return a human-readable redemption window string for an asset.
+
+    Checks the static _REDEMPTION_WINDOW_MAP first, then looks for a
+    ``redemption_window`` field in the RWA_UNIVERSE config entry, then
+    falls back to ASSET_LIQUIDITY_META, then to a category default.
+    """
+    # Static map takes highest precedence
+    if asset_id in _REDEMPTION_WINDOW_MAP:
+        return _REDEMPTION_WINDOW_MAP[asset_id]
+
+    # RWA_UNIVERSE config entry (for assets with redemption_window field)
+    for asset in RWA_UNIVERSE:
+        if asset.get("id") == asset_id:
+            rw = asset.get("redemption_window")
+            if rw:
+                return str(rw)
+            break
+
+    # ASSET_LIQUIDITY_META — convert days to label
+    liq_meta = ASSET_LIQUIDITY_META.get(asset_id, {})
+    red_days = liq_meta.get("redemption_days")
+    if red_days is not None:
+        if red_days == 0:   return "Instant"
+        if red_days == 1:   return "T+1"
+        if red_days <= 2:   return "T+2"
+        if red_days <= 7:   return f"{red_days} days"
+        if red_days <= 30:  return "Monthly"
+        if red_days <= 90:  return "Quarterly"
+        return f"{red_days}+ days"
+
+    return _REDEMPTION_WINDOW_CATEGORY_DEFAULT.get(category, "—")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

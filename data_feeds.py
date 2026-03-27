@@ -1844,7 +1844,7 @@ def fetch_fear_greed_index(limit: int = 30) -> dict:
             "source":  "alternative.me",
         }
 
-    result = _cached_get("fear_greed_index", 900, _fetch)   # 15-min TTL
+    result = _cached_get("fear_greed_index", 3600, _fetch)   # 1-hour TTL (#27)
     if result is None:
         return {
             "current": {"value": 50, "label": "Neutral", "date": ""},
@@ -1985,6 +1985,8 @@ _FRED_EXTENDED_SERIES = {
     "rrp_bn":         "RRPONTSYD",        # Fed ON Reverse Repo (billions USD)
     # Labor / activity
     "jobless_claims": "ICSA",             # Initial jobless claims (thousands)
+    # Fed balance sheet total assets (weekly, millions USD — upgrade #29)
+    "fed_assets_mn":  "WTREGEN",          # Fed total assets — all reserve banks combined
 }
 
 _FRED_EXTENDED_FALLBACKS = {
@@ -1996,6 +1998,7 @@ _FRED_EXTENDED_FALLBACKS = {
     "sofr":            5.3,
     "rrp_bn":        300.0,
     "jobless_claims": 220.0,
+    "fed_assets_mn": 6_800_000.0,  # approx $6.8T in millions
 }
 
 
@@ -2084,6 +2087,111 @@ def fetch_fred_extended() -> dict:
         fb["timestamp"] = datetime.now(timezone.utc).isoformat()
         return fb
     return cached
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UPGRADE #56: NAV DISCOUNT/PREMIUM TRACKER
+# Compares secondary-market price (CoinGecko) against published NAV ($1.00 for
+# most tokenized T-bill / money-market funds) and returns premium/discount %.
+# Cache 15 minutes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# NAV benchmarks for key tokenized fund assets.
+# All of these are designed to maintain a $1.00 NAV; deviations indicate
+# secondary-market pricing pressure, liquidity risk, or depeg events.
+_NAV_BENCHMARKS = {
+    "BUIDL":  {"nav": 1.00, "coingecko_id": None,                          "source": "Securitize"},
+    "OUSG":   {"nav": 1.00, "coingecko_id": "ondo-us-dollar-yield",        "source": "Ondo Finance"},
+    "USDY":   {"nav": 1.00, "coingecko_id": "ondo-us-dollar-yield-token",  "source": "Ondo Finance"},
+    "BENJI":  {"nav": 1.00, "coingecko_id": None,                          "source": "Franklin Templeton"},
+    "TBILL":  {"nav": 1.00, "coingecko_id": "openeden-tbill",              "source": "OpenEden"},
+    "USDM":   {"nav": 1.00, "coingecko_id": "usdm",                        "source": "Mountain Protocol"},
+    "USTB":   {"nav": 1.00, "coingecko_id": "superstate-short-duration-us-government-securities-fund",
+                            "source": "Superstate"},
+    "STBT":   {"nav": 1.00, "coingecko_id": "stbt",                        "source": "Matrixdock"},
+    "ARCA":   {"nav": 1.00, "coingecko_id": None,                          "source": "Arca"},
+    "PAXG":   {"nav": None, "coingecko_id": "pax-gold",                    "source": "Paxos (gold spot)"},
+    "XAUT":   {"nav": None, "coingecko_id": "tether-gold",                 "source": "Tether (gold spot)"},
+}
+
+
+def fetch_nav_premiums() -> List[dict]:
+    """
+    Compute NAV discount/premium for tokenized fund assets.
+
+    For each tracked asset:
+      - Market price from CoinGecko (already cached by fetch_coingecko_prices)
+      - NAV from static config (always $1.00 for money-market / T-bill tokens)
+      - Premium % = (market_price - nav) / nav × 100
+
+    Returns list of dicts:
+        {"symbol": str, "market_price": float, "nav": float,
+         "premium_pct": float, "status": "PREMIUM"|"DISCOUNT"|"AT_PAR",
+         "source": str}
+
+    Cache 15 minutes.
+    """
+    def _fetch() -> List[dict]:
+        # Collect all CoinGecko IDs we need
+        cg_ids = [v["coingecko_id"] for v in _NAV_BENCHMARKS.values() if v.get("coingecko_id")]
+        prices = fetch_coingecko_prices(cg_ids) if cg_ids else {}
+
+        # Also pull gold spot to compute NAV for PAXG/XAUT
+        gold_price = fetch_gold_price()
+
+        results = []
+        for symbol, meta in _NAV_BENCHMARKS.items():
+            cg_id       = meta.get("coingecko_id")
+            nav_config  = meta["nav"]
+            src         = meta["source"]
+
+            # Resolve market price
+            if cg_id and cg_id in prices:
+                market_price = float(prices[cg_id].get("price_usd") or 0)
+            else:
+                market_price = 0.0
+
+            # Resolve NAV
+            if nav_config is not None:
+                nav = float(nav_config)
+            elif symbol in ("PAXG", "XAUT"):
+                nav = gold_price  # gold-backed: NAV = gold spot price
+            else:
+                nav = 1.0
+
+            # Skip if we have no market price
+            if market_price <= 0 or nav <= 0:
+                results.append({
+                    "symbol":       symbol,
+                    "market_price": market_price,
+                    "nav":          nav,
+                    "premium_pct":  0.0,
+                    "status":       "NO_DATA",
+                    "source":       src,
+                })
+                continue
+
+            premium_pct = round((market_price - nav) / nav * 100.0, 4)
+
+            if premium_pct > 0.1:
+                status = "PREMIUM"
+            elif premium_pct < -0.1:
+                status = "DISCOUNT"
+            else:
+                status = "AT_PAR"
+
+            results.append({
+                "symbol":       symbol,
+                "market_price": round(market_price, 6),
+                "nav":          round(nav, 6),
+                "premium_pct":  premium_pct,
+                "status":       status,
+                "source":       src,
+            })
+
+        return sorted(results, key=lambda x: abs(x["premium_pct"]), reverse=True)
+
+    return _cached_get("nav_premiums", 900, _fetch) or []   # 15-min TTL
 
 
 # ─────────────────────────────────────────────────────────────────────────────
