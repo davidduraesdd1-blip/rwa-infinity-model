@@ -2276,14 +2276,14 @@ def fetch_global_m2_composite() -> dict:
                     raise ValueError(f"FRED CSV returned HTTP {r.status_code}")
                 lines = r.text.strip().split("\n")[1:]  # skip header
                 obs = []
-                for line in reversed(lines[-6:]):
+                for line in lines[-6:]:
                     parts = line.split(",")
                     if len(parts) == 2 and parts[1].strip() not in ("", "."):
                         obs.append({"date": parts[0], "value": parts[1]})
 
             if len(obs) >= 2:
-                latest_val  = float(obs[0]["value"])
-                earlier_val = float(obs[-1]["value"])
+                latest_val  = float(obs[-1]["value"])
+                earlier_val = float(obs[0]["value"])
                 change_pct  = round((latest_val - earlier_val) / max(earlier_val, 1) * 100, 2)
                 global_est  = round(latest_val * 4.2, 0)  # US ≈ 24% of global M2
 
