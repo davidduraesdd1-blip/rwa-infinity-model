@@ -26,14 +26,22 @@ KAIKO_API_KEY           = _os.environ.get("RWA_KAIKO_API_KEY")           # kaiko
 COIN_METRICS_API_KEY    = _os.environ.get("RWA_COIN_METRICS_API_KEY")    # coinmetrics.io — network data
 
 # ── Block Explorers ──────────────────────────────────────────────────────────
-ETHERSCAN_API_KEY       = _os.environ.get("RWA_ETHERSCAN_API_KEY")       # etherscan.io
-POLYGONSCAN_API_KEY     = _os.environ.get("RWA_POLYGONSCAN_API_KEY")     # polygonscan.com
-ARBISCAN_API_KEY        = _os.environ.get("RWA_ARBISCAN_API_KEY")        # arbiscan.io — Arbitrum
-BSCSCAN_API_KEY         = _os.environ.get("RWA_BSCSCAN_API_KEY")         # bscscan.com — BNB Chain
-OPTIMISTIC_API_KEY      = _os.environ.get("RWA_OPTIMISTIC_API_KEY")      # optimistic.etherscan.io
-BASESCAN_API_KEY        = _os.environ.get("RWA_BASESCAN_API_KEY")        # basescan.org — Base
-SNOWTRACE_API_KEY       = _os.environ.get("RWA_SNOWTRACE_API_KEY")       # snowtrace.io — Avalanche
-SOLSCAN_API_KEY         = _os.environ.get("RWA_SOLSCAN_API_KEY")         # solscan.io — Solana
+# Etherscan API V2 unifies 60+ chains under one key.
+# All EVM chains (Ethereum, Polygon, Arbitrum, Base, BSC, Optimism, Avalanche)
+# use ETHERSCAN_API_KEY with a chainid parameter — no separate keys needed.
+ETHERSCAN_API_KEY       = _os.environ.get("RWA_ETHERSCAN_API_KEY")       # etherscan.io — covers ALL EVM chains via V2
+SOLSCAN_API_KEY         = _os.environ.get("RWA_SOLSCAN_API_KEY")         # solscan.io — Solana (separate, not EVM)
+
+# Etherscan V2 chain IDs (pass as chainid= parameter to ETHERSCAN_V2_BASE)
+ETHERSCAN_CHAIN_IDS = {
+    "ethereum":  1,
+    "polygon":   137,
+    "arbitrum":  42161,
+    "base":      8453,
+    "bsc":       56,
+    "optimism":  10,
+    "avalanche": 43114,
+}
 
 # ── Web3 Node Providers ──────────────────────────────────────────────────────
 ALCHEMY_API_KEY         = _os.environ.get("RWA_ALCHEMY_API_KEY")         # alchemy.com — Ethereum/Polygon/etc.
@@ -140,12 +148,7 @@ COINGECKO_BASE      = (
 )
 
 RWA_XYZ_BASE        = "https://app.rwa.xyz"          # scrape / public data
-ETHERSCAN_BASE      = "https://api.etherscan.io/api"
-POLYGONSCAN_BASE    = "https://api.polygonscan.com/api"
-ARBISCAN_BASE       = "https://api.arbiscan.io/api"
-BSCSCAN_BASE        = "https://api.bscscan.com/api"
-BASESCAN_BASE       = "https://api.basescan.org/api"
-SNOWTRACE_BASE      = "https://api.snowtrace.io/api"
+ETHERSCAN_V2_BASE   = "https://api.etherscan.io/v2/api"   # unified V2 — add ?chainid=N for any EVM chain
 
 # CEX Public Market Data (read-only, no auth needed for prices)
 BINANCE_BASE        = "https://api.binance.us/api/v3"

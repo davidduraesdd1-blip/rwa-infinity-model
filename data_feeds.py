@@ -4035,27 +4035,35 @@ _ERC4626_VAULTS: dict = {
     "WSTETH": {"address": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", "chain": "ethereum", "decimals": 18},
 }
 
-_ETHERSCAN_RPC = "https://api.etherscan.io/api"
+_ETHERSCAN_RPC = "https://api.etherscan.io/v2/api"  # V2 unified — supports all EVM chains via chainid param
 
 _ERC4626_CACHE: dict = {}
 _ERC4626_LOCK  = threading.Lock()
 _ERC4626_TTL   = 300  # 5 min
 
 
-def _etherscan_call(contract: str, data: str) -> Optional[str]:
-    """Call eth_call via Etherscan proxy (no web3 needed)."""
+def _etherscan_call(contract: str, data: str, chain_id: int = 1) -> Optional[str]:
+    """Call eth_call via Etherscan V2 proxy (no web3 needed).
+
+    Args:
+        contract: target contract address (0x...)
+        data:     4-byte function selector (e.g. '0x99530b06')
+        chain_id: Etherscan V2 chain ID (1=Ethereum, 137=Polygon, 42161=Arbitrum,
+                  8453=Base, 56=BSC, 10=Optimism, 43114=Avalanche). Default: 1.
+    """
     key = ETHERSCAN_API_KEY or ""
     params = {
+        "chainid": chain_id,
         "module": "proxy", "action": "eth_call",
         "to": contract, "data": data,
         "tag": "latest", "apikey": key,
     }
     try:
-        r = _get("https://api.etherscan.io/api", params=params, timeout=8)
+        r = _get(_ETHERSCAN_RPC, params=params, timeout=8)
         if r and isinstance(r, dict):
             return r.get("result", "")
     except Exception as e:
-        logger.debug("[ERC4626] eth_call failed: %s", e)
+        logger.debug("[ERC4626] eth_call failed (chain=%s): %s", chain_id, e)
     return None
 
 
