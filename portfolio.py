@@ -1520,3 +1520,167 @@ def compute_factor_tilted_portfolio(
         "rationale":           rationale,
         "n_assets":            n,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FACTOR-BASED PORTFOLIO OPTIMIZATION  (#114)
+# Minimizes distance between portfolio factor vector and a target factor vector
+# using scipy.optimize.minimize (L-BFGS-B).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Per-category factor exposure matrix
+# Factors: duration_risk, credit_risk, inflation, liquidity, crypto_beta
+_CATEGORY_FACTOR_EXPOSURES: Dict[str, Dict[str, float]] = {
+    "Government Bonds":     {"duration_risk": 0.1,  "credit_risk": 0.0,  "inflation": -0.2, "liquidity": 1.0,  "crypto_beta": 0.0},
+    "Government Bonds (Long)": {"duration_risk": 0.8, "credit_risk": 0.1, "inflation": -0.5, "liquidity": 0.7, "crypto_beta": 0.0},
+    "Private Credit":       {"duration_risk": 0.3,  "credit_risk": 0.7,  "inflation": 0.1,  "liquidity": 0.2,  "crypto_beta": 0.0},
+    "Real Estate":          {"duration_risk": 0.4,  "credit_risk": 0.3,  "inflation": 0.4,  "liquidity": 0.3,  "crypto_beta": 0.0},
+    "Precious Metals":      {"duration_risk": 0.0,  "credit_risk": 0.0,  "inflation": 0.8,  "liquidity": 0.8,  "crypto_beta": 0.2},
+    "Commodities":          {"duration_risk": 0.0,  "credit_risk": 0.0,  "inflation": 0.8,  "liquidity": 0.7,  "crypto_beta": 0.1},
+    "Stablecoins":          {"duration_risk": 0.0,  "credit_risk": 0.1,  "inflation": -0.1, "liquidity": 1.0,  "crypto_beta": 0.0},
+    "Yield Stablecoin":     {"duration_risk": 0.1,  "credit_risk": 0.1,  "inflation": -0.1, "liquidity": 0.9,  "crypto_beta": 0.0},
+    "Tokenized Equities":   {"duration_risk": 0.3,  "credit_risk": 0.2,  "inflation": 0.3,  "liquidity": 0.7,  "crypto_beta": 0.3},
+    "Equities":             {"duration_risk": 0.3,  "credit_risk": 0.2,  "inflation": 0.3,  "liquidity": 0.7,  "crypto_beta": 0.3},
+    "DeFi Yield":           {"duration_risk": 0.0,  "credit_risk": 0.0,  "inflation": 0.2,  "liquidity": 0.6,  "crypto_beta": 1.0},
+    "Yield Derivatives":    {"duration_risk": 0.2,  "credit_risk": 0.1,  "inflation": 0.1,  "liquidity": 0.5,  "crypto_beta": 0.5},
+    "Trade Finance":        {"duration_risk": 0.2,  "credit_risk": 0.5,  "inflation": 0.2,  "liquidity": 0.4,  "crypto_beta": 0.0},
+    "Infrastructure":       {"duration_risk": 0.5,  "credit_risk": 0.3,  "inflation": 0.5,  "liquidity": 0.3,  "crypto_beta": 0.0},
+    "Carbon Credits":       {"duration_risk": 0.0,  "credit_risk": 0.1,  "inflation": 0.3,  "liquidity": 0.5,  "crypto_beta": 0.1},
+    # Default fallback
+    "_default":             {"duration_risk": 0.2,  "credit_risk": 0.2,  "inflation": 0.1,  "liquidity": 0.5,  "crypto_beta": 0.1},
+}
+
+# Default RISK_ON target factor weights
+_DEFAULT_TARGET_FACTOR_WEIGHTS: Dict[str, float] = {
+    "duration_risk": 0.2,
+    "credit_risk":   0.3,
+    "inflation":     0.2,
+    "liquidity":     0.2,
+    "crypto_beta":   0.1,
+}
+
+_FACTOR_NAMES = ["duration_risk", "credit_risk", "inflation", "liquidity", "crypto_beta"]
+
+
+def _get_asset_factor_exposure(asset: dict) -> Dict[str, float]:
+    """Return factor exposure vector for a single asset based on its category."""
+    category = asset.get("category", "")
+    # Try exact match, then partial match, then default
+    if category in _CATEGORY_FACTOR_EXPOSURES:
+        return _CATEGORY_FACTOR_EXPOSURES[category]
+    for key in _CATEGORY_FACTOR_EXPOSURES:
+        if key != "_default" and key.lower() in category.lower():
+            return _CATEGORY_FACTOR_EXPOSURES[key]
+    return _CATEGORY_FACTOR_EXPOSURES["_default"]
+
+
+def optimize_factor_portfolio(
+    assets: list,
+    factor_exposures: dict = None,
+    target_factor_weights: dict = None,
+) -> dict:
+    """
+    Factor-based portfolio optimization using macro factor exposures.
+
+    Minimizes the L2 distance between the portfolio's factor vector and
+    a target factor vector (default: RISK_ON) using scipy.optimize.minimize
+    with L-BFGS-B and weight sum = 1 constraint.
+
+    Factors: duration_risk, credit_risk, inflation, liquidity, crypto_beta
+
+    Args:
+        assets: list of asset dicts (same format as RWA_UNIVERSE / holdings)
+        factor_exposures: optional per-asset override {asset_id: {factor: value}}
+        target_factor_weights: optional override for target factors
+
+    Returns:
+        weights (dict), factor_exposures (dict), factor_distance (float),
+        improvement_vs_equal_weight (float), target_factors (dict),
+        portfolio_factors (dict), n_assets (int), source (str)
+    """
+    if not assets:
+        return {"error": "No assets provided", "weights": {}, "factor_distance": 0.0}
+
+    target = target_factor_weights or _DEFAULT_TARGET_FACTOR_WEIGHTS
+    n = len(assets)
+    ids = [a.get("id", f"asset_{i}") for i, a in enumerate(assets)]
+
+    # Build factor exposure matrix (n × num_factors)
+    F = np.zeros((n, len(_FACTOR_NAMES)))
+    for i, asset in enumerate(assets):
+        asset_id = asset.get("id", "")
+        if factor_exposures and asset_id in factor_exposures:
+            row = factor_exposures[asset_id]
+        else:
+            row = _get_asset_factor_exposure(asset)
+        for j, fname in enumerate(_FACTOR_NAMES):
+            F[i, j] = row.get(fname, 0.0)
+
+    # Target vector
+    target_vec = np.array([target.get(f, 0.0) for f in _FACTOR_NAMES])
+
+    # Objective: minimize L2 distance between portfolio factor vector and target
+    def objective(w):
+        portfolio_factors = F.T @ w  # (num_factors,)
+        diff = portfolio_factors - target_vec
+        return float(np.dot(diff, diff))
+
+    # L-BFGS-B handles box constraints (bounds) but not equality constraints.
+    # We post-normalize the weights to ensure sum = 1.
+    bounds = [(0.0, 1.0)] * n
+    w0 = np.ones(n) / n  # equal weight start
+
+    result_obj = None
+    try:
+        from scipy.optimize import minimize
+        opt_result = minimize(
+            objective,
+            w0,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxiter": 5000, "ftol": 1e-12},
+        )
+        # Normalize so weights sum to 1 (L-BFGS-B does not enforce sum = 1 directly)
+        w_opt = np.clip(opt_result.x, 0.0, 1.0)
+        w_sum = w_opt.sum()
+        if w_sum > 0:
+            w_opt = w_opt / w_sum
+        else:
+            w_opt = w0
+        result_obj = opt_result
+        source = "scipy_lbfgsb"
+    except Exception as e:
+        logger.warning("[FactorOpt] scipy minimize failed: %s — using equal weight", e)
+        w_opt = w0.copy()
+        source = "equal_weight_fallback"
+
+    # Compute final factor vector and distance
+    pf_factors = F.T @ w_opt
+    factor_dist = float(np.sqrt(np.dot(pf_factors - target_vec, pf_factors - target_vec)))
+
+    # Equal-weight benchmark distance
+    pf_eq = F.T @ w0
+    eq_dist = float(np.sqrt(np.dot(pf_eq - target_vec, pf_eq - target_vec)))
+    improvement = round((eq_dist - factor_dist) / max(eq_dist, 1e-8) * 100, 2)
+
+    weights_dict = {ids[i]: round(float(w_opt[i]) * 100, 2) for i in range(n)}
+    pf_factor_dict = {_FACTOR_NAMES[j]: round(float(pf_factors[j]), 4) for j in range(len(_FACTOR_NAMES))}
+    target_dict = {f: round(target.get(f, 0.0), 4) for f in _FACTOR_NAMES}
+
+    # Per-asset factor exposures dict
+    asset_factor_dict = {}
+    for i, asset_id in enumerate(ids):
+        asset_factor_dict[asset_id] = {_FACTOR_NAMES[j]: round(float(F[i, j]), 4) for j in range(len(_FACTOR_NAMES))}
+
+    return {
+        "weights":                    weights_dict,
+        "factor_exposures":           asset_factor_dict,
+        "portfolio_factors":          pf_factor_dict,
+        "target_factors":             target_dict,
+        "factor_distance":            round(factor_dist, 6),
+        "equal_weight_distance":      round(eq_dist, 6),
+        "improvement_vs_equal_weight": improvement,
+        "n_assets":                   n,
+        "source":                     source,
+        "optimizer_success":          bool(result_obj and result_obj.success) if result_obj else False,
+    }

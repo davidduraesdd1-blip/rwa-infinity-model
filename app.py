@@ -1131,15 +1131,24 @@ with tab_portfolio:
 
     st.markdown("<div style='margin:12px 0'></div>", unsafe_allow_html=True)
 
-    # ── RWA Market Context (#94) ────────────────────────────────────────────────
-    # On-chain RWA TVL vs the $360B TAM and BCG $16T 2030 projection
+    # ── RWA Market Context (#94 / #101) ─────────────────────────────────────────
+    # On-chain RWA TVL via fetch_rwaxyz_tvl() (DeFiLlama RWA proxy)
+    # Falls back to get_total_rwa_tvl() then RWA_ONCHAIN_USD config baseline
     _OFF_CHAIN_TAM_B  = RWA_TAM_USD / 1e9          # $360B
     _BCG_2030_T       = RWA_MILESTONES["target_2030"] / 1e12   # $16T
     _ONCHAIN_FALLBACK = RWA_ONCHAIN_USD / 1e9       # $15B fallback
     try:
-        _rwa_tvl = _df.get_total_rwa_tvl() if not _demo_mode else 18_400_000_000
+        if _demo_mode:
+            _rwa_tvl = 18_400_000_000
+            _rwaxyz_data = None
+        else:
+            _rwaxyz_data = _df.fetch_rwaxyz_tvl()
+            _rwa_tvl = _rwaxyz_data.get("total_rwa_tvl", 0) or 0
+            if _rwa_tvl == 0:
+                _rwa_tvl = _df.get_total_rwa_tvl()
     except Exception:
         _rwa_tvl = 0.0
+        _rwaxyz_data = None
     _rwa_tvl_b = (_rwa_tvl / 1e9) if _rwa_tvl > 0 else _ONCHAIN_FALLBACK
     if _rwa_tvl_b > 0:
         _pen_pct       = round(_rwa_tvl_b / _OFF_CHAIN_TAM_B * 100, 2)
@@ -1179,7 +1188,7 @@ with tab_portfolio:
                         </div>
                     </div>
                     <div style="font-size:10px;color:#374151;text-align:right;min-width:80px">
-                        Source:<br>DeFiLlama RWA<br>BCG/RWA.xyz 2025
+                        Source:<br>DeFiLlama RWA<br>BCG/RWA.xyz 2026
                     </div>
                 </div>
             </div>""",
@@ -2710,6 +2719,87 @@ with tab_ai:
 
             if _fopt.get("rationale"):
                 st.caption(f"Factor rationale: {_fopt['rationale']}")
+
+    # ── Macro Factor Portfolio Optimizer (#114 Batch 7) ──────────────────────────
+    if _pro_mode:
+        st.markdown('<div class="section-header">Factor Portfolio Optimizer (Pro)</div>', unsafe_allow_html=True)
+
+        with st.expander("🎯 Optimize Portfolio by Macro Factors (L-BFGS-B)", expanded=False):
+            from portfolio import optimize_factor_portfolio as _ofp
+
+            @st.cache_data(ttl=300, show_spinner=False)
+            def _load_factor_opt_b7(tier_key: int, val: int):
+                _port = _load_portfolio(tier_key, val)
+                _holds = _port.get("holdings", []) if _port else []
+                if not _holds:
+                    return {"error": "No holdings"}
+                return _ofp(_holds)
+
+            if st.button("Optimize Portfolio by Macro Factors", key="btn_factor_opt_b7"):
+                _load_factor_opt_b7.clear()
+
+            with st.spinner("Running factor optimizer (L-BFGS-B)…"):
+                _b7opt = _load_factor_opt_b7(selected_tier, portfolio_value)
+
+            if _b7opt.get("error"):
+                st.caption(f"Factor optimizer: {_b7opt['error']}")
+            else:
+                _b7a, _b7b, _b7c, _b7d = st.columns(4)
+                _b7a.metric("Factor Distance", f"{_b7opt.get('factor_distance', 0):.4f}")
+                _b7b.metric("EW Benchmark Dist", f"{_b7opt.get('equal_weight_distance', 0):.4f}")
+                _b7c.metric("Improvement vs EW", f"{_b7opt.get('improvement_vs_equal_weight', 0):.1f}%")
+                _b7d.metric("Assets Optimized", str(_b7opt.get("n_assets", 0)))
+
+                # Comparison table: optimized vs equal-weight
+                _b7_weights = _b7opt.get("weights", {})
+                _port_for_cmp = _load_portfolio(selected_tier, portfolio_value)
+                _cur_holdings = _port_for_cmp.get("holdings", []) if _port_for_cmp else []
+                _cur_w = {h.get("id"): h.get("weight_pct", 0) for h in _cur_holdings}
+                n_assets = _b7opt.get("n_assets", 0)
+                _eq_w = round(100.0 / n_assets, 2) if n_assets > 0 else 0.0
+
+                if _b7_weights:
+                    st.markdown("**Optimized Weights vs Current Portfolio**")
+                    _b7_rows = []
+                    for asset_id, opt_w in sorted(_b7_weights.items(), key=lambda x: -x[1]):
+                        cur_w = _cur_w.get(asset_id, _eq_w)
+                        delta = opt_w - cur_w
+                        _b7_rows.append({
+                            "Asset": asset_id,
+                            "Current Weight %": f"{cur_w:.1f}%",
+                            "Optimized Weight %": f"{opt_w:.1f}%",
+                            "Delta": f"{delta:+.1f}%",
+                            "Direction": "▲ Overweight" if delta > 1 else ("▼ Underweight" if delta < -1 else "— Neutral"),
+                        })
+                    if _b7_rows:
+                        st.dataframe(pd.DataFrame(_b7_rows), use_container_width=True, hide_index=True)
+
+                # Factor exposure bar chart
+                _pf_factors = _b7opt.get("portfolio_factors", {})
+                _tgt_factors = _b7opt.get("target_factors", {})
+                if _pf_factors and _tgt_factors:
+                    import plotly.graph_objects as _go_b7
+                    from plotly.subplots import make_subplots as _ms_b7
+                    _f_names  = list(_pf_factors.keys())
+                    _f_port   = [_pf_factors.get(f, 0) for f in _f_names]
+                    _f_target = [_tgt_factors.get(f, 0) for f in _f_names]
+                    _fig_f = _go_b7.Figure()
+                    _fig_f.add_trace(_go_b7.Bar(name="Portfolio", x=_f_names, y=_f_port,
+                                                 marker_color="#00D4FF"))
+                    _fig_f.add_trace(_go_b7.Bar(name="Target (RISK_ON)", x=_f_names, y=_f_target,
+                                                 marker_color="#34D399"))
+                    _fig_f.update_layout(
+                        title="Factor Exposure: Portfolio vs Target",
+                        barmode="group",
+                        height=320,
+                        plot_bgcolor="#0A0E1A",
+                        paper_bgcolor="#0A0E1A",
+                        font_color="#E2E8F0",
+                        legend=dict(orientation="h", y=1.1),
+                    )
+                    st.plotly_chart(_fig_f, use_container_width=True)
+
+                st.caption(f"Optimizer: {_b7opt.get('source', '—')} · Scipy L-BFGS-B minimizes factor vector distance to RISK_ON target")
 
     # ── XRPL Intelligence + Tier 3 Status (Upgrades 10, 11, 12) ─────────────────
     st.markdown('<div class="section-header">XRPL Intelligence</div>', unsafe_allow_html=True)
@@ -4315,6 +4405,62 @@ with tab_onchain:
   <div style="font-size:11px;color:#6b7280;margin-top:6px">XLS-33d MPT objects on ledger</div>
 </div>
 """, unsafe_allow_html=True)
+
+    # ── XRPL Basic Data (#97) — XRP price + RLUSD supply via fetch_xrpl_data() ─
+    st.markdown("---")
+    st.markdown("#### 🌐 XRPL Basic Integration (#97)")
+    st.caption("XRP price via CoinGecko · RLUSD supply via XRPL cluster / xrpl-py · Cached 15 min")
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _load_xrpl_basic():
+        return _df.fetch_xrpl_data()
+
+    if st.button("⟳ Refresh XRPL Basic", key="btn_xrpl_basic"):
+        _load_xrpl_basic.clear()
+
+    with st.spinner("Fetching XRPL data…"):
+        _xrpl_basic = _load_xrpl_basic()
+
+    _xb_xrp   = _xrpl_basic.get("xrp_price_usd", 0)
+    _xb_rlusd = _xrpl_basic.get("rlusd_supply", 0)
+    _xb_avail = _xrpl_basic.get("xrpl_available", False)
+    _xb_src   = _xrpl_basic.get("source", "—")
+    _xb_ts    = (_xrpl_basic.get("timestamp") or "")[:19]
+
+    _xb_c1, _xb_c2, _xb_c3 = st.columns(3)
+    with _xb_c1:
+        _xrp_clr = "#10b981" if _xb_xrp > 0 else "#6b7280"
+        _xrp_fmt = f"${_xb_xrp:.4f}" if _xb_xrp else "—"
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_xrp_clr};border-radius:10px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">XRP Price (USD)</div>
+  <div style="font-size:24px;font-weight:700;color:{_xrp_clr}">{_xrp_fmt}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">Source: CoinGecko</div>
+</div>
+""", unsafe_allow_html=True)
+    with _xb_c2:
+        _rlusd_s = (f"${_xb_rlusd/1e9:.2f}B" if _xb_rlusd and _xb_rlusd >= 1e9
+                    else f"${_xb_rlusd/1e6:.1f}M" if _xb_rlusd and _xb_rlusd >= 1e6
+                    else f"${_xb_rlusd:,.0f}" if _xb_rlusd else "—")
+        _rlusd_clr = "#3b82f6" if _xb_rlusd and _xb_rlusd > 0 else "#6b7280"
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_rlusd_clr};border-radius:10px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Supply</div>
+  <div style="font-size:24px;font-weight:700;color:{_rlusd_clr}">{_rlusd_s}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">XRPL ledger issuance</div>
+</div>
+""", unsafe_allow_html=True)
+    with _xb_c3:
+        _lib_clr  = "#10b981" if _xb_avail else "#6b7280"
+        _lib_lbl  = "xrpl-py installed" if _xb_avail else "xrpl-py not installed"
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_lib_clr};border-radius:10px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">xrpl-py Status</div>
+  <div style="font-size:16px;font-weight:700;color:{_lib_clr}">{_lib_lbl}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">Source: {_xb_src}</div>
+</div>
+""", unsafe_allow_html=True)
+    st.caption(f"Source: {_xb_src} · {_xb_ts} UTC · pip install xrpl-py>=2.4.0 for direct ledger reads")
 
     # ─── Chainlink Reference Price Feeds (#108 + #109) ───────────────────────
     st.markdown("---")

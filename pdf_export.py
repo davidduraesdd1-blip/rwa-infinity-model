@@ -2,6 +2,12 @@
 pdf_export.py — RWA Infinity Model v1.0
 Portfolio and arbitrage PDF report generation using ReportLab.
 Returns raw PDF bytes for Streamlit st.download_button().
+
+Batch 7 enhancements (#116):
+  - Cover page with app title, date/time, portfolio value, macro regime badge
+  - Summary statistics table (weighted yield, Sharpe, health score, risk tiers)
+  - Top-3 holdings by weight
+  - Appendix: data sources listing
 """
 
 import io
@@ -90,6 +96,159 @@ def _fmt(val, prefix="", suffix="", decimals=2, fallback="N/A"):
         return fallback
 
 
+# ─── Cover Page & Summary Helpers (Batch 7 #116) ────────────────────────────
+
+def _build_cover_page(story, styles, tier_name: str, portfolio: dict, macro_data: dict | None) -> None:
+    """Add a professional cover page to the story list."""
+    if not _REPORTLAB:
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    pv = portfolio.get("portfolio_value_usd", 0)
+    pv_fmt = f"${pv:,.0f}" if pv else "N/A"
+    regime = "N/A"
+    if macro_data:
+        regime = macro_data.get("macro_regime", "N/A")
+
+    # Regime badge color
+    regime_colors = {
+        "RISK_ON": "#34D399", "RISK_OFF": "#EF4444",
+        "STAGFLATION": "#F59E0B", "NEUTRAL": "#6B7280",
+    }
+    regime_color_hex = regime_colors.get(regime, "#6B7280")
+
+    cover_data = [
+        ["", ""],
+        ["App", "RWA Infinity Model"],
+        ["Report Type", "Portfolio Report"],
+        ["Tier", tier_name],
+        ["Generated", ts],
+        ["Portfolio Value", pv_fmt],
+        ["Macro Regime", regime],
+        ["", ""],
+    ]
+    cover_tbl = Table(cover_data, colWidths=[5 * cm, 14 * cm])
+
+    _regime_color = colors.HexColor(regime_color_hex)
+    cover_style = TableStyle([
+        ("BACKGROUND",   (0, 0), (-1, 0), colors.HexColor("#0A0E1A")),
+        ("BACKGROUND",   (0, -1), (-1, -1), colors.HexColor("#0A0E1A")),
+        ("TEXTCOLOR",    (0, 1), (0, -2), GREY),
+        ("TEXTCOLOR",    (1, 1), (1, -3), colors.HexColor("#E2E8F0")),
+        ("TEXTCOLOR",    (1, 6), (1, 6), _regime_color),  # regime value row
+        ("FONTNAME",     (0, 0), (-1, -1), "Helvetica"),
+        ("FONTNAME",     (0, 1), (0, -2), "Helvetica-Bold"),
+        ("FONTSIZE",     (0, 0), (-1, -1), 11),
+        ("FONTSIZE",     (1, 1), (1, 1), 18),   # App name larger
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.HexColor("#111827"), colors.HexColor("#0D1117")]),
+        ("TOPPADDING",   (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 12),
+        ("GRID",         (0, 1), (-1, -2), 0.3, colors.HexColor("#1F2937")),
+    ])
+    cover_tbl.setStyle(cover_style)
+
+    story.append(Spacer(1, 40))
+    story.append(Paragraph("RWA Infinity Model", styles["title"]))
+    story.append(Paragraph("Portfolio Intelligence Report", styles["subtitle"]))
+    story.append(HRFlowable(width="100%", thickness=2, color=CYAN, spaceAfter=24))
+    story.append(cover_tbl)
+    story.append(Spacer(1, 30))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=GREY, spaceAfter=16))
+
+
+def _build_summary_stats(story, styles, portfolio: dict, metrics: dict) -> None:
+    """Add summary statistics table: weighted yield, Sharpe, health, risk tiers, top-3."""
+    if not _REPORTLAB:
+        return
+
+    story.append(Paragraph("Summary Statistics", styles["section"]))
+
+    holdings = portfolio.get("holdings", [])
+
+    # Weighted average yield
+    w_yield = metrics.get("weighted_yield_pct")
+    sharpe  = metrics.get("sharpe_ratio")
+    health  = portfolio.get("health_score") or portfolio.get("score")
+    n_hold  = len(holdings)
+
+    # Count by risk tier
+    risk_tiers = {"Low (1-3)": 0, "Medium (4-6)": 0, "High (7-10)": 0}
+    for h in holdings:
+        r = h.get("risk_score") or 5
+        if r <= 3:
+            risk_tiers["Low (1-3)"] += 1
+        elif r <= 6:
+            risk_tiers["Medium (4-6)"] += 1
+        else:
+            risk_tiers["High (7-10)"] += 1
+
+    summary_rows = [
+        ["Metric", "Value"],
+        ["Weighted Avg Yield",  _fmt(w_yield, suffix="%", decimals=2)],
+        ["Sharpe Ratio",        _fmt(sharpe, decimals=3)],
+        ["Portfolio Health",    _fmt(health, decimals=1) if health else "N/A"],
+        ["Total Holdings",      str(n_hold)],
+        ["Low Risk Assets",     str(risk_tiers["Low (1-3)"])],
+        ["Medium Risk Assets",  str(risk_tiers["Medium (4-6)"])],
+        ["High Risk Assets",    str(risk_tiers["High (7-10)"])],
+    ]
+    tbl = Table(summary_rows, colWidths=[7 * cm, 5 * cm])
+    tbl.setStyle(_table_style(len(summary_rows)))
+    story.append(tbl)
+    story.append(Spacer(1, 12))
+
+    # Top 3 holdings by weight
+    if holdings:
+        top3 = sorted(holdings, key=lambda h: h.get("weight_pct", 0), reverse=True)[:3]
+        story.append(Paragraph("Top 3 Holdings by Weight", styles["section"]))
+        top3_rows = [["Rank", "Asset", "Category", "Weight %", "Yield %"]]
+        for i, h in enumerate(top3, 1):
+            top3_rows.append([
+                str(i),
+                (h.get("name") or h.get("id") or "?")[:30],
+                (h.get("category") or "?")[:20],
+                _fmt(h.get("weight_pct"), suffix="%", decimals=1),
+                _fmt(h.get("current_yield_pct"), suffix="%", decimals=2),
+            ])
+        tbl3 = Table(top3_rows, colWidths=[1.5 * cm, 8 * cm, 5 * cm, 3 * cm, 3 * cm])
+        tbl3.setStyle(_table_style(len(top3_rows)))
+        story.append(tbl3)
+        story.append(Spacer(1, 10))
+
+
+def _build_appendix(story, styles) -> None:
+    """Add data sources appendix."""
+    if not _REPORTLAB:
+        return
+
+    story.append(Paragraph("Appendix: Data Sources", styles["section"]))
+
+    sources = [
+        ["Source", "URL / Description", "Data Used"],
+        ["DeFiLlama",       "api.llama.fi",              "Protocol TVL, RWA yields, pool APY"],
+        ["CoinGecko",       "api.coingecko.com",         "Token prices, market caps, supply"],
+        ["FRED (St. Louis Fed)", "api.stlouisfed.org",  "Treasury yields, macro indicators, M2"],
+        ["Etherscan V2",    "api.etherscan.io/v2",       "ERC-4626 vault reads, ERC-3643 compliance"],
+        ["Binance",         "api.binance.us",            "Spot prices, perpetual funding rates"],
+        ["Alternative.me",  "api.alternative.me",        "Fear & Greed Index"],
+        ["XRPL Cluster",    "xrplcluster.com",           "RLUSD supply, XRPL on-chain data"],
+        ["Chainlink",       "etherscan eth_call",        "On-chain price reference feeds"],
+        ["CoinMarketCap",   "pro-api.coinmarketcap.com", "Global crypto market cap, dominance"],
+        ["yfinance",        "Yahoo Finance",             "CME futures, global equity ETFs"],
+        ["Wormhole Scan",   "api.wormholescan.io",       "Cross-chain RWA VAA tracking"],
+    ]
+    tbl = Table(sources, colWidths=[5 * cm, 5 * cm, 11 * cm])
+    tbl.setStyle(_table_style(len(sources)))
+    story.append(tbl)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        "All data is fetched in real-time with 5-60 minute caching. "
+        "API keys enhance rate limits but are not required for core functionality. "
+        "RWA.xyz TVL data is proxied through DeFiLlama (no public REST API available).",
+        styles["body"],
+    ))
+
+
 # ─── Portfolio Report ──────────────────────────────────────────────────────────
 
 def generate_portfolio_pdf(
@@ -124,12 +283,18 @@ def generate_portfolio_pdf(
     story  = []
     ts     = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+    # ── Cover Page (Batch 7 #116) ──
+    _build_cover_page(story, styles, tier_name, portfolio, macro_data)
+
     # ── Title ──
     story.append(Paragraph(f"RWA Infinity Model — {tier_name}", styles["title"]))
     story.append(Paragraph(f"Portfolio Report  |  Generated: {ts}", styles["subtitle"]))
     story.append(HRFlowable(width="100%", thickness=1, color=CYAN, spaceAfter=10))
 
     metrics = portfolio.get("metrics", {})
+
+    # ── Summary Statistics (Batch 7 #116) ──
+    _build_summary_stats(story, styles, portfolio, metrics)
 
     # ── Portfolio Metrics Summary ──
     story.append(Paragraph("Portfolio Metrics", styles["section"]))
@@ -252,6 +417,9 @@ def generate_portfolio_pdf(
                 styles["footer"],
             ))
             story.append(Spacer(1, 10))
+
+    # ── Appendix: Data Sources (Batch 7 #116) ──
+    _build_appendix(story, styles)
 
     # ── Footer ──
     story.append(Spacer(1, 20))

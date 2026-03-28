@@ -4625,6 +4625,10 @@ ALLOWED_DOMAINS: frozenset = frozenset({
     "min-api.cryptocompare.com",     # CryptoCompare — Chainlink fallback
     # Batch 5
     "fapi.binance.com",              # Binance Futures perpetual funding / OI (#54)
+    # Batch 7
+    "xrplcluster.com",               # XRPL mainnet public cluster (#97)
+    "eth.llamarpc.com",              # Public Ethereum RPC — no key needed (#103)
+    "mainnet.infura.io",             # Infura Ethereum RPC (#103)
 })
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4641,4 +4645,30 @@ RWA_MILESTONES = {
     "2024": 10_000_000_000,       # $10B milestone
     "target_2025": 30_000_000_000,
     "target_2030": 16_000_000_000_000,  # BCG projection: $16T by 2030
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ERC-4626 VAULT ADDRESSES  (#103 Batch 7)
+# Known ERC-4626 tokenized vault contract addresses.
+# These are exported so app.py and other modules can reference them directly.
+# ─────────────────────────────────────────────────────────────────────────────
+ERC4626_VAULTS = {
+    "BUIDL": {
+        "address":  "0x7712c34205737192402172409a8F7ccef8aA2AEc",
+        "chain_id": 1,
+        "decimals": 6,
+        "name":     "BlackRock USD Institutional Digital Liquidity Fund",
+    },
+    "OUSG":  {
+        "address":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
+        "chain_id": 1,
+        "decimals": 18,
+        "name":     "Ondo Short-Term US Government Bond Fund",
+    },
+    "BENJI": {
+        "address":  "0xc7CB1dE2721BFC0816b421A959a8d6bf8e2F4972",
+        "chain_id": 1,
+        "decimals": 6,
+        "name":     "Franklin OnChain US Government Money Fund",
+    },
 }

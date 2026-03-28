@@ -13,7 +13,9 @@ httpx>=0.27.0
 openpyxl>=3.1.0
 reportlab>=4.0.0
 # ── Tier 3 optional integrations (graceful fallback if not installed) ─────────
-# xrpl-py, x402, coinbase-agentkit intentionally excluded from Streamlit Cloud
-# requirements — all three are imported with try/except ImportError guards in
-# ai_agent.py and data_feeds.py; features degrade gracefully when unavailable.
+# xrpl-py, web3, x402, coinbase-agentkit intentionally excluded from Streamlit
+# Cloud requirements — all three are imported with try/except ImportError guards
+# in ai_agent.py and data_feeds.py; features degrade gracefully when unavailable.
+# To enable XRPL direct reads:  pip install xrpl>=2.4.0
+# To enable ERC-4626 web3 reads: pip install web3>=6.0.0
 yfinance>=0.2.40

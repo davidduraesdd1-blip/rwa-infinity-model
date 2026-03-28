@@ -1141,6 +1141,122 @@ def get_total_rwa_tvl() -> float:
     return sum(p.get("tvl", 0) or 0 for p in protocols)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# RWA.xyz TVL  (#101) — Authoritative RWA TVL via DeFiLlama (RWA category)
+# RWA.xyz has no public REST API; DeFiLlama is the authoritative proxy.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Known RWA protocol slugs on DeFiLlama (as of 2026)
+_RWA_PROTOCOL_SLUGS = {
+    "blackrock-buidl", "ondo-finance", "franklin-benji", "superstate",
+    "maple-finance", "centrifuge", "goldfinch", "clearpool",
+    "backed-finance", "wisdomtree-prime", "openeden", "matrixdock-stbt",
+    "hashnote", "mountain-protocol", "spiko", "credix", "truefi",
+}
+
+# Name fragments to match for RWA protocols (case-insensitive)
+_RWA_NAME_FRAGMENTS = [
+    "blackrock", "ondo", "franklin", "superstate", "maple", "centrifuge",
+    "goldfinch", "clearpool", "backed", "wisdomtree", "openeden",
+    "matrixdock", "hashnote", "mountain", "spiko",
+]
+
+_RWAXYZ_ISSUER_MAP = {
+    "blackrock":    "BlackRock (BUIDL)",
+    "ondo":         "Ondo Finance (OUSG/USDY)",
+    "franklin":     "Franklin Templeton (BENJI)",
+    "superstate":   "Superstate (USTB)",
+    "maple":        "Maple Finance",
+    "centrifuge":   "Centrifuge",
+    "goldfinch":    "Goldfinch",
+    "clearpool":    "Clearpool",
+    "backed":       "Backed Finance",
+    "wisdomtree":   "WisdomTree",
+    "openeden":     "OpenEden (TBILL)",
+    "matrixdock":   "Matrixdock (STBT)",
+    "hashnote":     "Hashnote (USYC)",
+    "mountain":     "Mountain Protocol (USDM)",
+    "spiko":        "Spiko",
+}
+
+
+def fetch_rwaxyz_tvl() -> dict:
+    """Fetch authoritative RWA TVL by issuer from DeFiLlama (RWA.xyz proxy).
+
+    RWA.xyz does not expose a public REST API; this function uses DeFiLlama
+    /protocols endpoint filtered to the RWA category and known RWA protocol
+    slugs/names to produce a per-issuer TVL breakdown.
+
+    Cached 15 minutes.
+
+    Returns:
+        total_rwa_tvl (float), by_issuer (dict), top_issuer (str),
+        protocol_count (int), timestamp (str), source (str)
+    """
+    def _fetch():
+        protocols = _get(f"{DEFILLAMA_BASE}/protocols")
+        if not protocols:
+            return None
+
+        by_issuer: Dict[str, float] = {}
+        total = 0.0
+
+        for p in protocols:
+            category = (p.get("category") or "").lower()
+            name     = (p.get("name") or "").lower()
+            slug     = (p.get("slug") or "").lower()
+            tvl      = float(p.get("tvl") or 0)
+
+            if tvl <= 0:
+                continue
+
+            is_rwa = (
+                category == "rwa"
+                or slug in _RWA_PROTOCOL_SLUGS
+                or any(frag in name or frag in slug for frag in _RWA_NAME_FRAGMENTS)
+            )
+            if not is_rwa:
+                continue
+
+            total += tvl
+
+            # Map to issuer label
+            issuer_label = None
+            for frag, label in _RWAXYZ_ISSUER_MAP.items():
+                if frag in name or frag in slug:
+                    issuer_label = label
+                    break
+            if issuer_label is None:
+                issuer_label = p.get("name", "Other")
+
+            by_issuer[issuer_label] = by_issuer.get(issuer_label, 0) + tvl
+
+        # Sort by TVL descending
+        by_issuer = dict(sorted(by_issuer.items(), key=lambda x: -x[1]))
+        top_issuer = next(iter(by_issuer), "N/A") if by_issuer else "N/A"
+
+        return {
+            "total_rwa_tvl":   round(total, 2),
+            "by_issuer":       {k: round(v, 2) for k, v in by_issuer.items()},
+            "top_issuer":      top_issuer,
+            "protocol_count":  len(by_issuer),
+            "timestamp":       datetime.now(timezone.utc).isoformat(),
+            "source":          "defillama_rwa_filter",
+        }
+
+    result = _cached_get("rwaxyz_tvl", 900, _fetch)  # 15-min cache
+    if result is None:
+        return {
+            "total_rwa_tvl": 0.0,
+            "by_issuer":     {},
+            "top_issuer":    "N/A",
+            "protocol_count": 0,
+            "timestamp":     datetime.now(timezone.utc).isoformat(),
+            "source":        "unavailable",
+        }
+    return result
+
+
 def get_market_summary() -> dict:
     """Return a high-level market summary dict including macro intelligence."""
     protocols   = fetch_defillama_protocols()
@@ -5058,6 +5174,110 @@ def fetch_xrpl_mpt_data() -> dict:
 
     with _XRPL_MPT_LOCK:
         _XRPL_MPT_CACHE["mpt_data"] = {**result, "_ts": time.time()}
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XRPL BASIC INTEGRATION  (#97) — RLUSD supply, XRP price, basic XRPL stats
+# Graceful fallback to CoinGecko when xrpl-py is not installed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from xrpl.clients import JsonRpcClient as _XrplJsonRpcClient  # type: ignore
+    _XRPL_AVAILABLE = True
+except ImportError:
+    _XRPL_AVAILABLE = False
+
+_XRPL_DATA_CACHE: dict = {}
+_XRPL_DATA_LOCK  = threading.Lock()
+_XRPL_DATA_TTL   = 900  # 15 min
+
+
+def fetch_xrpl_data() -> dict:
+    """Fetch basic XRPL data: RLUSD supply, XRP price, top token flows.
+
+    If xrpl-py is installed, connects directly to XRPL mainnet public cluster.
+    Otherwise falls back to CoinGecko for XRP price and the existing
+    fetch_xrpl_rlusd() for RLUSD supply.
+
+    Returns:
+        xrp_price_usd (float), rlusd_supply (float),
+        xrpl_available (bool), source (str), timestamp (str)
+    """
+    with _XRPL_DATA_LOCK:
+        cached = _XRPL_DATA_CACHE.get("xrpl_basic")
+        if cached and (time.time() - cached.get("_ts", 0)) < _XRPL_DATA_TTL:
+            return {k: v for k, v in cached.items() if k != "_ts"}
+
+    result: dict = {
+        "xrp_price_usd": 0.0,
+        "rlusd_supply":  0.0,
+        "xrpl_available": _XRPL_AVAILABLE,
+        "source":         "unavailable",
+        "timestamp":      datetime.now(timezone.utc).isoformat(),
+    }
+
+    # ── Try xrpl-py direct connection ────────────────────────────────────────
+    if _XRPL_AVAILABLE:
+        try:
+            from xrpl.clients import JsonRpcClient as _JRC  # type: ignore
+            from xrpl.models.requests import AccountInfo, GatewayBalances  # type: ignore
+
+            client = _JRC("https://xrplcluster.com")
+
+            # Fetch RLUSD supply via gateway_balances
+            gb_req = GatewayBalances(account=XRPL_RLUSD_ISSUER, strict=True)
+            gb_resp = client.request(gb_req)
+            if gb_resp.is_successful():
+                obligations = gb_resp.result.get("obligations", {})
+                rlusd_hex = "524C555344000000000000000000000000000000"
+                raw = obligations.get(rlusd_hex) or obligations.get("RLUSD")
+                if raw:
+                    result["rlusd_supply"] = round(float(raw), 2)
+            result["source"] = "xrpl-py"
+        except Exception as e:
+            logger.debug("[XRPL #97] xrpl-py direct call failed: %s", e)
+
+    # ── CoinGecko fallback for XRP price + RLUSD supply ───────────────────────
+    try:
+        _COINGECKO_LIMITER.acquire()
+        cg_ids = "ripple"
+        if result.get("rlusd_supply", 0) == 0.0:
+            cg_ids += ",ripple-usd"
+        params = {"ids": cg_ids, "vs_currencies": "usd", "include_24hr_change": "true"}
+        cg_resp = _session.get(f"{COINGECKO_BASE}/simple/price", params=params, timeout=10)
+        if cg_resp.status_code == 200:
+            cg_data = cg_resp.json()
+            xrp_data = cg_data.get("ripple", {})
+            if xrp_data:
+                result["xrp_price_usd"] = round(float(xrp_data.get("usd", 0)), 6)
+            # RLUSD supply from CoinGecko circulating supply if not from xrpl-py
+            if result["rlusd_supply"] == 0.0:
+                rlusd_data = cg_data.get("ripple-usd", {})
+                # Circulating supply not in simple/price; fall back to existing fetch
+                pass
+        if result["source"] == "unavailable":
+            result["source"] = "coingecko"
+    except Exception as e:
+        logger.debug("[XRPL #97] CoinGecko fallback failed: %s", e)
+
+    # ── Fallback: use existing fetch_xrpl_rlusd() for RLUSD supply ───────────
+    if result["rlusd_supply"] == 0.0:
+        try:
+            rlusd_d = fetch_xrpl_rlusd()
+            if not rlusd_d.get("error"):
+                supply = rlusd_d.get("xrpl_supply") or rlusd_d.get("circulating_supply")
+                if supply:
+                    result["rlusd_supply"] = round(float(supply), 2)
+                if result["source"] == "unavailable":
+                    result["source"] = rlusd_d.get("source", "xrpl_rlusd_fallback")
+        except Exception as e:
+            logger.debug("[XRPL #97] fetch_xrpl_rlusd fallback failed: %s", e)
+
+    result["timestamp"] = datetime.now(timezone.utc).isoformat()
+    with _XRPL_DATA_LOCK:
+        _XRPL_DATA_CACHE["xrpl_basic"] = {**result, "_ts": time.time()}
 
     return result
 
