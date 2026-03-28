@@ -4793,7 +4793,7 @@ with tab_onchain:
 
         _ERC7540_VAULTS = {
             "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
-            "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbe39B",
+            "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
         }
 
         _rq_cols = st.columns(len(_ERC7540_VAULTS))
