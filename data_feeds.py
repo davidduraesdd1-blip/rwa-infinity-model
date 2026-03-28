@@ -1210,7 +1210,8 @@ def fetch_rwaxyz_tvl() -> dict:
         protocol_count (int), timestamp (str), source (str)
     """
     def _fetch():
-        protocols = _get(f"{DEFILLAMA_BASE}/protocols")
+        # OPT-8: reuse cached fetch_defillama_protocols() instead of a raw HTTP call
+        protocols = fetch_defillama_protocols()
         if not protocols:
             return None
 
@@ -1330,7 +1331,17 @@ def _dune_get(query_id: int) -> Optional[dict]:
     """
     Execute a Dune Analytics query and return results.
     Requires DUNE_API_KEY in environment. Returns None gracefully if unavailable.
+    OPT-15: raises RuntimeError if called from the Streamlit render (main) thread
+    because the 30s polling loop blocks the UI event loop.
     """
+    import threading
+    if threading.current_thread() is threading.main_thread():
+        raise RuntimeError(
+            "_dune_get() must NOT be called from the Streamlit render thread — "
+            "it polls for up to 30 s and will block the UI. "
+            "Wrap the caller in a ThreadPoolExecutor or background task."
+        )
+
     if not DUNE_API_KEY:
         logger.debug("[Dune] No API key — skipping query %s", query_id)
         return None
@@ -1891,23 +1902,36 @@ def _parse_rss(xml_text: str, source_name: str) -> List[dict]:
 
 
 def fetch_live_rss_news() -> List[dict]:
-    """Fetch real-time RWA news from all RSS sources."""
+    """Fetch real-time RWA news from all RSS sources.
+    OPT-3: parallel fetches via ThreadPoolExecutor (was sequential loop).
+    """
+    def _fetch_one(src: dict) -> List[dict]:
+        try:
+            resp = _session.get(
+                src["url"], timeout=8,
+                headers={"Accept": "application/rss+xml,application/xml,text/xml,*/*"},
+            )
+            if resp.status_code == 200:
+                items = _parse_rss(resp.text, src["name"])
+                logger.debug("[RSS] %s: %d relevant items", src["name"], len(items))
+                return items
+        except Exception as e:
+            logger.debug("[RSS] %s failed: %s", src["name"], e)
+        return []
+
     def _fetch():
         all_items: List[dict] = []
-        for src in _RSS_FEED_SOURCES:
-            try:
-                resp = _session.get(
-                    src["url"], timeout=8,
-                    headers={"Accept": "application/rss+xml,application/xml,text/xml,*/*"},
-                )
-                if resp.status_code == 200:
-                    items = _parse_rss(resp.text, src["name"])
-                    all_items.extend(items)
-                    logger.debug("[RSS] %s: %d relevant items", src["name"], len(items))
-            except Exception as e:
-                logger.debug("[RSS] %s failed: %s", src["name"], e)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=5) as _ex:
+            _futs = {_ex.submit(_fetch_one, src): src for src in _RSS_FEED_SOURCES}
+            for _fut in as_completed(_futs):
+                try:
+                    all_items.extend(_fut.result())
+                except Exception:
+                    pass
         all_items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         return all_items[:40]
+
     return _cached_get("live_rss_news", 900, _fetch) or []   # 15-min TTL
 
 
@@ -2472,6 +2496,7 @@ def fetch_macro_timeseries(days: int = 90) -> Dict[str, Any]:
 
     Keys: BTC, VIX, Gold, SPX, DXY, Oil — each maps to a dict of {date_str: price}.
     Returns {} if yfinance not installed.  Cached 30 min.
+    OPT-4: parallel yfinance calls via ThreadPoolExecutor (was sequential loop).
     """
     def _fetch():
         try:
@@ -2486,17 +2511,32 @@ def fetch_macro_timeseries(days: int = 90) -> Dict[str, Any]:
             "DXY":  "DX-Y.NYB",
             "Oil":  "CL=F",
         }
-        result: Dict[str, Any] = {}
-        for key, symbol in _SYMBOLS.items():
+
+        def _fetch_one(key_sym):
+            key, symbol = key_sym
             try:
                 hist = yf.Ticker(symbol).history(period=f"{days}d")
                 if not hist.empty:
-                    result[key] = {
+                    return key, {
                         str(dt)[:10]: round(float(v), 4)
                         for dt, v in hist["Close"].items()
                     }
             except Exception as e:
                 logger.debug("[MacroTS] %s failed: %s", symbol, e)
+            return key, None
+
+        result: Dict[str, Any] = {}
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=6) as _ex:
+            _futs = {_ex.submit(_fetch_one, item): item for item in _SYMBOLS.items()}
+            for _fut in as_completed(_futs):
+                try:
+                    key, data = _fut.result()
+                    if data is not None:
+                        result[key] = data
+                except Exception:
+                    pass
+
         result["_days"]      = days
         result["_timestamp"] = datetime.now(timezone.utc).isoformat()
         return result
@@ -3317,7 +3357,7 @@ def compute_rsi(closes: List[float], period: int = 14) -> float:
     return 100.0 - (100.0 / (1.0 + rs))
 
 
-def compute_screener_signals(symbol: str) -> Dict[str, Any]:
+def compute_screener_signals(symbol: str, btc_bars: Optional[List[dict]] = None) -> Dict[str, Any]:
     """Compute multi-timeframe signals + on-chain data for a single Binance symbol.
 
     Returns a dict with: price, 24h change, RSI-14, EMA 20/50/200 stack,
@@ -3326,6 +3366,8 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
 
     Weights — Crypto: 1H 10% · 4H 20% · 1D 35% · 1W 35%.
     TTL: 5 min.  Upgrade 6 + 8.
+    OPT-2: parallel OHLCV fetches via ThreadPoolExecutor.
+    OPT-9: optional btc_bars parameter to avoid re-fetching BTCUSDT bars per symbol.
     """
     with _screener_lock:
         cached = _screener_cache.get(symbol)
@@ -3349,11 +3391,30 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
     }
 
     try:
-        # ── Fetch OHLCV across all timeframes ─────────────────────────────────
-        bars_1h = fetch_binance_ohlcv(symbol, "1h",   60)
-        bars_4h = fetch_binance_ohlcv(symbol, "4h",   60)
-        bars_1d = fetch_binance_ohlcv(symbol, "1d",  220)
-        bars_1w = fetch_binance_ohlcv(symbol, "1w",   60)
+        # ── OPT-2: Fetch OHLCV across all timeframes in parallel ──────────────
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _ac
+        _tf_specs = [
+            ("1h",   60),
+            ("4h",   60),
+            ("1d",  220),
+            ("1w",   60),
+        ]
+        _tf_map: Dict[str, List[dict]] = {}
+        with ThreadPoolExecutor(max_workers=4) as _ex:
+            _futs = {
+                _ex.submit(fetch_binance_ohlcv, symbol, tf, limit): tf
+                for tf, limit in _tf_specs
+            }
+            for _fut in _ac(_futs):
+                _tf = _futs[_fut]
+                try:
+                    _tf_map[_tf] = _fut.result()
+                except Exception:
+                    _tf_map[_tf] = []
+        bars_1h = _tf_map.get("1h", [])
+        bars_4h = _tf_map.get("4h", [])
+        bars_1d = _tf_map.get("1d", [])
+        bars_1w = _tf_map.get("1w", [])
 
         # ── Price + 24h change (from daily bars) ──────────────────────────────
         if len(bars_1d) >= 2:
@@ -3395,10 +3456,12 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
                 result["volume_anomaly"] = vols_1d[-1] / avg_vol if avg_vol > 0 else 1.0
 
         # ── BTC 30-day return correlation ─────────────────────────────────────
+        # OPT-9: use pre-fetched btc_bars when provided to avoid redundant HTTP call
         if symbol == "BTCUSDT":
             result["btc_corr_30d"] = 1.0
         else:
-            btc_bars = fetch_binance_ohlcv("BTCUSDT", "1d", 35)
+            if btc_bars is None:
+                btc_bars = fetch_binance_ohlcv("BTCUSDT", "1d", 35)
             if len(btc_bars) >= 32 and len(bars_1d) >= 32:
                 sym_rets = [
                     bars_1d[-(31 - i)]["c"] / bars_1d[-(32 - i)]["c"] - 1.0
@@ -3701,7 +3764,8 @@ def fetch_crypto_onchain_signals() -> dict:
     try:
         bybit_funding = fetch_binance_funding_rates(["BTCUSDT", "ETHUSDT"])
         bybit_oi      = fetch_binance_open_interest(["BTCUSDT", "ETHUSDT"])
-        bybit_prices  = fetch_coingecko_prices()
+        # OPT-10: fetch only BTC + ETH prices instead of all 100+ CoinGecko coins
+        bybit_prices  = fetch_coingecko_prices(ids=["bitcoin", "ethereum"])
 
         btc_price = float(bybit_prices.get("bitcoin", {}).get("price_usd", 0) or 0)
         eth_price = float(bybit_prices.get("ethereum", {}).get("price_usd", 0) or 0)

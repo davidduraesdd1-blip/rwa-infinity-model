@@ -40,12 +40,11 @@ from config import (
 logger = logging.getLogger(__name__)
 
 # ─── Optional imports (graceful fallback) ────────────────────────────────────
-try:
-    from langgraph.graph import StateGraph, END
-    _LANGGRAPH = True
-except ImportError:
-    _LANGGRAPH = False
-    logger.info("[Agent] langgraph not installed — using sequential pipeline")
+# OPT-16: langgraph, coinbase_agentkit, and x402 are imported lazily inside
+# the functions that use them. The bool flags below are set via lightweight
+# importlib.util.find_spec() checks — no heavy module code is executed here.
+
+import importlib.util as _ilu
 
 try:
     import anthropic as _anthropic
@@ -54,29 +53,23 @@ except ImportError:
     _ANTHROPIC = False
     logger.warning("[Agent] anthropic SDK not installed — AI analysis disabled")
 
-# ── Coinbase AgentKit (Upgrade 11 — optional) ────────────────────────────────
-try:
-    from coinbase_agentkit import (
-        CdpApiActionProvider,
-        CdpWalletActionProvider,
-        AgentKit,
-        AgentKitConfig,
-        CdpWalletProvider,
-        CdpWalletProviderConfig,
-    )
-    _AGENTKIT = True
+# ── langgraph: presence check only — actual import deferred to _build_graph() ─
+_LANGGRAPH: bool = _ilu.find_spec("langgraph") is not None
+if not _LANGGRAPH:
+    logger.info("[Agent] langgraph not installed — using sequential pipeline")
+
+# ── coinbase_agentkit: presence check — import deferred to _build_agentkit() ──
+_AGENTKIT: bool = _ilu.find_spec("coinbase_agentkit") is not None
+if _AGENTKIT:
     logger.info("[Agent] Coinbase AgentKit available")
-except ImportError:
-    _AGENTKIT = False
+else:
     logger.info("[Agent] coinbase-agentkit not installed — AgentKit execution disabled")
 
-# ── x402 payment client (Upgrade 10 — optional) ──────────────────────────────
-try:
-    import x402  # noqa: F401 — presence-check only; we use httpx directly
-    _X402 = True
+# ── x402: presence check — import deferred to pay_x402_service() ─────────────
+_X402: bool = _ilu.find_spec("x402") is not None
+if _X402:
     logger.info("[Agent] x402 payment protocol available")
-except ImportError:
-    _X402 = False
+else:
     logger.info("[Agent] x402 not installed — micropayment rail disabled")
 
 
@@ -552,6 +545,15 @@ def _build_agentkit() -> Optional[Any]:
             )
             return None
         try:
+            # OPT-16: lazy import — coinbase_agentkit only loaded when first needed
+            from coinbase_agentkit import (  # noqa: F811
+                CdpApiActionProvider,
+                CdpWalletActionProvider,
+                AgentKit,
+                AgentKitConfig,
+                CdpWalletProvider,
+                CdpWalletProviderConfig,
+            )
             wallet_provider = CdpWalletProvider(CdpWalletProviderConfig(
                 api_key_id     = CDP_API_KEY_ID,
                 api_key_secret = CDP_API_KEY_SECRET,
@@ -614,6 +616,7 @@ def pay_x402_service(url: str, max_usdc_cents: int = 1) -> Optional[dict]:
         logger.debug("[x402] x402 package not installed — skipping payment rail")
         return None
     try:
+        import x402  # noqa: F401  OPT-16: lazy import, executed only when _X402 is True
         import httpx
         with httpx.Client(timeout=15) as client:
             resp = client.get(url)
@@ -641,12 +644,11 @@ def pay_x402_service(url: str, max_usdc_cents: int = 1) -> Optional[dict]:
 # TIER 3 — MOONPAY OPEN WALLET STANDARD  (Upgrade 11 supplement)
 # ─────────────────────────────────────────────────────────────────────────────
 
-try:
-    import moonpay  # noqa: F401 — presence-check only
-    _MOONPAY = True
+# OPT-16 pattern: presence check via find_spec, lazy import deferred to usage site
+_MOONPAY: bool = _ilu.find_spec("moonpay") is not None
+if _MOONPAY:
     logger.info("[Agent] MoonPay OWS SDK available")
-except ImportError:
-    _MOONPAY = False
+else:
     logger.info("[Agent] moonpay SDK not installed — MoonPay OWS disabled")
 
 
@@ -945,6 +947,9 @@ def _build_graph():
     """Build the LangGraph state machine for the agent pipeline."""
     if not _LANGGRAPH:
         return None
+
+    # OPT-16: lazy import — only loaded when actually building the graph
+    from langgraph.graph import StateGraph, END  # noqa: F811
 
     g = StateGraph(AgentState)
     g.add_node("load_state",       _node_load_state)

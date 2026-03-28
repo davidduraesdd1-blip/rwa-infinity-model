@@ -465,11 +465,10 @@ def _load_macro_regime() -> dict:
     except Exception:
         return {}
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=90, show_spinner=False)
 def _load_market_summary():
     """Fetch market summary with a hard 6-second timeout to keep the UI responsive.
-    The TTL is short (30 s) so stale/empty results are retried quickly once the
-    background scheduler has warmed the API caches."""
+    TTL raised to 90s (OPT-13): market summary changes slowly, 30s was wasteful."""
     import concurrent.futures
     try:
         from data_feeds import get_market_summary
@@ -491,6 +490,172 @@ def _load_all_portfolios(value):
     except Exception as e:
         logger.error("build_all_portfolios failed: %s", e)
         return {}, pd.DataFrame()
+
+
+# ─── OPT-1: Module-level loaders (moved from inside tab blocks to prevent
+#     Streamlit from re-registering a new cache entry on every render cycle) ────
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_nav_premiums():
+    return _df.fetch_nav_premiums()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_chainlink_prices():
+    """OPT-13: TTL raised to 300s (was 60s inside tab_universe)."""
+    return {pair: _df.fetch_chainlink_price(pair) for pair in ["XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD"]}
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_xrpl_dex_arb():
+    return _df.fetch_xrpl_dex_arb()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_factor_bias():
+    from data_feeds import get_macro_factor_allocation_bias
+    return get_macro_factor_allocation_bias()
+
+@st.cache_data(ttl=180, show_spinner=False)
+def _load_factor_opt(tier_key: int, val: int):
+    from portfolio import compute_factor_tilted_portfolio
+    from data_feeds import get_macro_factor_allocation_bias
+    _port  = _load_portfolio(tier_key, val)
+    _holds = _port.get("holdings", []) if _port else []
+    _fb    = get_macro_factor_allocation_bias()
+    return compute_factor_tilted_portfolio(_holds, _fb, val)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_factor_opt_b7(tier_key: int, val: int):
+    from portfolio import optimize_factor_portfolio as _ofp
+    _port  = _load_portfolio(tier_key, val)
+    _holds = _port.get("holdings", []) if _port else []
+    if not _holds:
+        return {"error": "No holdings"}
+    return _ofp(_holds)
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_xrpl_stats():
+    from data_feeds import fetch_xrpl_stats
+    return fetch_xrpl_stats()
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_macro_snapshot():
+    fred  = _df.fetch_macro_indicators()
+    yf_m  = _df.fetch_yfinance_macro()
+    return fred, yf_m
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_macro_ts(days: int):
+    return _df.fetch_macro_timeseries(days)
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_fred_extended():
+    return _df.fetch_fred_extended()
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_fg_history():
+    return _df.fetch_fear_greed_index(limit=30)
+
+@st.cache_data(ttl=21600, show_spinner=False)   # 6-hour TTL (monthly data)
+def _load_global_m2():
+    return _df.fetch_global_m2_composite()
+
+@st.cache_data(ttl=86400, show_spinner=False)   # daily TTL
+def _load_pi_cycle():
+    return _df.fetch_pi_cycle_indicator()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_stable():
+    return _df.fetch_stablecoin_supply()
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_hmm_regime():
+    try:
+        return _df.fetch_hmm_macro_regime()
+    except Exception:
+        return None
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_onchain_signals():
+    try:
+        return _df.fetch_crypto_onchain_signals()
+    except Exception:
+        return {}
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_protocol_fees():
+    try:
+        return _df.fetch_protocol_fees()
+    except Exception:
+        return {}
+
+# OPT-5: Cache get_private_credit_warnings (was called uncached in tab_portfolio)
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_private_credit_warnings():
+    from data_feeds import get_private_credit_warnings
+    return get_private_credit_warnings()
+
+# OPT-6: Cache treasury/duration/liquidity calls (was called uncached in tab_portfolio)
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_treasury_yield_curve():
+    from data_feeds import fetch_treasury_yield_curve
+    return fetch_treasury_yield_curve()
+
+# Note: calculate_portfolio_duration and calculate_portfolio_liquidity are
+# pure-Python computations with no I/O, so they are not cached separately.
+# OPT-6 caches fetch_treasury_yield_curve() (the only I/O in that section).
+
+# OPT-7: Cache On-Chain tab fetches (was called uncached each render)
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_coinmetrics_onchain(days: int = 400):
+    return _df.fetch_coinmetrics_onchain(days=days)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_coinalyze_funding():
+    return _df.fetch_coinalyze_funding()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_xrpl_rlusd():
+    return _df.fetch_xrpl_rlusd()
+
+# On-chain tab — additional loaders (OPT-1)
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_xrpl_basic():
+    return _df.fetch_xrpl_data()
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cl_prices():
+    pairs = ["XAU/USD", "EUR/USD", "BTC/USD", "ETH/USD", "LINK/USD"]
+    return _df.fetch_multicall3_prices(pairs)
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _vault_data():
+    return {sym: _df.fetch_erc4626_vault_data(sym)
+            for sym in ["BUIDL", "OUSG", "USDY", "WSTETH"]}
+
+@st.cache_data(ttl=180, show_spinner=False)
+def _redeem_data():
+    return {sym: _df.fetch_erc7540_redemption_depth(sym)
+            for sym in ["BUIDL", "OUSG"]}
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_erc7540_queue(addr: str) -> dict:
+    return _df.fetch_erc7540_redemption_queue(addr)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _compliance_check(wallet: str):
+    _ERC3643_ADDRS = {
+        "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
+        "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
+    }
+    return {sym: _df.fetch_erc3643_compliance(addr, wallet)
+            for sym, addr in _ERC3643_ADDRS.items()}
+
+@st.cache_data(ttl=180, show_spinner=False)
+def _zerion_portfolio(wallet: str):
+    return _df.fetch_zerion_portfolio(wallet)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _wh_vaas(chain_id: int):
+    return _df.fetch_wormhole_rwa_vaa(emitter_chain_id=chain_id, page_size=15)
 
 
 # ─── UPGRADE 21: Cached chart builders ────────────────────────────────────────
@@ -637,6 +802,41 @@ def _build_tier_comparison_bar(comp_records: list, tier_colors: dict):
         margin=dict(l=40, r=20, t=20, b=40),
         height=350,
     )
+    return fig
+
+
+# OPT-14: Cached Plotly yield bar chart builder
+@st.cache_data(ttl=300, show_spinner=False)
+def _build_yield_bar(holdings_records: tuple, avg_yield_pct: float):
+    """Top Holdings by Yield bar chart. Takes a tuple of (name, yield, category, weight) rows."""
+    import plotly.graph_objects as _go14
+    names  = [r[0] for r in holdings_records]
+    yields = [r[1] for r in holdings_records]
+    cats   = [r[2] for r in holdings_records]
+    wts    = [r[3] for r in holdings_records]
+    colors = [CATEGORY_COLORS.get(c, "#6366f1") for c in cats]
+    fig = _go14.Figure(_go14.Bar(
+        x=names,
+        y=yields,
+        marker_color=colors,
+        text=[f"{v:.1f}%" for v in yields],
+        textposition="outside",
+        customdata=list(zip(cats, wts)),
+        hovertemplate="<b>%{x}</b><br>Yield: %{y:.2f}%<br>Category: %{customdata[0]}<br>Weight: %{customdata[1]:.1f}%<extra></extra>",
+    ))
+    fig.update_layout(
+        paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+        font_color="#E2E8F0",
+        margin=dict(l=40, r=20, t=30, b=80),
+        height=280,
+        xaxis=dict(gridcolor="#1F2937", tickangle=-35, tickfont=dict(size=10)),
+        yaxis=dict(gridcolor="#1F2937", ticksuffix="%"),
+        showlegend=False,
+    )
+    fig.add_hline(y=avg_yield_pct, line_dash="dash",
+                  line_color="#A78BFA", opacity=0.7,
+                  annotation_text=f"Portfolio avg {avg_yield_pct:.1f}%",
+                  annotation_font_color="#A78BFA", annotation_font_size=10)
     return fig
 
 
@@ -907,27 +1107,29 @@ if not _pro_mode:
 # ─────────────────────────────────────────────────────────────────────────────
 
 from data_feeds import compute_screener_signals as _compute_screener_signals
+from data_feeds import fetch_binance_ohlcv as _fetch_binance_ohlcv
 
 _SCR_SYMS  = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_screener_signals():
-    return {sym: _compute_screener_signals(sym) for sym in _SCR_SYMS}
+    # OPT-9: pre-fetch BTC daily bars once and pass to each symbol to avoid
+    # 3 redundant BTCUSDT HTTP calls (one per non-BTC symbol).
+    _btc_bars = _fetch_binance_ohlcv("BTCUSDT", "1d", 35)
+    return {sym: _compute_screener_signals(sym, btc_bars=_btc_bars) for sym in _SCR_SYMS}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# UPGRADE 15: Session-state guard for all-portfolios to avoid redundant rebuilds
-# within the same render cycle across multiple tabs.
+# OPT-12: Module-level portfolio cache — avoids storing large dicts in
+# st.session_state (which causes serialization overhead on every rerun).
+# _load_all_portfolios is already @st.cache_data(ttl=300) so calling it here
+# is a cache lookup only; the heavy rebuild only runs when the TTL expires.
+# Keep only lightweight scalars (ts, value key) in session_state.
 # ─────────────────────────────────────────────────────────────────────────────
-_port_now = time.time()
-if ("portfolio_data" not in st.session_state
-        or _port_now - st.session_state.get("portfolio_ts", 0) > 60
-        or st.session_state.get("portfolio_value_key") != portfolio_value):
-    _all_ports, _comp_df = _load_all_portfolios(portfolio_value)
-    st.session_state["portfolio_data"]      = _all_ports
-    st.session_state["portfolio_comp_df"]   = _comp_df
-    st.session_state["portfolio_ts"]        = _port_now
-    st.session_state["portfolio_value_key"] = portfolio_value
+_all_ports, _comp_df = _load_all_portfolios(portfolio_value)
+# Lightweight session_state markers so other components can detect staleness
+st.session_state["portfolio_ts"]        = time.time()
+st.session_state["portfolio_value_key"] = portfolio_value
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1292,37 +1494,21 @@ with tab_portfolio:
         st.dataframe(styled, use_container_width=True, height=min(400, 55 + 35 * len(display_df)))
 
     # ── Yield Breakdown Bar Chart (Phase 7 UI) ───────────────────────────────
+    # OPT-14: figure construction wrapped in @st.cache_data via _build_yield_bar()
     if holdings:
         _h_df_yb = pd.DataFrame(holdings)
         _yb_cols_needed = {"name", "current_yield_pct", "category", "weight_pct"}
         if _yb_cols_needed.issubset(set(_h_df_yb.columns)):
-            _yb = _h_df_yb[_h_df_yb["current_yield_pct"].fillna(0) > 0]  # UPGRADE 22: no mutation follows, copy removed
+            _yb = _h_df_yb[_h_df_yb["current_yield_pct"].fillna(0) > 0]
             _yb = _yb.nlargest(12, "current_yield_pct")
             if not _yb.empty:
                 st.markdown('<div class="section-header">Top Holdings by Yield</div>', unsafe_allow_html=True)
-                _bar_colors = [CATEGORY_COLORS.get(c, "#6366f1") for c in _yb["category"]]
-                _fig_ybar = go.Figure(go.Bar(
-                    x=_yb["name"],
-                    y=_yb["current_yield_pct"],
-                    marker_color=_bar_colors,
-                    text=[f"{v:.1f}%" for v in _yb["current_yield_pct"]],
-                    textposition="outside",
-                    customdata=_yb[["category", "weight_pct"]].values,
-                    hovertemplate="<b>%{x}</b><br>Yield: %{y:.2f}%<br>Category: %{customdata[0]}<br>Weight: %{customdata[1]:.1f}%<extra></extra>",
-                ))
-                _fig_ybar.update_layout(
-                    paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
-                    font_color="#E2E8F0",
-                    margin=dict(l=40, r=20, t=30, b=80),
-                    height=280,
-                    xaxis=dict(gridcolor="#1F2937", tickangle=-35, tickfont=dict(size=10)),
-                    yaxis=dict(gridcolor="#1F2937", ticksuffix="%"),
-                    showlegend=False,
+                _yb_records = tuple(
+                    zip(_yb["name"].tolist(), _yb["current_yield_pct"].tolist(),
+                        _yb["category"].tolist(), _yb["weight_pct"].tolist())
                 )
-                _fig_ybar.add_hline(y=metrics.get("weighted_yield_pct", 0), line_dash="dash",
-                                    line_color="#A78BFA", opacity=0.7,
-                                    annotation_text=f"Portfolio avg {metrics.get('weighted_yield_pct', 0):.1f}%",
-                                    annotation_font_color="#A78BFA", annotation_font_size=10)
+                _avg_yield = float(metrics.get("weighted_yield_pct", 0))
+                _fig_ybar = _build_yield_bar(_yb_records, _avg_yield)
                 st.plotly_chart(_fig_ybar, use_container_width=True)
 
     # ── Risk Metrics (Pro mode only) ───────────────────────────────────────────
@@ -1462,8 +1648,7 @@ with tab_portfolio:
     # ── Duration / Interest Rate Risk ────────────────────────────────────────
     if holdings:
         try:
-            from portfolio import calculate_portfolio_duration, calculate_portfolio_liquidity
-            from data_feeds import fetch_treasury_yield_curve, get_private_credit_warnings
+            from portfolio import calculate_portfolio_duration
 
             st.markdown('<div class="section-header">Interest Rate Risk</div>',
                         unsafe_allow_html=True)
@@ -1487,7 +1672,7 @@ with tab_portfolio:
                                  "Commodities / Equity (no rate risk)",
                                  tooltip="Percentage of your portfolio in assets with no interest rate sensitivity (gold, commodities, equities) — these act as a natural rate-risk hedge")
                 with d4:
-                    curve = fetch_treasury_yield_curve()
+                    curve = _load_treasury_yield_curve()   # OPT-6: cached 300s
                     rf    = curve.get("yields", {}).get("3m", 4.32)
                     _metric_card("Live Risk-Free Rate",
                                  f"{rf:.2f}%",
@@ -1578,8 +1763,7 @@ with tab_portfolio:
 
     # ── Private Credit Early Warnings ────────────────────────────────────────
     try:
-        from data_feeds import get_private_credit_warnings
-        pc_warnings = get_private_credit_warnings()
+        pc_warnings = _load_private_credit_warnings()
         if pc_warnings:
             st.markdown('<div class="section-header">⚠️ Private Credit Early Warnings</div>',
                         unsafe_allow_html=True)
@@ -1803,31 +1987,34 @@ with tab_universe:
         st.plotly_chart(fig_cats, use_container_width=True)
 
         # Enrich with Net APY, composite liquidity, exit velocity, trust score
+        # OPT-11: consolidated from 5 separate .apply() passes to 2 passes;
+        #         _exit_score + _exit_label share a single get_exit_velocity_score() call per row.
         try:
             from data_feeds import normalize_yield_to_net_apy
             from portfolio import calculate_asset_liquidity_score
             from config import get_asset_fee_bps, get_exit_velocity_score, get_asset_trust_score
-            def _net_apy(row):
+            def _enrich_row(row):
+                """Single pass: compute all 4 enrichment columns for one row."""
+                _id  = row.get("id", "")
+                _cat = row.get("category", "")
                 gross = row.get("current_yield_pct") or row.get("expected_yield_pct") or 0
-                fee   = get_asset_fee_bps(row.get("id", ""), row.get("category", ""))
-                return normalize_yield_to_net_apy(float(gross), fee)
-            def _liq_score(row):
-                return calculate_asset_liquidity_score(
-                    row.get("id", ""), row.get("category", ""),
-                    int(row.get("liquidity_score", 5) or 5)
-                )
-            def _exit_score(row):
-                return get_exit_velocity_score(row.get("id", ""), row.get("category", ""))["score"]
-            def _exit_label(row):
-                return get_exit_velocity_score(row.get("id", ""), row.get("category", ""))["label"]
-            def _trust_score(row):
-                return get_asset_trust_score(row.get("id", ""), row.get("category", ""))["trust_score"]
+                fee   = get_asset_fee_bps(_id, _cat)
+                _ev   = get_exit_velocity_score(_id, _cat)
+                return pd.Series({
+                    "net_apy_pct":    normalize_yield_to_net_apy(float(gross), fee),
+                    "liq_score_comp": calculate_asset_liquidity_score(
+                                          _id, _cat, int(row.get("liquidity_score", 5) or 5)),
+                    "exit_velocity":  _ev["score"],
+                    "exit_label":     _ev["label"],
+                    "trust_score":    get_asset_trust_score(_id, _cat)["trust_score"],
+                })
             filtered_df = filtered_df.copy()
-            filtered_df["net_apy_pct"]      = filtered_df.apply(_net_apy, axis=1)
-            filtered_df["liq_score_comp"]   = filtered_df.apply(_liq_score, axis=1)
-            filtered_df["exit_velocity"]    = filtered_df.apply(_exit_score, axis=1)
-            filtered_df["exit_label"]       = filtered_df.apply(_exit_label, axis=1)
-            filtered_df["trust_score"]      = filtered_df.apply(_trust_score, axis=1)
+            _enriched = filtered_df.apply(_enrich_row, axis=1)
+            filtered_df["net_apy_pct"]    = _enriched["net_apy_pct"]
+            filtered_df["liq_score_comp"] = _enriched["liq_score_comp"]
+            filtered_df["exit_velocity"]  = _enriched["exit_velocity"]
+            filtered_df["exit_label"]     = _enriched["exit_label"]
+            filtered_df["trust_score"]    = _enriched["trust_score"]
         except Exception:
             filtered_df["net_apy_pct"]    = filtered_df.get("current_yield_pct", 0)
             filtered_df["liq_score_comp"] = filtered_df.get("liquidity_score", 5)
@@ -1904,10 +2091,6 @@ with tab_universe:
                     unsafe_allow_html=True)
         st.caption("Compares secondary-market price vs published NAV ($1.00 for tokenized T-bill / MM funds). "
                    "Green = trading at premium above NAV. Red = discount below NAV. Key RWA risk signal.")
-
-        @st.cache_data(ttl=900, show_spinner=False)
-        def _load_nav_premiums():
-            return _df.fetch_nav_premiums()
 
         _nav_data = _load_nav_premiums()
         if _nav_data:
@@ -1998,10 +2181,6 @@ with tab_universe:
     st.markdown("---")
     st.markdown("#### ⛓️ Chainlink On-Chain Prices")
     st.caption("Chainlink AggregatorV3 · latestAnswer() via Etherscan eth_call · Cached 60s · No Chainlink SDK required")
-
-    @st.cache_data(ttl=60, show_spinner=False)
-    def _load_chainlink_prices():
-        return {pair: _df.fetch_chainlink_price(pair) for pair in ["XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD"]}
 
     _cl_prices = _load_chainlink_prices()
     _cl_pairs  = [
@@ -2149,10 +2328,6 @@ with tab_arb:
     # ── XRPL DEX Arbitrage Scanner (Item 15) ─────────────────────────────────
     st.markdown('<div class="section-header">XRPL DEX Arbitrage Scanner</div>',
                 unsafe_allow_html=True)
-
-    @st.cache_data(ttl=120, show_spinner=False)
-    def _load_xrpl_dex_arb():
-        return _df.fetch_xrpl_dex_arb()
 
     if st.button("⟳ Scan XRPL DEX", key="btn_xrpl_dex_arb"):
         _load_xrpl_dex_arb.clear()
@@ -2655,12 +2830,6 @@ with tab_ai:
     st.markdown('<div class="section-header">Macro Factor Allocation Bias</div>', unsafe_allow_html=True)
 
     with st.expander("📊 VIX · DXY · Yield Curve · Fear & Greed → Allocation Adjustments", expanded=True):
-        from data_feeds import get_macro_factor_allocation_bias
-
-        @st.cache_data(ttl=300, show_spinner=False)
-        def _load_factor_bias():
-            return get_macro_factor_allocation_bias()
-
         if st.button("⟳ Refresh Factor Bias", key="btn_factor_bias_refresh"):
             _load_factor_bias.clear()
 
@@ -2710,16 +2879,6 @@ with tab_ai:
     st.markdown('<div class="section-header">Factor-Based Portfolio Optimization</div>', unsafe_allow_html=True)
 
     with st.expander("📐 Macro-Factor-Tilted Mean-Variance Optimizer", expanded=False):
-        from portfolio import compute_factor_tilted_portfolio
-        from data_feeds import get_macro_factor_allocation_bias
-
-        @st.cache_data(ttl=180, show_spinner=False)
-        def _load_factor_opt(tier_key: int, val: int):
-            _port = _load_portfolio(tier_key, val)
-            _holds = _port.get("holdings", []) if _port else []
-            _fb    = get_macro_factor_allocation_bias()
-            return compute_factor_tilted_portfolio(_holds, _fb, val)
-
         if st.button("⟳ Recompute Factor Optimization", key="btn_factor_opt"):
             _load_factor_opt.clear()
 
@@ -2778,16 +2937,6 @@ with tab_ai:
         st.markdown('<div class="section-header">Factor Portfolio Optimizer (Pro)</div>', unsafe_allow_html=True)
 
         with st.expander("🎯 Optimize Portfolio by Macro Factors (L-BFGS-B)", expanded=False):
-            from portfolio import optimize_factor_portfolio as _ofp
-
-            @st.cache_data(ttl=300, show_spinner=False)
-            def _load_factor_opt_b7(tier_key: int, val: int):
-                _port = _load_portfolio(tier_key, val)
-                _holds = _port.get("holdings", []) if _port else []
-                if not _holds:
-                    return {"error": "No holdings"}
-                return _ofp(_holds)
-
             if st.button("Optimize Portfolio by Macro Factors", key="btn_factor_opt_b7"):
                 _load_factor_opt_b7.clear()
 
@@ -2858,12 +3007,6 @@ with tab_ai:
     st.markdown('<div class="section-header">XRPL Intelligence</div>', unsafe_allow_html=True)
 
     with st.expander("🔗 XRPL · RLUSD · Soil Protocol · XLS-81", expanded=False):
-        from data_feeds import fetch_xrpl_stats
-
-        @st.cache_data(ttl=120, show_spinner=False)
-        def _load_xrpl_stats():
-            return fetch_xrpl_stats()
-
         if st.button("⟳ Refresh XRPL", key="btn_xrpl_refresh"):
             _load_xrpl_stats.clear()
 
@@ -3728,16 +3871,6 @@ with tab_macro:
     st.caption("FRED + yfinance macro data · Rolling correlations with BTC · M2 84-day lead indicator")
 
     # ── Load data ──────────────────────────────────────────────────────────────
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _load_macro_snapshot():
-        fred  = _df.fetch_macro_indicators()
-        yf_m  = _df.fetch_yfinance_macro()
-        return fred, yf_m
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _load_macro_ts(days: int):
-        return _df.fetch_macro_timeseries(days)
-
     fred_data, yf_data = _load_macro_snapshot()
 
     # ── Macro Snapshot Metrics ─────────────────────────────────────────────────
@@ -3761,10 +3894,6 @@ with tab_macro:
     # ── FRED Extended Series (#29) ─────────────────────────────────────────────
     st.markdown("#### Credit Spreads · Inflation Breakevens · SOFR · Jobless Claims")
     st.caption("FRED extended series — key risk signals for RWA credit quality and macro stress")
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _load_fred_extended():
-        return _df.fetch_fred_extended()
 
     _fred_ext = _load_fred_extended()
 
@@ -3813,10 +3942,6 @@ with tab_macro:
     st.markdown("#### Fear & Greed Index — 30-Day History")
     st.caption("Crypto Fear & Greed Index (alternative.me) — daily value over the past 30 days. "
                "0 = Extreme Fear (buy signal), 100 = Extreme Greed (sell signal).")
-
-    @st.cache_data(ttl=900, show_spinner=False)
-    def _load_fg_history():
-        return _df.fetch_fear_greed_index(limit=30)
 
     _fg_full = _load_fg_history()
     _fg_history = _fg_full.get("history", [])
@@ -4038,10 +4163,6 @@ with tab_macro:
     st.markdown("#### Global M2 Composite — 90-Day Lag BTC Signal")
     st.caption("US M2 × 4.2 scaling (US ≈ 24% of global M2). Rising M2 typically precedes BTC rallies by ~90 days.")
 
-    @st.cache_data(ttl=21600, show_spinner=False)   # 6-hour TTL (monthly data)
-    def _load_global_m2():
-        return _df.fetch_global_m2_composite()
-
     _m2 = _load_global_m2()
     _m2_sig = _m2.get("lag_signal", "NEUTRAL")
     _m2_sig_colors = {"EXPANDING": "#10b981", "CONTRACTING": "#ef4444", "NEUTRAL": "#6b7280"}
@@ -4064,10 +4185,6 @@ with tab_macro:
     # ── Pi Cycle Top Indicator ────────────────────────────────────────────────
     st.markdown("#### Pi Cycle Top Indicator")
     st.caption("111-DMA vs 350-DMA×2 of BTC close. When 111-DMA crosses above 350-DMA×2, BTC is near a cycle top.")
-
-    @st.cache_data(ttl=86400, show_spinner=False)   # daily TTL
-    def _load_pi_cycle():
-        return _df.fetch_pi_cycle_indicator()
 
     _pi = _load_pi_cycle()
     _pi_sig = _pi.get("signal", "N/A")
@@ -4094,10 +4211,6 @@ with tab_macro:
     st.markdown("#### Stablecoin Supply — Dry Powder Indicator")
     st.caption("Rising stablecoin supply = capital waiting on the sidelines = bullish setup when deployed.")
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _load_stable():
-        return _df.fetch_stablecoin_supply()
-
     _stb = _load_stable()
     _stb_c1, _stb_c2, _stb_c3, _stb_c4 = st.columns(4)
     _stb_c1.metric("USDT", f"${_stb.get('usdt_bn', 140.0):.1f}B")
@@ -4112,13 +4225,6 @@ with tab_macro:
     st.markdown("#### Macro Regime — HMM Probabilistic Classifier")
     st.caption("Gaussian observation scoring across 4 macro states (VIX, yield spread, DXY, WTI oil). "
                "Bars show soft probability assignment — not binary classification.")
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _load_hmm_regime():
-        try:
-            return _df.fetch_hmm_macro_regime()
-        except Exception:
-            return None
 
     _hmm = _load_hmm_regime()
     regime_data = (_hmm.get("regime") if _hmm else None) or market.get("macro_regime", "NEUTRAL")
@@ -4178,13 +4284,6 @@ with tab_macro:
     # ── BTC/ETH On-Chain Signals (#54) ─────────────────────────────────────────
     st.markdown("#### BTC / ETH Perpetual Funding & Open Interest")
     st.caption("Bybit v5 perpetual markets · Funding rate per 8h · Open interest in USD")
-
-    @st.cache_data(ttl=900, show_spinner=False)
-    def _load_onchain_signals():
-        try:
-            return _df.fetch_crypto_onchain_signals()
-        except Exception:
-            return {}
 
     _ocs = _load_onchain_signals()
     _btc_fr   = _ocs.get("btc_funding_rate")
@@ -4269,13 +4368,6 @@ with tab_macro:
     st.caption("DeFiLlama fees endpoint · 24h and 30d fee collection for top RWA protocols. "
                "Declining fees = shrinking origination. GREEN = on pace, YELLOW = slowing, RED = declining.")
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _load_protocol_fees():
-        try:
-            return _df.fetch_protocol_fees()
-        except Exception:
-            return {}
-
     _pf = _load_protocol_fees()
     _pf_ts = _pf.get("timestamp", "")
 
@@ -4332,7 +4424,7 @@ with tab_onchain:
     st.markdown("### ⛓️ BTC On-Chain Intelligence")
     st.caption("CoinMetrics Community API · free, no key · MVRV Z-Score · SOPR · Active Addresses")
 
-    _oc = _df.fetch_coinmetrics_onchain(days=400)
+    _oc = _load_coinmetrics_onchain(days=400)
 
     if _oc.get("error") and not _oc.get("mvrv_z"):
         st.warning(f"On-chain data unavailable: {_oc.get('error')}. CoinMetrics Community API may be rate-limited — try again in a minute.")
@@ -4449,7 +4541,7 @@ with tab_onchain:
         # ── Funding rates from Coinalyze (cross-exchange context) ─────────────
         st.markdown("---")
         st.markdown("#### 📡 Cross-Exchange Funding Rates (via Coinalyze)")
-        _funding = _df.fetch_coinalyze_funding()
+        _funding = _load_coinalyze_funding()
         if _funding:
             _fnd_cols = st.columns(len(_funding))
             for _ci, (_sym, _fdata) in enumerate(_funding.items()):
@@ -4476,7 +4568,7 @@ with tab_onchain:
     st.markdown("#### 🌊 RLUSD & XRP Ledger")
     st.caption("XRPL ledger gateway_balances + CoinGecko · Ripple USD · Cached 15 min")
 
-    _rlusd = _df.fetch_xrpl_rlusd()
+    _rlusd = _load_xrpl_rlusd()
 
     if _rlusd.get("error") and not _rlusd.get("circulating_supply"):
         st.caption(f"RLUSD data unavailable: {_rlusd.get('error')}. XRPL cluster may be unreachable.")
@@ -4566,10 +4658,6 @@ with tab_onchain:
     st.markdown("#### 🌐 XRPL Basic Integration (#97)")
     st.caption("XRP price via CoinGecko · RLUSD supply via XRPL cluster / xrpl-py · Cached 15 min")
 
-    @st.cache_data(ttl=900, show_spinner=False)
-    def _load_xrpl_basic():
-        return _df.fetch_xrpl_data()
-
     if st.button("⟳ Refresh XRPL Basic", key="btn_xrpl_basic"):
         _load_xrpl_basic.clear()
 
@@ -4623,11 +4711,6 @@ with tab_onchain:
     st.caption("Etherscan eth_call proxy · latestAnswer() + decimals() · Cached 1 min")
 
     if feature_enabled("etherscan"):
-        @st.cache_data(ttl=60, show_spinner=False)
-        def _cl_prices():
-            pairs = ["XAU/USD", "EUR/USD", "BTC/USD", "ETH/USD", "LINK/USD"]
-            return _df.fetch_multicall3_prices(pairs)
-
         _cl_data = _cl_prices()
         if _cl_data:
             _cl_cols = st.columns(len(_cl_data))
@@ -4653,11 +4736,6 @@ with tab_onchain:
     st.caption("Etherscan eth_call · pricePerShare() + totalAssets() · BUIDL / OUSG / USDY / wstETH")
 
     if feature_enabled("erc4626") or feature_enabled("etherscan"):
-        @st.cache_data(ttl=120, show_spinner=False)
-        def _vault_data():
-            return {sym: _df.fetch_erc4626_vault_data(sym)
-                    for sym in ["BUIDL", "OUSG", "USDY", "WSTETH"]}
-
         _vaults = _vault_data()
         _v_cols = st.columns(4)
         for _vi, (_sym, _vd) in enumerate(_vaults.items()):
@@ -4686,11 +4764,6 @@ with tab_onchain:
     st.caption("Etherscan eth_call · totalPendingRedemptions() · BUIDL / OUSG")
 
     if feature_enabled("erc4626") or feature_enabled("etherscan"):
-        @st.cache_data(ttl=180, show_spinner=False)
-        def _redeem_data():
-            return {sym: _df.fetch_erc7540_redemption_depth(sym)
-                    for sym in ["BUIDL", "OUSG"]}
-
         _redeems = _redeem_data()
         _rd_cols = st.columns(2)
         for _ri, (_sym, _rd) in enumerate(_redeems.items()):
@@ -4722,10 +4795,6 @@ with tab_onchain:
             "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
             "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbe39B",
         }
-
-        @st.cache_data(ttl=300, show_spinner=False)
-        def _load_erc7540_queue(addr: str) -> dict:
-            return _df.fetch_erc7540_redemption_queue(addr)
 
         _rq_cols = st.columns(len(_ERC7540_VAULTS))
         for _rqi, (_rq_sym, _rq_addr) in enumerate(_ERC7540_VAULTS.items()):
@@ -4783,11 +4852,6 @@ with tab_onchain:
         "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
     }
     if _wallet_addr and (feature_enabled("onchainid") or feature_enabled("etherscan")):
-        @st.cache_data(ttl=300, show_spinner=False)
-        def _compliance_check(wallet):
-            return {sym: _df.fetch_erc3643_compliance(addr, wallet)
-                    for sym, addr in _ERC3643_ADDRS.items()}
-
         _compl = _compliance_check(_wallet_addr)
         _co_cols = st.columns(len(_compl))
         for _coi, (_sym, _cd) in enumerate(_compl.items()):
@@ -4851,10 +4915,6 @@ with tab_onchain:
     st.caption("Zerion API v1 · wallet positions across all EVM chains · Cached 3 min")
 
     if _wallet_addr and feature_enabled("zerion"):
-        @st.cache_data(ttl=180, show_spinner=False)
-        def _zerion_portfolio(wallet):
-            return _df.fetch_zerion_portfolio(wallet)
-
         _zp = _zerion_portfolio(_wallet_addr)
         if _zp.get("source") in ("unavailable", "auth_error", "invalid_address"):
             st.caption(f"Zerion unavailable — {_zp.get('message', _zp.get('source', ''))}")
@@ -4890,10 +4950,6 @@ with tab_onchain:
     st.markdown("---")
     st.markdown("#### 🌉 Wormhole Cross-Chain Bridge Activity")
     st.caption("Wormhole Scan public API · Verified Action Approvals (VAAs) · RWA bridge flow tracker")
-
-    @st.cache_data(ttl=300, show_spinner=False)
-    def _wh_vaas(chain_id):
-        return _df.fetch_wormhole_rwa_vaa(emitter_chain_id=chain_id, page_size=15)
 
     _wh_chain_opts = {"Ethereum (2)": 2, "Solana (1)": 1, "BSC (4)": 4}
     _wh_sel = st.selectbox("Source Chain", list(_wh_chain_opts.keys()),
