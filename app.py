@@ -113,6 +113,29 @@ def _init():
 
 _init()
 
+# ─── Sidebar: API health status (#17) ─────────────────────────────────────────
+with st.sidebar:
+    st.markdown("#### API Status")
+    _api_health = _get_api_health()
+    if _api_health:
+        _dot_map = {
+            "ok":      ("🟢", "green"),
+            "no key":  ("⚫", "grey"),
+        }
+        for _svc, _status in _api_health.items():
+            if _status == "ok":
+                _dot, _label = "🟢", "ok"
+            elif _status == "no key":
+                _dot, _label = "⚫", "no key"
+            else:
+                _dot, _label = "🔴", "error"
+            st.markdown(
+                f'<span style="font-size:11px">{_dot} <b>{_svc}</b>: {_label}</span>',
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption("API health check unavailable")
+
 # ─── Custom CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -235,6 +258,45 @@ div[data-testid="stHorizontalBlock"] { gap: 12px; }
 .stMetric { background: var(--card-bg); border-radius: 10px; padding: 12px; border: 1px solid var(--border); }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #13 — INPUT VALIDATION HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+import re as _re_input
+
+def _validate_weights(weights: dict) -> tuple:
+    """Validate that portfolio weights sum to at most 100%."""
+    total = sum(weights.values())
+    if total > 1.001:
+        return False, f"Weights sum to {total:.1%} — must be ≤ 100%"
+    return True, ""
+
+
+def _sanitize_text_input(value: str, max_len: int = 100) -> str:
+    """Strip dangerous characters from free-text inputs.
+
+    Allows alphanumeric, spaces, hyphens, underscores, and dots.
+    Truncates to max_len characters.
+    """
+    if not value:
+        return ""
+    cleaned = _re_input.sub(r"[^\w\s\-\.]", "", value)
+    return cleaned[:max_len].strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #17 — API KEY HEALTH CHECK (cached once per process)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@st.cache_resource
+def _get_api_health():
+    """Run lightweight API connectivity tests once on startup."""
+    try:
+        return _df.validate_api_keys()
+    except Exception:
+        return {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1544,6 +1606,9 @@ with tab_portfolio:
                 help="VIX volatility index point change. +10 = elevated fear environment",
             )
 
+        if abs(_sc_hy) > 500:
+            st.warning("HY spread change > 500bp is extreme — results may be unreliable")
+
         if st.button("Run Scenario", key="btn_run_scenario", use_container_width=False):
             _shocks = {
                 "hy_spread_bps": _sc_hy,
@@ -1655,9 +1720,10 @@ with tab_universe:
     # Filters
     _fsearch_col, f1, f2, f3, f4 = st.columns([2, 2, 1, 1, 2])
     with _fsearch_col:
-        search_query = st.text_input("Search", placeholder="e.g. ONDO, treasury, real estate…",
-                                     key="filter_search",
-                                     help="Filter by asset name, ticker, or issuer (case-insensitive)")
+        _raw_search = st.text_input("Search", placeholder="e.g. ONDO, treasury, real estate…",
+                                    key="filter_search",
+                                    help="Filter by asset name, ticker, or issuer (case-insensitive)")
+        search_query = _sanitize_text_input(_raw_search, max_len=100)
     with f1:
         categories = ["All"] + sorted(assets_df["category"].dropna().unique().tolist()) \
                      if not assets_df.empty else ["All"]
@@ -4355,7 +4421,8 @@ with tab_onchain:
         help="Enter an EVM-compatible wallet address (0x…) for ERC-3643 compliance checks and Zerion portfolio import.",
         max_chars=42,
     )
-    _wallet_addr = _wallet_input.strip()
+    # Sanitize: wallet addresses are hex strings (0x + 40 hex chars) — strip anything else
+    _wallet_addr = _re_input.sub(r"[^0-9a-fA-Fx]", "", _wallet_input.strip())[:42]
     if _wallet_addr:
         st.session_state["wallet_address"] = _wallet_addr
 

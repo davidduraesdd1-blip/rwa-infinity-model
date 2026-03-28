@@ -67,8 +67,35 @@ def _get_conn() -> _PooledConn:
 
 # ─── Schema ────────────────────────────────────────────────────────────────────
 
+def check_db_integrity(db_path: str) -> bool:
+    """Run SQLite PRAGMA quick_check on startup.
+
+    Returns True when the database is healthy. Logs a warning and returns
+    False on corruption or error — but never raises, so the app can
+    continue with degraded functionality.
+    """
+    try:
+        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
+        result = conn.execute("PRAGMA quick_check").fetchone()
+        conn.close()
+        if result and result[0] == "ok":
+            return True
+        else:
+            logger.warning("[DB] integrity check (quick_check) failed: %s", result)
+            return False
+    except Exception as e:
+        logger.error("[DB] integrity check error: %s", e)
+        return False
+
+
 def init_db():
     """Create all tables. Idempotent — safe to call every startup."""
+    # Run quick integrity check before opening the pooled connection.
+    # Failures are logged but never crash the app.
+    from config import DB_FILE as _DB_FILE
+    if not check_db_integrity(_DB_FILE):
+        logger.warning("[DB] Startup integrity check FAILED — app will continue with caution")
+
     with _write_lock:
         conn = _get_conn()
         conn.executescript("""

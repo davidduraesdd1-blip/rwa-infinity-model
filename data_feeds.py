@@ -43,46 +43,68 @@ from config import (
 logger = logging.getLogger(__name__)
 
 # ─── Rate Limiter (token bucket — #11 security hardening) ────────────────────
-class _RateLimiter:
-    """Thread-safe token bucket rate limiter. Prevents API quota abuse."""
-    def __init__(self, calls_per_second: float = 2.0):
-        self._interval = 1.0 / max(calls_per_second, 0.01)
-        self._lock     = threading.Lock()
-        self._last     = 0.0
+class RateLimiter:
+    """Token bucket rate limiter for API calls."""
+    def __init__(self, calls_per_second: float = 1.0):
+        self._rate      = calls_per_second
+        self._tokens    = calls_per_second
+        self._last_refill = time.time()
+        self._lock      = threading.Lock()
 
-    def acquire(self) -> None:
-        with self._lock:
-            now  = time.time()
-            wait = self._interval - (now - self._last)
-            if wait > 0:
-                time.sleep(wait)
-            self._last = time.time()
+    def acquire(self, timeout: float = 30.0) -> bool:
+        """Acquire a token, blocking until available or timeout."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self._lock:
+                now     = time.time()
+                elapsed = now - self._last_refill
+                self._tokens = min(self._rate, self._tokens + elapsed * self._rate)
+                self._last_refill = now
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return True
+            time.sleep(0.05)
+        return False
 
-# Per-API limiters (calls per second)
-_coingecko_limiter  = _RateLimiter(0.5)   # 30 req/min on free tier
-_defillama_limiter  = _RateLimiter(2.0)   # generous free tier
-_binance_limiter    = _RateLimiter(5.0)   # 1200 req/min weight limit
-_fred_limiter       = _RateLimiter(2.0)   # FRED: 120 req/min
-_default_limiter    = _RateLimiter(2.0)   # fallback for all other APIs
+# Keep internal alias for backward compatibility with existing call sites
+_RateLimiter = RateLimiter
 
-# ─── HTTP Session with retry adapter ─────────────────────────────────────────
-_retry_strategy = Retry(
-    total=MAX_RETRIES,
-    read=0,               # don't retry on read-timeouts — fail fast, use cached/fallback data
-    backoff_factor=RETRY_BACKOFF,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET"],
-    raise_on_status=False,
-)
-_adapter = HTTPAdapter(max_retries=_retry_strategy)
-_session = requests.Session()
-_session.mount("https://", _adapter)
-_session.mount("http://", _adapter)
-_session.headers.update({
-    "Accept":          "application/json",
-    "Accept-Encoding": "gzip, deflate",
-    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-})
+# Module-level rate limiters (calls per second)
+_COINGECKO_LIMITER  = RateLimiter(calls_per_second=0.4)   # 25 req/min free tier
+_FRED_LIMITER       = RateLimiter(calls_per_second=2.0)   # generous FRED limit
+_DEFILLAMA_LIMITER  = RateLimiter(calls_per_second=1.0)   # 60 req/min
+_ETHERSCAN_LIMITER  = RateLimiter(calls_per_second=0.2)   # 5 req/sec free
+
+# Per-API limiters (calls per second) — legacy names kept for internal use
+_coingecko_limiter  = _COINGECKO_LIMITER
+_defillama_limiter  = _DEFILLAMA_LIMITER
+_binance_limiter    = RateLimiter(calls_per_second=5.0)   # 1200 req/min weight limit
+_fred_limiter       = _FRED_LIMITER
+_default_limiter    = RateLimiter(calls_per_second=2.0)   # fallback for all other APIs
+
+# ─── HTTP Session with retry adapter (#12 — exponential backoff) ──────────────
+def _build_session() -> requests.Session:
+    """Build a requests Session with exponential backoff retry."""
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=MAX_RETRIES,
+        read=0,               # don't retry on read-timeouts — fail fast, use cached/fallback data
+        backoff_factor=RETRY_BACKOFF,  # 1s, 2s, 4s
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers.update({
+        "Accept":          "application/json",
+        "Accept-Encoding": "gzip, deflate",
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    })
+    return session
+
+_session = _build_session()
 # Attach CoinGecko Pro key when available (higher rate limits)
 if COINGECKO_API_KEY:
     _session.headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
@@ -156,10 +178,23 @@ def _cached_get(key: str, ttl: int, fetch_fn):
 
 
 def _get(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> Optional[dict]:
-    """GET with exponential retry and SSRF allowlist check."""
+    """GET with exponential retry, SSRF allowlist check, and per-API rate limiting."""
     if not _is_allowed_url(url):
         logger.warning("[DataFeeds] SSRF blocked: %s", url)
         return None
+    # Apply per-API rate limiting based on URL domain
+    try:
+        _host = urlparse(url).hostname or ""
+        if "coingecko" in _host:
+            _COINGECKO_LIMITER.acquire()
+        elif "stlouisfed" in _host or "fred.st" in _host:
+            _FRED_LIMITER.acquire()
+        elif "llama.fi" in _host or "defillama" in _host:
+            _DEFILLAMA_LIMITER.acquire()
+        elif "etherscan.io" in _host:
+            _ETHERSCAN_LIMITER.acquire()
+    except Exception:
+        pass  # rate limiter errors must never block requests
     for attempt in range(MAX_RETRIES):
         try:
             r = _session.get(url, params=params, timeout=timeout)
@@ -5651,6 +5686,73 @@ def fetch_cmc_global_metrics() -> dict:
             _CMC_GLOBAL_CACHE["ts"]   = time.time()
 
     return data
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #17 — API KEY HEALTH CHECK
+# Validates each configured API key with a lightweight connectivity test.
+# Called once on startup via st.cache_resource in app.py.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def validate_api_keys() -> dict:
+    """Test each configured API key with a lightweight request.
+
+    Returns a dict of service → status string:
+        "ok"         — HTTP 200 received
+        "HTTP <N>"   — non-200 status
+        "no key"     — API key not configured
+        "error: ..." — connection/timeout error
+
+    Note: detailed error messages are intentionally omitted from the return
+    value to avoid leaking infrastructure info to the UI.
+    """
+    results: Dict[str, str] = {}
+
+    # CoinGecko — free endpoint, no key needed but test connectivity
+    try:
+        r = _session.get("https://api.coingecko.com/api/v3/ping", timeout=5)
+        results["coingecko"] = "ok" if r.status_code == 200 else f"HTTP {r.status_code}"
+    except Exception:
+        results["coingecko"] = "error"
+
+    # FRED — test with a simple series request (DFF = Fed Funds Rate)
+    if FRED_API_KEY:
+        try:
+            r = _session.get(
+                "https://api.stlouisfed.org/fred/series/observations",
+                params={"series_id": "DFF", "api_key": FRED_API_KEY,
+                        "file_type": "json", "limit": 1},
+                timeout=5,
+            )
+            results["fred"] = "ok" if r.status_code == 200 else f"HTTP {r.status_code}"
+        except Exception:
+            results["fred"] = "error"
+    else:
+        results["fred"] = "no key"
+
+    # DeFiLlama — free public API
+    try:
+        r = _session.get("https://api.llama.fi/chains", timeout=5)
+        results["defillama"] = "ok" if r.status_code == 200 else f"HTTP {r.status_code}"
+    except Exception:
+        results["defillama"] = "error"
+
+    # Etherscan V2
+    if ETHERSCAN_API_KEY:
+        try:
+            r = _session.get(
+                "https://api.etherscan.io/v2/api",
+                params={"chainid": 1, "module": "stats", "action": "ethsupply",
+                        "apikey": ETHERSCAN_API_KEY},
+                timeout=5,
+            )
+            results["etherscan"] = "ok" if r.status_code == 200 else f"HTTP {r.status_code}"
+        except Exception:
+            results["etherscan"] = "error"
+    else:
+        results["etherscan"] = "no key"
+
+    return results
 
 
 # ─────────────────────────────────────────────────────────────────────────────
