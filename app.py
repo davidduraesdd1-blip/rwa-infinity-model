@@ -2591,9 +2591,9 @@ with tab_compare:
     st.markdown('<div class="section-header">Portfolio Tier Comparison</div>',
                 unsafe_allow_html=True)
 
-    # UPGRADE 15: use session-state cached result to avoid redundant rebuild
-    all_ports = st.session_state.get("portfolio_data", {})
-    comp_df   = st.session_state.get("portfolio_comp_df", pd.DataFrame())
+    # OPT-12: use module-level cached result (_all_ports / _comp_df computed above)
+    all_ports = _all_ports
+    comp_df   = _comp_df
     if not all_ports:
         all_ports, comp_df = _load_all_portfolios(portfolio_value)
 
