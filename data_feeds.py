@@ -111,6 +111,22 @@ if COINGECKO_API_KEY:
     logger.info("[DataFeeds] CoinGecko Pro API key loaded")
 
 
+def _get_runtime_key(key_name: str, default: str = "") -> str:
+    """Get API key from session state (user-provided) or fall back to env var.
+
+    Users can supply keys at runtime via the sidebar expander in app.py.
+    Keys are stored only in st.session_state — never persisted to disk.
+    """
+    try:
+        import streamlit as st
+        session_key = f"runtime_{key_name}"
+        if session_key in st.session_state and st.session_state[session_key]:
+            return str(st.session_state[session_key])
+    except Exception:
+        pass
+    return default
+
+
 def _is_allowed_url(url: str) -> bool:
     """SSRF guard — only permit requests to pre-approved domains."""
     try:
@@ -4140,7 +4156,8 @@ def fetch_coinmetrics_onchain(days: int = 400) -> Dict[str, Any]:
 
     def _fetch():
         try:
-            api_key = (COIN_METRICS_API_KEY or "").strip()
+            # Prefer session-state runtime key (user-supplied), fall back to env var
+            api_key = _get_runtime_key("cm_key", (COIN_METRICS_API_KEY or "").strip())
             if api_key:
                 url = "https://api.coinmetrics.io/v4/timeseries/asset-metrics"
                 params = {
@@ -5216,6 +5233,74 @@ def fetch_erc3643_compliance(contract: str, wallet: str = "") -> dict:
     }
 
 
+def check_erc3643_eligibility(wallet_address: str, token_address: str, chain_id: int = 1) -> dict:
+    """
+    Check ERC-3643 (T-REX) compliance: isVerified() and canTransfer() for a wallet/token pair.
+    ERC-3643 is the institutional-grade token standard for regulated securities.
+
+    For a full on-chain check the token's identity registry address is required; this
+    function provides a structured stub with all relevant metadata and a best-effort
+    isVerified() call via Etherscan when wallet_address is supplied.
+    """
+    # ERC-3643 minimal ABI (Identity Registry interface) — kept as documentation
+    _ERC3643_ABI = [
+        {
+            "name": "isVerified",
+            "type": "function",
+            "inputs": [{"name": "userAddress", "type": "address"}],
+            "outputs": [{"type": "bool"}],
+        },
+        {
+            "name": "canTransfer",
+            "type": "function",
+            "inputs": [
+                {"name": "from",   "type": "address"},
+                {"name": "to",     "type": "address"},
+                {"name": "amount", "type": "uint256"},
+            ],
+            "outputs": [{"type": "bool"}],
+        },
+    ]
+
+    if not wallet_address or not token_address:
+        return {
+            "supported": True,
+            "wallet":      wallet_address,
+            "token":       token_address,
+            "is_verified": None,
+            "can_transfer": None,
+            "standard":    "ERC-3643 (T-REX)",
+            "note":        "wallet_address and token_address are both required.",
+            "source":      "stub",
+        }
+
+    # Best-effort isVerified() via Etherscan eth_call (no web3 install needed)
+    padded = wallet_address.lower().replace("0x", "").zfill(64)
+    is_verified_calldata = "0xb9209e33" + padded
+    raw = _etherscan_call(token_address, is_verified_calldata)
+    is_verified = None
+    if raw and len(raw) >= 64:
+        try:
+            is_verified = bool(int(raw, 16))
+        except ValueError:
+            pass
+
+    return {
+        "supported":   True,
+        "wallet":      wallet_address,
+        "token":       token_address,
+        "chain_id":    chain_id,
+        "is_verified": is_verified,
+        "can_transfer": None,  # canTransfer requires (from, to, amount) — needs separate call
+        "standard":    "ERC-3643 (T-REX)",
+        "note": (
+            "Full compliance check requires the token's identity registry address. "
+            "Contact the issuer for whitelist verification."
+        ),
+        "source": "etherscan" if is_verified is not None else "stub",
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # XRPL MPT DATA  (#106)
 # Multi-Purpose Token (XLS-33d) issuances and RLUSD flows
@@ -5458,6 +5543,65 @@ def fetch_chainlink_price(pair: str) -> dict:
 
     _CL_CACHE[cache_key] = {**result, "_ts": time.time()}
     return result
+
+
+def fetch_chainlink_price_w3(feed_address: str, chain_rpc: str = "https://eth.llamarpc.com") -> dict:
+    """
+    Read latest price from a Chainlink price feed on-chain using web3.py.
+    Chainlink AggregatorV3Interface: latestRoundData() + decimals().
+
+    Falls back gracefully when web3.py is not installed.
+    """
+    _AGGREGATOR_ABI = [
+        {
+            "name": "latestRoundData",
+            "type": "function",
+            "inputs": [],
+            "outputs": [
+                {"name": "roundId",         "type": "uint80"},
+                {"name": "answer",          "type": "int256"},
+                {"name": "startedAt",       "type": "uint256"},
+                {"name": "updatedAt",       "type": "uint256"},
+                {"name": "answeredInRound", "type": "uint80"},
+            ],
+        },
+        {
+            "name": "decimals",
+            "type": "function",
+            "inputs": [],
+            "outputs": [{"type": "uint8"}],
+        },
+    ]
+
+    try:
+        from web3 import Web3  # optional — graceful fallback if not installed
+    except ImportError:
+        return {"supported": False, "reason": "web3.py not installed"}
+
+    try:
+        w3 = Web3(Web3.HTTPProvider(chain_rpc, request_kwargs={"timeout": 5}))
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(feed_address),
+            abi=_AGGREGATOR_ABI,
+        )
+        decimals   = contract.functions.decimals().call()
+        round_data = contract.functions.latestRoundData().call()
+        price      = round_data[1] / (10 ** decimals)
+        return {
+            "price":        price,
+            "decimals":     decimals,
+            "updated_at":   round_data[3],
+            "source":       "chainlink_onchain",
+            "feed_address": feed_address,
+        }
+    except Exception as e:
+        return {
+            "supported":    True,
+            "price":        None,
+            "error":        str(e),
+            "source":       "chainlink_onchain",
+            "feed_address": feed_address,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -280,6 +280,24 @@ def _get_api_health():
 # ─── Sidebar: API health status (#17) ─────────────────────────────────────────
 # Placed here — after _get_api_health() is defined — to avoid NameError on startup.
 with st.sidebar:
+    # ── Personal API Keys (session-only, never saved to disk) ─────────────────
+    with st.sidebar.expander("🔑 API Keys (Session Only)", expanded=False):
+        st.caption("Keys stored in session only — cleared on refresh. Never saved to disk.")
+        _user_cg_key     = st.text_input("CoinGecko Pro Key",  type="password", key="user_cg_key")
+        _user_tiingo_key = st.text_input("Tiingo Key",         type="password", key="user_tiingo_key")
+        _user_cm_key     = st.text_input("CoinMetrics Key",    type="password", key="user_cm_key")
+        if st.button("Apply Keys", key="btn_apply_keys"):
+            if _user_cg_key:
+                st.session_state["runtime_cg_key"] = _user_cg_key
+                audit("API_KEY_APPLIED", service="coingecko")
+            if _user_tiingo_key:
+                st.session_state["runtime_tiingo_key"] = _user_tiingo_key
+                audit("API_KEY_APPLIED", service="tiingo")
+            if _user_cm_key:
+                st.session_state["runtime_cm_key"] = _user_cm_key
+                audit("API_KEY_APPLIED", service="coinmetrics")
+            st.success("Keys applied for this session")
+
     st.markdown("#### API Status")
     _api_health = _get_api_health()
     if _api_health:
@@ -1975,6 +1993,40 @@ with tab_universe:
 - **3–4**: On-chain only, no traditional audit (Maple, Centrifuge, Goldfinch)
 - **0–2**: No public audit, no reserves proof, no CUSIP (STBT, REALT)
             """)
+
+    # ── Chainlink On-Chain Commodity Prices (#108) ────────────────────────────
+    st.markdown("---")
+    st.markdown("#### ⛓️ Chainlink On-Chain Prices")
+    st.caption("Chainlink AggregatorV3 · latestAnswer() via Etherscan eth_call · Cached 60s · No Chainlink SDK required")
+
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _load_chainlink_prices():
+        return {pair: _df.fetch_chainlink_price(pair) for pair in ["XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD"]}
+
+    _cl_prices = _load_chainlink_prices()
+    _cl_pairs  = [
+        ("XAU/USD",  "Gold (XAU)",   "🥇", "PAXG / XAUt reference"),
+        ("XAG/USD",  "Silver (XAG)", "🥈", "Tokenized silver reference"),
+        ("BTC/USD",  "Bitcoin",      "₿",  "Chainlink on-chain oracle"),
+        ("ETH/USD",  "Ethereum",     "Ξ",  "Chainlink on-chain oracle"),
+    ]
+    _cl_cols = st.columns(len(_cl_pairs))
+    for _cli, (_pair, _label, _icon, _caption) in enumerate(_cl_pairs):
+        _cd = _cl_prices.get(_pair, {})
+        _cp = _cd.get("price")
+        _cs = _cd.get("source", "unavailable")
+        _cl_clr = "#34D399" if _cs == "chainlink_etherscan" else "#6B7280"
+        with _cl_cols[_cli]:
+            st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
+  <div style="font-size:20px">{_icon}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:2px">{_label}</div>
+  <div style="font-size:20px;font-weight:700;color:{_cl_clr};margin-top:4px">
+    {"${:,.2f}".format(_cp) if _cp else "—"}
+  </div>
+  <div style="font-size:10px;color:#4b5563;margin-top:4px">{_caption}</div>
+  <div style="font-size:9px;color:#374151;margin-top:2px">{_cs}</div>
+</div>""", unsafe_allow_html=True)
 
 
 
@@ -4754,6 +4806,45 @@ with tab_onchain:
         st.caption("Enter a wallet address above to check ERC-3643 compliance status.")
     else:
         st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-3643 compliance checks.")
+
+    # ERC-3643 Eligibility Stub — #105 (Pro Mode)
+    if st.session_state.get("pro_mode", True):
+        with st.expander("🛡️ ERC-3643 Token Eligibility Check (Pro)", expanded=False):
+            st.caption(
+                "ERC-3643 (T-REX) is the institutional-grade token standard for regulated securities. "
+                "Permissioned RWA tokens (BUIDL, OUSG, tokenized equity) use an Identity Registry contract "
+                "to enforce KYC/AML compliance on-chain. Each transfer checks isVerified() against the "
+                "investor's on-chain identity before allowing the transaction."
+            )
+            _el_token = st.text_input(
+                "Token Contract Address",
+                placeholder="0x… (e.g. BUIDL: 0x7712c34205737192402172409a8F7ccef8aA2AEc)",
+                key="erc3643_token_addr",
+                max_chars=42,
+            )
+            _el_token_clean = _re_input.sub(r"[^0-9a-fA-Fx]", "", (_el_token or "").strip())[:42]
+            _el_wallet_clean = _wallet_addr  # reuse wallet from above
+
+            if st.button("Check Eligibility", key="btn_erc3643_check"):
+                if _el_token_clean and _el_wallet_clean:
+                    _el_result = _df.check_erc3643_eligibility(_el_wallet_clean, _el_token_clean)
+                    _el_v = _el_result.get("is_verified")
+                    _el_clr = "#10b981" if _el_v is True else ("#ef4444" if _el_v is False else "#6b7280")
+                    _el_lbl = "VERIFIED" if _el_v is True else ("NOT VERIFIED" if _el_v is False else "UNKNOWN")
+                    st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;margin-top:8px">
+  <div style="font-size:13px;color:#6b7280">ERC-3643 isVerified() result</div>
+  <div style="font-size:24px;font-weight:700;color:{_el_clr};margin:8px 0">{_el_lbl}</div>
+  <div style="font-size:11px;color:#9ca3af">Standard: {_el_result.get("standard", "ERC-3643 (T-REX)")}</div>
+  <div style="font-size:11px;color:#9ca3af">Source: {_el_result.get("source", "stub")}</div>
+  <div style="font-size:11px;color:#4b5563;margin-top:8px">{_el_result.get("note", "")}</div>
+</div>""", unsafe_allow_html=True)
+                elif not _el_wallet_clean:
+                    st.warning("Enter a wallet address in the EVM Wallet Address field above.")
+                else:
+                    st.warning("Enter a token contract address.")
+            else:
+                st.caption("Enter a wallet address above and a token address, then click Check Eligibility.")
 
     # Zerion Portfolio Import (#111)
     st.markdown("##### 🟣 Zerion On-Chain Portfolio")

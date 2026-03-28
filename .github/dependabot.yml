@@ -8,4 +8,11 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
-      - "security"
+    ignore:
+      - dependency-name: "streamlit"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/.github/workflows"
+    schedule:
+      interval: "weekly"

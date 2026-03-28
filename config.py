@@ -4679,3 +4679,16 @@ ERC4626_VAULTS = {
         "name":     "Franklin OnChain US Government Money Fund",
     },
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHAINLINK FEED ADDRESSES  (#108 Batch 9)
+# Chainlink AggregatorV3Interface contract addresses on Ethereum mainnet.
+# Used by fetch_chainlink_price() and fetch_chainlink_price_w3() in data_feeds.py.
+# ─────────────────────────────────────────────────────────────────────────────
+CHAINLINK_FEEDS = {
+    "ETH/USD":  "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+    "BTC/USD":  "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",
+    "LINK/USD": "0x2c1d072e956AFFC0D435Cb7AC308d97e0fBC2de6",
+    "XAU/USD":  "0x214eD9Da11D2fbe465a6fc601a91E62EbEc1a0D6",  # Gold
+    "XAG/USD":  "0x379589227b15F1a12195D3f2d90bBc9F31f95235",  # Silver
+}
