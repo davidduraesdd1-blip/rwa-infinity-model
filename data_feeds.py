@@ -3371,6 +3371,8 @@ def compute_mtf_confidence(asset_id: str, price_data: dict) -> dict:
         "dominant_tf": "1D",
         "trend": "NEUTRAL",
     }
+    if not price_data:
+        return _default
     try:
         current_price = float(price_data.get("price") or price_data.get("current_price") or 0.0)
         nav_usd       = float(price_data.get("nav_usd") or 0.0)
@@ -4703,10 +4705,6 @@ _PROTOCOL_FEE_SLUGS = {
     "truefi":       "truefi",
     "ondo":         "ondo-finance",
 }
-
-# Default protocol slugs for batch-5 (#57) — matches spec exactly
-_BATCH5_FEE_SLUGS = ["centrifuge", "maple-finance", "goldfinch", "clearpool", "truefi"]
-
 
 def fetch_protocol_fees(protocol_slugs: Optional[List[str]] = None) -> Dict[str, Any]:
     """
