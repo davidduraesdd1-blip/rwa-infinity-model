@@ -3408,7 +3408,7 @@ RWA_UNIVERSE = [
         "chain": "Ethereum",
         "protocol": "Sprott",
         "token_symbol": "SLVT",
-        "coingecko_id": "silver",
+        "coingecko_id": None,   # CoinGecko has no coin with id "silver" — price injected via fetch_silver_price()
         "defillama_slug": "",
         "expected_yield_pct": 0.0,
         "risk_score": 2,
@@ -3429,7 +3429,7 @@ RWA_UNIVERSE = [
         "chain": "Ethereum",
         "protocol": "Sprott Physical Silver Trust",
         "token_symbol": "XAGT",
-        "coingecko_id": "silver",
+        "coingecko_id": None,   # CoinGecko has no coin with id "silver" — price injected via fetch_silver_price()
         "defillama_slug": "",
         "expected_yield_pct": 0.0,
         "risk_score": 2,
@@ -3953,6 +3953,11 @@ _REDEMPTION_WINDOW_CATEGORY_DEFAULT: dict = {
     "Commodities":          "Instant",
     "Precious Metals":      "T+2",
     "Tokenized Equities":   "T+2",
+    "Equities":             "T+2",
+    "Private Equity":       "365+ days",
+    "Intellectual Property":"30+ days",
+    "Art & Collectibles":   "30+ days",
+    "Insurance":            "30-90 days",
     "Liquid Staking":       "7 days",
     "DeFi Yield":           "Instant",
     "PayFi":                "T+1",
@@ -4319,6 +4324,15 @@ _CATEGORY_EXIT_VELOCITY_DEFAULT: dict = {
     "Trade Finance":       {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
     "Infrastructure":      {"lockup_days": 365, "otc_available": False, "min_exit_usd": 100_000, "partial_exit": False},
     "Stablecoins":         {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
+    # Missing categories — added to prevent KeyError fallback returning wrong defaults
+    "Equities":            {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100,     "partial_exit": True},
+    "Private Equity":      {"lockup_days": 365, "otc_available": True,  "min_exit_usd": 100_000, "partial_exit": False},
+    "Intellectual Property":{"lockup_days": 90, "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
+    "Art & Collectibles":  {"lockup_days": 180, "otc_available": True,  "min_exit_usd": 10_000,  "partial_exit": False},
+    "Insurance":           {"lockup_days": 90,  "otc_available": False, "min_exit_usd": 5_000,   "partial_exit": False},
+    "Liquid Staking":      {"lockup_days": 7,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
+    "DeFi Yield":          {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
+    "PayFi":               {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
 }
 
 

@@ -151,12 +151,18 @@ CATEGORY_CORRELATIONS: dict = {
     ("Carbon Credits",       "Carbon Credits"):       0.65,
     ("Carbon Credits",       "Voluntary Carbon"):     0.85,
     ("Carbon Credits",       "Nature-Based Solutions"):0.70,
+    ("Carbon Credits",       "Compliance Carbon"):    0.55,   # legacy key corr with compliance market
     ("Carbon Credits",       "Infrastructure"):       0.20,
     ("Voluntary Carbon",     "Voluntary Carbon"):     0.65,
     ("Voluntary Carbon",     "Nature-Based Solutions"):0.70,
+    ("Voluntary Carbon",     "Compliance Carbon"):    0.50,   # vol carbon loosely tracks EUA
     ("Voluntary Carbon",     "Infrastructure"):       0.20,
     ("Nature-Based Solutions","Nature-Based Solutions"):0.65,
+    ("Nature-Based Solutions","Compliance Carbon"):   0.45,   # nature-based vs compliance market
     ("Nature-Based Solutions","Infrastructure"):      0.20,
+    ("Compliance Carbon",    "Compliance Carbon"):    0.72,   # EUA/CCA — policy-driven, correlated
+    ("Compliance Carbon",    "Equities"):             0.30,   # mild risk-on correlation
+    ("Compliance Carbon",    "Government Bonds"):    -0.05,   # slight defensive negative
     ("Precious Metals",      "Precious Metals"):      0.75,
     ("Precious Metals",      "Commodities"):          0.60,
     ("Precious Metals",      "Government Bonds"):     0.05,

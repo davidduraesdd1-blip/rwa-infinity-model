@@ -432,32 +432,27 @@ def fetch_gold_price() -> float:
 def fetch_silver_price() -> float:
     """Fetch spot silver price in USD per troy ounce.
 
+    NOTE: CoinGecko does not have a coin with id "silver" — that endpoint
+    would return empty data and is intentionally skipped here.
+
     Sources tried in order:
-      1. CoinGecko simple price for 'silver'
-      2. yfinance SI=F (silver futures — front month)
+      1. LBMA silver fix via FRED (fetch_lbma_prices — requires FRED_API_KEY)
+      2. yfinance SI=F (silver futures — front month, no key needed)
       3. Hardcoded fallback: $30.0 (approximate March 2026 price)
     Result cached for 15 minutes.
     """
     _SILVER_FALLBACK = 30.0
 
     def _fetch():
-        # Source 1: CoinGecko simple price API
+        # Source 1: LBMA silver fix via FRED (authoritative, key required)
         try:
-            _coingecko_limiter.acquire()
-            url = f"{COINGECKO_BASE}/simple/price"
-            r = _session.get(
-                url,
-                params={"ids": "silver", "vs_currencies": "usd"},
-                timeout=REQUEST_TIMEOUT,
-            )
-            if r.status_code == 200:
-                data = r.json()
-                price = data.get("silver", {}).get("usd")
-                if price and float(price) > 0:
-                    logger.debug("[Silver] CoinGecko price: $%.2f", price)
-                    return float(price)
+            lbma = fetch_lbma_prices()
+            price = lbma.get("silver_usd_oz")
+            if price and float(price) > 0 and lbma.get("source") != "fallback":
+                logger.debug("[Silver] LBMA/FRED price: $%.2f", price)
+                return float(price)
         except Exception as e:
-            logger.debug("[Silver] CoinGecko fetch failed: %s", e)
+            logger.debug("[Silver] LBMA fetch failed: %s", e)
 
         # Source 2: yfinance SI=F (silver front-month futures)
         try:
@@ -471,9 +466,10 @@ def fetch_silver_price() -> float:
         except Exception as e:
             logger.debug("[Silver] yfinance SI=F failed: %s", e)
 
-        # Source 3: hardcoded fallback
-        logger.debug("[Silver] Using hardcoded fallback: $%.2f", _SILVER_FALLBACK)
-        return None  # signal to _cached_get that fetch failed — use stale or fallback below
+        # Source 3: all sources exhausted — return None so _cached_get uses stale cache
+        # if available; caller returns _SILVER_FALLBACK ($30.0) when no stale value exists
+        logger.warning("[Silver] All price sources failed — will use stale cache or $%.2f fallback", _SILVER_FALLBACK)
+        return None
 
     cached = _cached_get("silver_price", 900, _fetch)  # 15-min TTL
     if cached is None:
@@ -895,6 +891,10 @@ def refresh_all_assets(progress_callback=None) -> List[dict]:
     protocols = _parallel_results.get("protocols") or []
     yield_pools = _parallel_results.get("yields") or []
 
+    # Pre-fetch silver spot price for SLVT / XAGT (CoinGecko has no "silver" coin ID)
+    _silver_price = fetch_silver_price()
+    _SILVER_ASSET_IDS = {"SLVT", "XAGT"}
+
     if progress_callback:
         progress_callback(35, "Processing asset data...")
 
@@ -931,6 +931,12 @@ def refresh_all_assets(progress_callback=None) -> List[dict]:
         current_price = price_data.get("price_usd") or 1.0  # most RWA tokens = $1
         market_cap    = price_data.get("market_cap") or 0
         volume_24h    = price_data.get("volume_24h") or 0
+
+        # Silver-backed assets: override with live silver spot price.
+        # CoinGecko has no coin with id "silver"; their coingecko_id is None.
+        # fetch_silver_price() uses CoinGecko simple/price → yfinance → fallback.
+        if asset_id in _SILVER_ASSET_IDS:
+            current_price = _silver_price
 
         # Stable/T-bill tokens → always $1
         stablecoin_ids = {"USDM", "USDY", "OMMF", "OUSG", "TBILL", "USTB",
