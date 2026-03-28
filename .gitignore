@@ -1,14 +1,35 @@
-# Environment & secrets
+# ── Secrets & credentials (NEVER commit these) ────────────────────────────────
 .env
 *.env
 ANTHROPIC_API_KEY*
+.streamlit/secrets.toml
+alerts_config.json
 
-# Database (local state — not version controlled)
+# ── Database & runtime state ──────────────────────────────────────────────────
 *.db
 *.db-shm
 *.db-wal
+rwa_model.db*
 
-# Python
+# ── Runtime JSON (auto-generated, personal data) ─────────────────────────────
+anomaly_baseline.json
+scan_results_cache.json
+positions.json
+dynamic_weights.json
+scan_status.json
+feedback_cache.json
+news_cache.json
+model_state.json
+
+# ── Generated output files ────────────────────────────────────────────────────
+*.csv
+*.xlsx
+*.pdf
+*.png
+*.log
+logs/
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,18 +41,10 @@ build/
 venv/
 env/
 
-# Streamlit
-.streamlit/secrets.toml
-
-# Data outputs
-*.csv
-*.xlsx
-*.pdf
-scan_results_cache.json
-model.log
-*.log
-
-# OS
+# ── OS / Editor ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 desktop.ini
+.idea/
+.vscode/
+*.swp
