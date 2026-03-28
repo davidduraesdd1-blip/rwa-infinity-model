@@ -193,6 +193,8 @@ def _get(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> Optio
             _DEFILLAMA_LIMITER.acquire()
         elif "etherscan.io" in _host:
             _ETHERSCAN_LIMITER.acquire()
+        else:
+            _default_limiter.acquire()   # 2 req/s fallback for all other APIs
     except Exception:
         pass  # rate limiter errors must never block requests
     for attempt in range(MAX_RETRIES):

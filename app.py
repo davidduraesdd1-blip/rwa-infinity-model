@@ -113,29 +113,6 @@ def _init():
 
 _init()
 
-# ─── Sidebar: API health status (#17) ─────────────────────────────────────────
-with st.sidebar:
-    st.markdown("#### API Status")
-    _api_health = _get_api_health()
-    if _api_health:
-        _dot_map = {
-            "ok":      ("🟢", "green"),
-            "no key":  ("⚫", "grey"),
-        }
-        for _svc, _status in _api_health.items():
-            if _status == "ok":
-                _dot, _label = "🟢", "ok"
-            elif _status == "no key":
-                _dot, _label = "⚫", "no key"
-            else:
-                _dot, _label = "🔴", "error"
-            st.markdown(
-                f'<span style="font-size:11px">{_dot} <b>{_svc}</b>: {_label}</span>',
-                unsafe_allow_html=True,
-            )
-    else:
-        st.caption("API health check unavailable")
-
 # ─── Custom CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -297,6 +274,27 @@ def _get_api_health():
         return _df.validate_api_keys()
     except Exception:
         return {}
+
+
+# ─── Sidebar: API health status (#17) ─────────────────────────────────────────
+# Placed here — after _get_api_health() is defined — to avoid NameError on startup.
+with st.sidebar:
+    st.markdown("#### API Status")
+    _api_health = _get_api_health()
+    if _api_health:
+        for _svc, _status in _api_health.items():
+            if _status == "ok":
+                _dot, _label = "🟢", "ok"
+            elif _status == "no key":
+                _dot, _label = "⚫", "no key"
+            else:
+                _dot, _label = "🔴", "error"
+            st.markdown(
+                f'<span style="font-size:11px">{_dot} <b>{_svc}</b>: {_label}</span>',
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption("API health check unavailable")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1606,8 +1604,8 @@ with tab_portfolio:
                 help="VIX volatility index point change. +10 = elevated fear environment",
             )
 
-        if abs(_sc_hy) > 500:
-            st.warning("HY spread change > 500bp is extreme — results may be unreliable")
+        if abs(_sc_hy) >= 400:
+            st.warning("HY spread change >= 400bp is extreme — results may be unreliable")
 
         if st.button("Run Scenario", key="btn_run_scenario", use_container_width=False):
             _shocks = {
