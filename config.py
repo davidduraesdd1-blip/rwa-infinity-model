@@ -4623,4 +4623,22 @@ ALLOWED_DOMAINS: frozenset = frozenset({
     "api.wormholescan.io",           # Wormhole VAA tracking (#113)
     "api.chain.link",                # Chainlink Data Streams (#108)
     "min-api.cryptocompare.com",     # CryptoCompare — Chainlink fallback
+    # Batch 5
+    "fapi.binance.com",              # Binance Futures perpetual funding / OI (#54)
 })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RWA MARKET CONTEXT  (#94) — Represented Asset Value / TAM framing
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The total off-chain asset market that RWA protocols represent
+RWA_TAM_USD = 360_000_000_000  # $360B total addressable market (BCG / RWA.xyz 2024 estimate)
+RWA_ONCHAIN_USD = 15_000_000_000  # ~$15B currently tokenized on-chain (baseline fallback)
+
+# Key RWA milestones for context
+RWA_MILESTONES = {
+    "2023": 1_000_000_000,        # $1B milestone
+    "2024": 10_000_000_000,       # $10B milestone
+    "target_2025": 30_000_000_000,
+    "target_2030": 16_000_000_000_000,  # BCG projection: $16T by 2030
+}

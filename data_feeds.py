@@ -37,6 +37,7 @@ from config import (
     ETHERSCAN_API_KEY, ZERION_API_KEY, COIN_METRICS_API_KEY,
     get_asset_fee_bps,
     ALLOWED_DOMAINS,
+    RWA_TAM_USD, RWA_ONCHAIN_USD,
 )
 
 logger = logging.getLogger(__name__)
@@ -3321,6 +3322,356 @@ def compute_screener_signals(symbol: str) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# MULTI-TIMEFRAME CONFIDENCE FOR RWA ASSETS  (#53)
+# ─────────────────────────────────────────────────────────────────────────────
+# Weights: 1H 10% · 4H 20% · 1D 35% · 1W 35%
+# For RWA assets (no intraday data), uses NAV premium/discount + macro regime.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MTF_WEIGHTS = {"1H": 0.10, "4H": 0.20, "1D": 0.35, "1W": 0.35}
+_MTF_SIGNAL  = {"BULLISH": 1.0, "NEUTRAL": 0.5, "BEARISH": 0.0}
+
+# Macro-regime → default MTF signal for stable/yield-bearing RWA assets
+_REGIME_TO_MTF = {
+    "RISK_ON":          {"1H": "BULLISH", "4H": "BULLISH", "1D": "BULLISH", "1W": "BULLISH"},
+    "RISK_OFF":         {"1H": "BEARISH", "4H": "BEARISH", "1D": "BEARISH", "1W": "BEARISH"},
+    "STAGFLATION":      {"1H": "NEUTRAL", "4H": "NEUTRAL", "1D": "NEUTRAL", "1W": "NEUTRAL"},
+    "LIQUIDITY_CRUNCH": {"1H": "BEARISH", "4H": "BEARISH", "1D": "BEARISH", "1W": "BEARISH"},
+    "NEUTRAL":          {"1H": "NEUTRAL", "4H": "NEUTRAL", "1D": "NEUTRAL", "1W": "NEUTRAL"},
+}
+# Commodity/gold RWA assets get different stagflation signal
+_STAGFLATION_COMMODITY = {"1H": "BULLISH", "4H": "BULLISH", "1D": "BULLISH", "1W": "NEUTRAL"}
+
+_COMMODITY_KEYWORDS = {"gold", "silver", "commodity", "paxg", "xaut", "comex"}
+
+
+def compute_mtf_confidence(asset_id: str, price_data: dict) -> dict:
+    """
+    Multi-timeframe confidence for an RWA or crypto asset.  (#53)
+
+    For crypto assets with OHLCV data available, delegates to compute_screener_signals().
+    For RWA (stable/yield-bearing) assets, uses:
+      - NAV premium/discount per timeframe (if nav_usd in price_data)
+      - Macro regime as proxy when intraday data is unavailable
+
+    Weights: 1H=10%, 4H=20%, 1D=35%, 1W=35%
+    Signal values: BULLISH=1.0, NEUTRAL=0.5, BEARISH=0.0
+
+    Returns:
+        {
+          "confidence": float,
+          "timeframes": {"1H": float, "4H": float, "1D": float, "1W": float},
+          "dominant_tf": str,
+          "trend": "BULLISH" | "BEARISH" | "NEUTRAL",
+        }
+    """
+    _default = {
+        "confidence": 0.5,
+        "timeframes": {"1H": 0.5, "4H": 0.5, "1D": 0.5, "1W": 0.5},
+        "dominant_tf": "1D",
+        "trend": "NEUTRAL",
+    }
+    try:
+        current_price = float(price_data.get("price") or price_data.get("current_price") or 0.0)
+        nav_usd       = float(price_data.get("nav_usd") or 0.0)
+        asset_lower   = asset_id.lower()
+
+        tf_signals: Dict[str, str] = {}
+
+        # ── NAV premium/discount path (RWA assets with a known NAV) ───────────
+        if nav_usd > 0 and current_price > 0:
+            ratio = current_price / nav_usd
+            if ratio > 1.01:
+                nav_sig = "BULLISH"
+            elif ratio < 0.99:
+                nav_sig = "BEARISH"
+            else:
+                nav_sig = "NEUTRAL"
+            # Apply same nav signal to all timeframes (NAV is a slow-moving anchor)
+            tf_signals = {"1H": nav_sig, "4H": nav_sig, "1D": nav_sig, "1W": nav_sig}
+
+        # ── Intraday price vs EMA path (crypto assets or RWA with price history) ─
+        elif current_price > 0:
+            # Try Binance OHLCV for known crypto-like assets
+            binance_sym = price_data.get("binance_symbol")
+            if binance_sym:
+                try:
+                    bars_1h = fetch_binance_ohlcv(binance_sym, "1h", 60)
+                    bars_4h = fetch_binance_ohlcv(binance_sym, "4h", 60)
+                    bars_1d = fetch_binance_ohlcv(binance_sym, "1d", 220)
+                    bars_1w = fetch_binance_ohlcv(binance_sym, "1w", 60)
+
+                    def _ema_sig(bars: List[dict], fast: int, slow: int) -> str:
+                        if len(bars) < slow:
+                            return "NEUTRAL"
+                        closes = [b["c"] for b in bars]
+                        k_f = 2.0 / (fast + 1)
+                        k_s = 2.0 / (slow + 1)
+                        ef = sum(closes[:fast]) / fast
+                        es = sum(closes[:slow]) / slow
+                        for c in closes[fast:]:
+                            ef = c * k_f + ef * (1.0 - k_f)
+                        for c in closes[slow:]:
+                            es = c * k_s + es * (1.0 - k_s)
+                        p = closes[-1]
+                        if p > ef > es:
+                            return "BULLISH"
+                        elif p < ef < es:
+                            return "BEARISH"
+                        return "NEUTRAL"
+
+                    tf_signals = {
+                        "1H": _ema_sig(bars_1h, 9, 21),
+                        "4H": _ema_sig(bars_4h, 9, 21),
+                        "1D": _ema_sig(bars_1d, 20, 50),
+                        "1W": _ema_sig(bars_1w, 10, 20),
+                    }
+                except Exception:
+                    pass
+
+        # ── Macro regime fallback (RWA assets with no intraday data) ──────────
+        if not tf_signals:
+            try:
+                regime_data = fetch_macro_regime()
+                regime      = regime_data.get("regime", "NEUTRAL")
+            except Exception:
+                regime = "NEUTRAL"
+
+            is_commodity = any(kw in asset_lower for kw in _COMMODITY_KEYWORDS)
+            if regime == "STAGFLATION" and is_commodity:
+                tf_signals = _STAGFLATION_COMMODITY.copy()
+            else:
+                tf_signals = _REGIME_TO_MTF.get(regime, _REGIME_TO_MTF["NEUTRAL"]).copy()
+
+        # ── Compute weighted confidence ────────────────────────────────────────
+        tf_values   = {tf: _MTF_SIGNAL.get(sig, 0.5) for tf, sig in tf_signals.items()}
+        weighted    = sum(tf_values[tf] * _MTF_WEIGHTS[tf] for tf in _MTF_WEIGHTS)
+        dominant_tf = max(tf_values, key=lambda tf: tf_values[tf] * _MTF_WEIGHTS[tf])
+
+        if weighted >= 0.65:
+            trend = "BULLISH"
+        elif weighted <= 0.35:
+            trend = "BEARISH"
+        else:
+            trend = "NEUTRAL"
+
+        return {
+            "confidence": round(weighted, 3),
+            "timeframes": {tf: round(tf_values[tf], 3) for tf in ["1H", "4H", "1D", "1W"]},
+            "dominant_tf": dominant_tf,
+            "trend": trend,
+        }
+
+    except Exception as e:
+        logger.warning("[MTFConfidence] %s: %s", asset_id, e)
+        return _default
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ON-CHAIN SIGNALS — FUNDING RATES + OPEN INTEREST  (#54)
+# ─────────────────────────────────────────────────────────────────────────────
+# Fetches BTC and ETH perpetual funding rates and open interest.
+# Primary: Bybit v5 (no geo-block). Fallback: fapi.binance.com if accessible.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_onchain_signals_cache: Dict[str, Any] = {}
+_ONCHAIN_SIGNALS_TTL = 900  # 15 minutes
+
+
+def _funding_signal(rate: float) -> str:
+    """Classify a perpetual funding rate as OVERHEATED / NORMAL / DISCOUNTED."""
+    if rate > 0.0001:      # > 0.01% per 8h
+        return "OVERHEATED"
+    if rate < -0.00005:    # < -0.005% per 8h
+        return "DISCOUNTED"
+    return "NORMAL"
+
+
+def fetch_crypto_onchain_signals() -> dict:
+    """
+    Fetch BTC and ETH perpetual funding rates and open interest.  (#54)
+
+    Primary source: Bybit v5 (api.bybit.com — no US geo-block).
+    Secondary source: fapi.binance.com (if accessible).
+
+    Returns:
+        {
+          "btc_funding_rate": float,         # decimal per 8h, e.g. 0.0001
+          "eth_funding_rate": float,
+          "btc_funding_signal": str,         # OVERHEATED | NORMAL | DISCOUNTED
+          "eth_funding_signal": str,
+          "btc_oi_usd": float,               # open interest in USD
+          "eth_oi_usd": float,
+          "btc_oi_7d_change_pct": float,
+          "eth_oi_7d_change_pct": float,
+          "source": str,
+          "timestamp": str,
+        }
+    """
+    now    = time.time()
+    cached = _onchain_signals_cache.get("onchain_signals")
+    if cached and now - cached[1] < _ONCHAIN_SIGNALS_TTL:
+        return cached[0]
+
+    result: dict = {
+        "btc_funding_rate":    None,
+        "eth_funding_rate":    None,
+        "btc_funding_signal":  "NORMAL",
+        "eth_funding_signal":  "NORMAL",
+        "btc_oi_usd":          None,
+        "eth_oi_usd":          None,
+        "btc_oi_7d_change_pct": None,
+        "eth_oi_7d_change_pct": None,
+        "source":              "unavailable",
+        "timestamp":           datetime.now(timezone.utc).isoformat(),
+    }
+
+    # ── Bybit v5 path (primary — no geo-block) ────────────────────────────────
+    try:
+        bybit_funding = fetch_binance_funding_rates(["BTCUSDT", "ETHUSDT"])
+        bybit_oi      = fetch_binance_open_interest(["BTCUSDT", "ETHUSDT"])
+        bybit_prices  = fetch_coingecko_prices()
+
+        btc_price = float(bybit_prices.get("bitcoin", {}).get("usd", 0) or 0)
+        eth_price = float(bybit_prices.get("ethereum", {}).get("usd", 0) or 0)
+
+        btc_fr = bybit_funding.get("BTCUSDT")
+        eth_fr = bybit_funding.get("ETHUSDT")
+
+        if btc_fr is not None:
+            # convert % to decimal
+            btc_fr_dec = btc_fr / 100.0
+            result["btc_funding_rate"]   = round(btc_fr_dec, 6)
+            result["btc_funding_signal"] = _funding_signal(btc_fr_dec)
+
+        if eth_fr is not None:
+            eth_fr_dec = eth_fr / 100.0
+            result["eth_funding_rate"]   = round(eth_fr_dec, 6)
+            result["eth_funding_signal"] = _funding_signal(eth_fr_dec)
+
+        btc_oi_coins = bybit_oi.get("BTCUSDT")
+        eth_oi_coins = bybit_oi.get("ETHUSDT")
+        if btc_oi_coins is not None and btc_price > 0:
+            result["btc_oi_usd"] = round(btc_oi_coins * btc_price, 0)
+        if eth_oi_coins is not None and eth_price > 0:
+            result["eth_oi_usd"] = round(eth_oi_coins * eth_price, 0)
+
+        result["source"] = "bybit_v5"
+
+        # ── OI 7d change via Bybit OI history ─────────────────────────────────
+        for sym, key_prefix in [("BTCUSDT", "btc"), ("ETHUSDT", "eth")]:
+            try:
+                url = f"{_BYBIT_BASE}/market/open-interest"
+                oi_hist = _get(url, params={
+                    "category":     "linear",
+                    "symbol":       sym,
+                    "intervalTime": "1d",
+                    "limit":        8,
+                })
+                if (isinstance(oi_hist, dict) and oi_hist.get("retCode") == 0):
+                    items = (oi_hist.get("result") or {}).get("list") or []
+                    if len(items) >= 7:
+                        oi_now  = float(items[0]["openInterest"])
+                        oi_7d   = float(items[min(6, len(items) - 1)]["openInterest"])
+                        if oi_7d > 0:
+                            chg = (oi_now - oi_7d) / oi_7d * 100.0
+                            result[f"{key_prefix}_oi_7d_change_pct"] = round(chg, 2)
+            except Exception as e:
+                logger.debug("[OnChainSignals] OI history %s: %s", sym, e)
+
+    except Exception as e:
+        logger.warning("[OnChainSignals] Bybit path failed: %s", e)
+
+    _onchain_signals_cache["onchain_signals"] = (result, time.time())
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HMM MACRO REGIME — PUBLIC ALIAS  (#55)
+# ─────────────────────────────────────────────────────────────────────────────
+# fetch_hmm_macro_regime() is the public name expected by app.py.
+# The implementation lives in get_hmm_macro_regime() (defined earlier in this file)
+# which uses Gaussian observation scoring across 4 macro states.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_hmm_macro_regime() -> dict:
+    """
+    Probabilistic macro regime classifier (HMM-inspired).  (#55)
+
+    Wraps get_hmm_macro_regime() with an additional VIX-based probability
+    decomposition that satisfies the batch-5 spec:
+      - p_risk_on  = max(0, min(1, (30 - vix) / 20))  normalised
+      - p_risk_off = max(0, min(1, (vix - 20) / 20))
+      - p_neutral  = 1 - p_risk_on - p_risk_off
+
+    Returns:
+        {
+          "regime":       str,
+          "probabilities": {"RISK_ON": float, "RISK_OFF": float, "NEUTRAL": float},
+          "confidence":   float,
+          "dominant_signal": str,
+          "source":       "HMM" | "fallback",
+        }
+    """
+    try:
+        base = get_hmm_macro_regime()
+        regime = base.get("regime", "NEUTRAL")
+
+        # Extract VIX for VIX-based probability bands
+        try:
+            macro = fetch_macro_indicators()
+            yf_m  = fetch_yfinance_macro()
+            vix   = float(yf_m.get("vix") or macro.get("vix", 20.0))
+        except Exception:
+            vix = 20.0
+
+        p_risk_on  = max(0.0, min(1.0, (30.0 - vix) / 20.0))
+        p_risk_off = max(0.0, min(1.0, (vix - 20.0) / 20.0))
+        p_neutral  = max(0.0, 1.0 - p_risk_on - p_risk_off)
+
+        # Normalise to 1.0
+        total_p = p_risk_on + p_risk_off + p_neutral or 1.0
+        probs = {
+            "RISK_ON":  round(p_risk_on  / total_p, 3),
+            "RISK_OFF": round(p_risk_off / total_p, 3),
+            "NEUTRAL":  round(p_neutral  / total_p, 3),
+        }
+
+        # Identify the dominant signal from the underlying Gaussian classifier
+        base_sigs = base.get("signals", {})
+        dominant_signal = (
+            max(base_sigs, key=lambda k: abs(float(base_sigs[k])))
+            if base_sigs else "vix"
+        )
+
+        return {
+            "regime":           regime,
+            "probabilities":    probs,
+            "confidence":       base.get("confidence", max(probs.values())),
+            "dominant_signal":  dominant_signal,
+            "source":           "HMM",
+            "description":      base.get("description", ""),
+            "vix":              round(vix, 1),
+        }
+
+    except Exception as e:
+        logger.warning("[HMMRegime] fetch_hmm_macro_regime failed: %s", e)
+        # Graceful fallback
+        try:
+            fb = fetch_macro_regime()
+            regime = fb.get("regime", "NEUTRAL")
+        except Exception:
+            regime = "NEUTRAL"
+        return {
+            "regime":           regime,
+            "probabilities":    {"RISK_ON": 0.33, "RISK_OFF": 0.33, "NEUTRAL": 0.34},
+            "confidence":       0.33,
+            "dominant_signal":  "fallback",
+            "source":           "fallback",
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TIER 3 — XRPL / RLUSD / SOIL PROTOCOL  (Upgrade 12)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -4345,50 +4696,102 @@ def fetch_nav_premium_discount(asset_ids: Optional[List[str]] = None) -> Dict[st
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PROTOCOL_FEE_SLUGS = {
-    "centrifuge": "centrifuge",
-    "maple":      "maple",
-    "goldfinch":  "goldfinch",
-    "clearpool":  "clearpool",
-    "ondo":       "ondo-finance",
+    "centrifuge":   "centrifuge",
+    "maple":        "maple",
+    "goldfinch":    "goldfinch",
+    "clearpool":    "clearpool",
+    "truefi":       "truefi",
+    "ondo":         "ondo-finance",
 }
 
+# Default protocol slugs for batch-5 (#57) — matches spec exactly
+_BATCH5_FEE_SLUGS = ["centrifuge", "maple-finance", "goldfinch", "clearpool", "truefi"]
 
-def fetch_protocol_fees(slugs: Optional[List[str]] = None) -> Dict[str, Any]:
+
+def fetch_protocol_fees(protocol_slugs: Optional[List[str]] = None) -> Dict[str, Any]:
     """
-    Fetch 7d/30d protocol fee revenue from DeFiLlama /fees endpoint.
+    Fetch 24h and 30d protocol fee revenue from DeFiLlama /fees endpoint.
+
+    Uses DeFiLlama summary/fees/{slug} for each protocol.
+    Computes a health signal: GREEN/YELLOW/RED based on whether daily fees
+    are on track relative to the 30-day average.
+
+    Default slugs: centrifuge, maple-finance, goldfinch, clearpool, truefi
 
     Returns:
         {
-          "protocols": {slug: {"fees_7d_usd": float, "fees_30d_usd": float, "revenue_7d_usd": float}},
+          <slug>: {"fees_24h": float, "fees_30d": float, "annualized": float, "health": str},
+          ...
           "timestamp": str,
         }
     """
-    targets = slugs or list(_PROTOCOL_FEE_SLUGS.values())
-    protocols: Dict[str, Any] = {}
+    slugs = protocol_slugs or list(_PROTOCOL_FEE_SLUGS.values())
 
-    for slug in targets:
+    result: Dict[str, Any] = {}
+
+    for slug in slugs:
         try:
-            url  = f"https://api.llama.fi/summary/fees/{slug}"
-            data = _cached_get(f"protocol_fees_{slug}", 3600, lambda u=url: (
-                lambda r: r.json() if r.status_code == 200 else None
-            )(_session.get(u, timeout=10)))
+            url = f"{DEFILLAMA_BASE}/summary/fees/{slug}"
+
+            def _fetch_slug(u: str = url, s: str = slug):
+                if not _is_allowed_url(u):
+                    logger.warning("[ProtocolFees] SSRF blocked: %s", u)
+                    return None
+                try:
+                    r = _session.get(u, timeout=10)
+                    if r.status_code == 404:
+                        logger.debug("[ProtocolFees] %s not found in DeFiLlama fees", s)
+                        return None
+                    if r.status_code != 200:
+                        return None
+                    return r.json()
+                except Exception as _e:
+                    logger.debug("[ProtocolFees] request failed %s: %s", s, _e)
+                    return None
+
+            data = _cached_get(f"protocol_fees_{slug}", 3600, _fetch_slug)
             if not data:
+                result[slug] = None
                 continue
-            protocols[slug] = {
-                "fees_7d_usd":     data.get("total7d",  0) or 0,
-                "fees_30d_usd":    data.get("total30d", 0) or 0,
-                "revenue_7d_usd":  data.get("revenue7d",  0) or 0,
-                "revenue_30d_usd": data.get("revenue30d", 0) or 0,
-                "name":            data.get("name", slug),
+
+            fees_24h  = float(data.get("total24h",  0) or 0)
+            fees_30d  = float(data.get("total30d",  0) or 0)
+            fees_7d   = float(data.get("total7d",   0) or 0)
+            rev_24h   = float(data.get("revenue24h", 0) or 0)
+            rev_30d   = float(data.get("revenue30d", 0) or 0)
+
+            daily_avg_30d = fees_30d / 30.0 if fees_30d > 0 else 0.0
+            annualized    = fees_30d * 12.0
+
+            # Health signal: is today's fee collection on pace?
+            if daily_avg_30d > 0:
+                ratio = fees_24h / daily_avg_30d
+                if ratio >= 0.8:
+                    health = "GREEN"
+                elif ratio >= 0.4:
+                    health = "YELLOW"
+                else:
+                    health = "RED"
+            else:
+                health = "YELLOW"
+
+            result[slug] = {
+                "name":        data.get("name", slug),
+                "fees_24h":    fees_24h,
+                "fees_30d":    fees_30d,
+                "fees_7d":     fees_7d,
+                "revenue_24h": rev_24h,
+                "revenue_30d": rev_30d,
+                "annualized":  annualized,
+                "health":      health,
             }
         except Exception as e:
             logger.debug("[ProtocolFees] %s failed: %s", slug, e)
+            result[slug] = None
 
-    return {
-        "protocols": protocols,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "source":    "defillama_fees",
-    }
+    result["timestamp"] = datetime.now(timezone.utc).isoformat()
+    result["source"]    = "defillama_fees"
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────

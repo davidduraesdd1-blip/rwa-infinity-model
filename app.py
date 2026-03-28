@@ -83,6 +83,7 @@ from config import (
     RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
     XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled,
     get_redemption_window,
+    RWA_TAM_USD, RWA_ONCHAIN_USD, RWA_MILESTONES,
 )
 
 # ─── Sentry error monitoring (free tier — only loads when DSN is set) ──────────
@@ -1070,41 +1071,56 @@ with tab_portfolio:
 
     st.markdown("<div style='margin:12px 0'></div>", unsafe_allow_html=True)
 
-    # ── Represented Asset Value (#94) ─────────────────────────────────────────
-    # On-chain RWA TVL vs the $360B off-chain tokenizable universe
-    _OFF_CHAIN_TAM_B = 360.0  # $360B total addressable market (Boston Consulting Group / RWA.xyz 2025 estimate)
+    # ── RWA Market Context (#94) ────────────────────────────────────────────────
+    # On-chain RWA TVL vs the $360B TAM and BCG $16T 2030 projection
+    _OFF_CHAIN_TAM_B  = RWA_TAM_USD / 1e9          # $360B
+    _BCG_2030_T       = RWA_MILESTONES["target_2030"] / 1e12   # $16T
+    _ONCHAIN_FALLBACK = RWA_ONCHAIN_USD / 1e9       # $15B fallback
     try:
         _rwa_tvl = _df.get_total_rwa_tvl() if not _demo_mode else 18_400_000_000
     except Exception:
         _rwa_tvl = 0.0
-    if _rwa_tvl > 0:
-        _rwa_tvl_b  = _rwa_tvl / 1e9
-        _pen_pct    = round(_rwa_tvl_b / _OFF_CHAIN_TAM_B * 100, 2)
-        _pen_color  = "#34D399" if _pen_pct >= 5 else "#FBBF24" if _pen_pct >= 1 else "#9CA3AF"
+    _rwa_tvl_b = (_rwa_tvl / 1e9) if _rwa_tvl > 0 else _ONCHAIN_FALLBACK
+    if _rwa_tvl_b > 0:
+        _pen_pct       = round(_rwa_tvl_b / _OFF_CHAIN_TAM_B * 100, 2)
+        _bcg_pct       = round(_rwa_tvl_b / (_BCG_2030_T * 1000) * 100, 4)  # % of $16T (T→B)
+        _pen_color     = "#34D399" if _pen_pct >= 5 else "#FBBF24" if _pen_pct >= 1 else "#9CA3AF"
+        _bar_width_pct = min(_pen_pct * 4, 100)
         st.markdown(
             f"""<div style="background:linear-gradient(135deg,#111827,#0D1117);
                             border:1px solid #1F2937;border-radius:10px;
-                            padding:12px 18px;margin-bottom:14px;
-                            display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-                <div style="min-width:54px;text-align:center">
-                    <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.6px">On-Chain</div>
-                    <div style="font-size:18px;font-weight:800;color:{_pen_color}">${_rwa_tvl_b:.1f}B</div>
+                            padding:14px 18px;margin-bottom:14px">
+                <div style="font-size:11px;color:#6B7280;text-transform:uppercase;
+                            letter-spacing:0.08em;margin-bottom:8px">
+                    RWA Market Context
                 </div>
-                <div style="flex:1;min-width:180px">
-                    <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-                        <span style="font-size:12px;font-weight:600;color:#E2E8F0">Represented Asset Value</span>
-                        <span style="font-size:12px;color:{_pen_color};font-weight:700">{_pen_pct:.2f}% of TAM</span>
+                <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+                    <div style="min-width:64px;text-align:center">
+                        <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.6px">On-Chain</div>
+                        <div style="font-size:20px;font-weight:800;color:{_pen_color}">${_rwa_tvl_b:.1f}B</div>
                     </div>
-                    <div style="background:#1F2937;border-radius:3px;height:5px;overflow:hidden">
-                        <div style="background:linear-gradient(90deg,{_pen_color},{_pen_color}88);
-                                    width:{min(_pen_pct*4, 100):.0f}%;height:100%;border-radius:3px"></div>
+                    <div style="flex:1;min-width:200px">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                            <span style="font-size:12px;font-weight:600;color:#E2E8F0">Total On-Chain RWA</span>
+                            <span style="font-size:12px;color:{_pen_color};font-weight:700">{_pen_pct:.2f}% tokenized</span>
+                        </div>
+                        <div style="background:#1F2937;border-radius:3px;height:5px;overflow:hidden;margin-bottom:6px">
+                            <div style="background:linear-gradient(90deg,{_pen_color},{_pen_color}88);
+                                        width:{_bar_width_pct:.0f}%;height:100%;border-radius:3px"></div>
+                        </div>
+                        <div style="font-size:10px;color:#4B5563;">
+                            <b style="color:#9CA3AF">${_rwa_tvl_b:.1f}B</b> on-chain
+                            &nbsp;/&nbsp; <b style="color:#6B7280">${_OFF_CHAIN_TAM_B:.0f}B TAM</b>
+                            &nbsp;=&nbsp; <b style="color:{_pen_color}">{_pen_pct:.2f}% tokenized</b>
+                        </div>
+                        <div style="font-size:10px;color:#374151;margin-top:3px">
+                            BCG projects $16T by 2030 — we are at
+                            <b style="color:#6366f1">{_bcg_pct:.2f}%</b> of that target
+                        </div>
                     </div>
-                    <div style="font-size:10px;color:#4B5563;margin-top:3px">
-                        ${_rwa_tvl_b:.1f}B on-chain vs ${_OFF_CHAIN_TAM_B:.0f}B total addressable real-world asset market
+                    <div style="font-size:10px;color:#374151;text-align:right;min-width:80px">
+                        Source:<br>DeFiLlama RWA<br>BCG/RWA.xyz 2025
                     </div>
-                </div>
-                <div style="font-size:10px;color:#374151;text-align:right;min-width:80px">
-                    Source:<br>DeFiLlama RWA<br>BCG/RWA.xyz 2025
                 </div>
             </div>""",
             unsafe_allow_html=True,
@@ -1240,6 +1256,55 @@ with tab_portfolio:
         with r5:
             _metric_card("Diversification", f"{metrics.get('diversification_ratio', 0):.2f}x",
                          tooltip="Diversification benefit: weighted avg individual volatility ÷ portfolio volatility. Above 1.0x means your asset mix actively reduces overall risk")
+
+    # ── MTF Confidence per Asset (Pro Mode only) (#53) ───────────────────────
+    if _pro_mode and holdings:
+        st.markdown('<div class="section-header">Multi-Timeframe Confidence (Pro)</div>',
+                    unsafe_allow_html=True)
+        st.caption("MTF confidence: 1H(10%) · 4H(20%) · 1D(35%) · 1W(35%). "
+                   "RWA assets use macro regime + NAV premium/discount as proxy.")
+        _mtf_cols = st.columns(min(len(holdings), 4))
+        for _mi, _h in enumerate(holdings[:8]):
+            _col_idx = _mi % 4
+            with _mtf_cols[_col_idx]:
+                try:
+                    _price_data = {
+                        "price":      _h.get("current_price") or _h.get("price") or 0,
+                        "nav_usd":    _h.get("nav_usd") or 0,
+                    }
+                    _mtf = _df.compute_mtf_confidence(_h.get("id", ""), _price_data)
+                    _conf = _mtf.get("confidence", 0.5)
+                    _trend = _mtf.get("trend", "NEUTRAL")
+                    _tfs   = _mtf.get("timeframes", {})
+                    _dom_tf = _mtf.get("dominant_tf", "1D")
+                    _trend_color = "#34D399" if _trend == "BULLISH" else "#EF4444" if _trend == "BEARISH" else "#9CA3AF"
+                    _bar_w = int(_conf * 100)
+                    # 4-segment visual: one segment per timeframe
+                    _seg_html = ""
+                    for _tf_nm, _tf_w in [("1H", 10), ("4H", 20), ("1D", 35), ("1W", 35)]:
+                        _tf_v = _tfs.get(_tf_nm, 0.5)
+                        _seg_c = "#34D399" if _tf_v >= 0.65 else "#EF4444" if _tf_v <= 0.35 else "#9CA3AF"
+                        _seg_html += (
+                            f'<div style="flex:{_tf_w};background:{_seg_c}20;border:1px solid {_seg_c}60;'
+                            f'border-radius:3px;padding:3px 0;text-align:center;font-size:9px;color:{_seg_c}">'
+                            f'{_tf_nm}</div>'
+                        )
+                    st.markdown(f"""
+<div style="background:#111827;border:1px solid #1F2937;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+  <div style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px">
+    {_h.get('token_symbol') or _h.get('id','?')}
+  </div>
+  <div style="font-size:16px;font-weight:800;color:{_trend_color}">{_trend}</div>
+  <div style="font-size:10px;color:#9CA3AF;margin-bottom:6px">Conf: {_bar_w}% · Dom: {_dom_tf}</div>
+  <div style="background:#1F2937;border-radius:3px;height:4px;overflow:hidden;margin-bottom:6px">
+    <div style="background:{_trend_color};width:{_bar_w}%;height:100%;border-radius:3px"></div>
+  </div>
+  <div style="display:flex;gap:3px">{_seg_html}</div>
+</div>""", unsafe_allow_html=True)
+                except Exception as _mtf_err:
+                    logger.debug("[MTF UI] %s: %s", _h.get("id"), _mtf_err)
+        if len(holdings) > 8:
+            st.caption(f"Showing 8 of {len(holdings)} holdings. All assets use macro regime proxy for RWA confidence.")
 
     # ── Monte Carlo ───────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Monte Carlo Simulation (10,000 scenarios)</div>',
@@ -3734,24 +3799,221 @@ with tab_macro:
 
     st.markdown("---")
 
-    # ── Macro Regime ───────────────────────────────────────────────────────────
-    st.markdown("#### Macro Regime Classifier")
-    regime_data = market.get("macro_regime", "NEUTRAL")
+    # ── Macro Regime — HMM Probabilistic Classifier (#55) ─────────────────────
+    st.markdown("#### Macro Regime — HMM Probabilistic Classifier")
+    st.caption("Gaussian observation scoring across 4 macro states (VIX, yield spread, DXY, WTI oil). "
+               "Bars show soft probability assignment — not binary classification.")
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _load_hmm_regime():
+        try:
+            return _df.fetch_hmm_macro_regime()
+        except Exception:
+            return None
+
+    _hmm = _load_hmm_regime()
+    regime_data = (_hmm.get("regime") if _hmm else None) or market.get("macro_regime", "NEUTRAL")
     regime_bias = market.get("macro_bias", "NEUTRAL")
-    regime_desc = market.get("macro_description", "")
+    regime_desc = (_hmm.get("description") if _hmm else None) or market.get("macro_description", "")
     regime_colors = {
         "RISK_ON": "#10b981", "RISK_OFF": "#ef4444",
         "STAGFLATION": "#f59e0b", "LIQUIDITY_CRUNCH": "#8b5cf6", "NEUTRAL": "#6b7280",
     }
     r_color = regime_colors.get(regime_data, "#6b7280")
+
+    # Probability bars
+    _hmm_probs = (_hmm.get("probabilities") if _hmm else None) or {}
+    _hmm_conf  = (_hmm.get("confidence") if _hmm else None) or 0.0
+    _hmm_dom   = (_hmm.get("dominant_signal") if _hmm else None) or "—"
+    _hmm_src   = (_hmm.get("source") if _hmm else "fallback")
+
+    # Show regime label + description
     st.markdown(f"""
     <div style="background:rgba(255,255,255,0.04);border:1px solid {r_color};
     border-radius:8px;padding:16px 20px;margin-bottom:8px">
         <div style="font-size:18px;font-weight:700;color:{r_color}">{regime_data.replace('_', ' ')}</div>
         <div style="font-size:13px;color:#9ca3af;margin-top:6px">{regime_desc}</div>
-        <div style="font-size:12px;color:#6b7280;margin-top:4px">Bias: <b style="color:{r_color}">{regime_bias}</b></div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">
+            Bias: <b style="color:{r_color}">{regime_bias}</b>
+            &nbsp;·&nbsp; Confidence: <b style="color:{r_color}">{int(_hmm_conf*100)}%</b>
+            &nbsp;·&nbsp; Dominant signal: <b style="color:#9ca3af">{_hmm_dom}</b>
+            &nbsp;·&nbsp; Source: <b style="color:#4b5563">{_hmm_src}</b>
+        </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # 3-bar probability display
+    if _hmm_probs:
+        _prob_defs = [
+            ("RISK_ON",  _hmm_probs.get("RISK_ON",  0.33), "#10b981", "Risk On"),
+            ("NEUTRAL",  _hmm_probs.get("NEUTRAL",  0.34), "#6b7280", "Neutral"),
+            ("RISK_OFF", _hmm_probs.get("RISK_OFF", 0.33), "#ef4444", "Risk Off"),
+        ]
+        st.markdown("**Regime Probability Distribution**")
+        for _pkey, _pval, _pcol, _plabel in _prob_defs:
+            _pw = int(_pval * 100)
+            st.markdown(f"""
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+  <div style="min-width:72px;font-size:11px;color:{_pcol};text-transform:uppercase;letter-spacing:0.04em">{_plabel}</div>
+  <div style="flex:1;background:#1F2937;border-radius:4px;height:16px;overflow:hidden">
+    <div style="background:{_pcol};width:{_pw}%;height:100%;border-radius:4px;
+                display:flex;align-items:center;padding-left:6px">
+      <span style="font-size:10px;color:#fff;font-weight:700">{_pval:.1%}</span>
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
+        st.caption("RISK_ON = green · NEUTRAL = grey · RISK_OFF = red")
+
+    st.markdown("---")
+
+    # ── BTC/ETH On-Chain Signals (#54) ─────────────────────────────────────────
+    st.markdown("#### BTC / ETH Perpetual Funding & Open Interest")
+    st.caption("Bybit v5 perpetual markets · Funding rate per 8h · Open interest in USD")
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _load_onchain_signals():
+        try:
+            return _df.fetch_crypto_onchain_signals()
+        except Exception:
+            return {}
+
+    _ocs = _load_onchain_signals()
+    _btc_fr   = _ocs.get("btc_funding_rate")
+    _eth_fr   = _ocs.get("eth_funding_rate")
+    _btc_fsig = _ocs.get("btc_funding_signal", "NORMAL")
+    _eth_fsig = _ocs.get("eth_funding_signal", "NORMAL")
+    _btc_oi   = _ocs.get("btc_oi_usd")
+    _eth_oi   = _ocs.get("eth_oi_usd")
+    _btc_oi7  = _ocs.get("btc_oi_7d_change_pct")
+    _eth_oi7  = _ocs.get("eth_oi_7d_change_pct")
+    _oc_src   = _ocs.get("source", "unavailable")
+
+    _oc_sig_colors = {
+        "OVERHEATED": "#ef4444", "NORMAL": "#9ca3af", "DISCOUNTED": "#10b981"
+    }
+    _oc_tooltips = {
+        "OVERHEATED":  "High positive funding = longs paying shorts = market overextended. Bearish signal.",
+        "NORMAL":      "Funding rate within normal range. Market balanced between longs and shorts.",
+        "DISCOUNTED":  "Negative funding = shorts paying longs = market underextended. Potential bullish reversal.",
+    }
+
+    def _fmt_fr(v):
+        if v is None: return "—"
+        return f"{v*100:.4f}%"
+
+    def _fmt_oi(v):
+        if v is None: return "—"
+        if v >= 1e9: return f"${v/1e9:.2f}B"
+        return f"${v/1e6:.0f}M"
+
+    def _fmt_oi7(v):
+        if v is None: return "—"
+        return f"{v:+.1f}%"
+
+    _oc1, _oc2, _oc3, _oc4 = st.columns(4)
+    with _oc1:
+        _fc = _oc_sig_colors.get(_btc_fsig, "#9ca3af")
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid {_fc}40;border-radius:8px;padding:12px;
+            border-top:3px solid {_fc}">
+  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">BTC Funding Rate</div>
+  <div style="font-size:20px;font-weight:800;color:{_fc}">{_fmt_fr(_btc_fr)}</div>
+  <div style="font-size:11px;color:{_fc};font-weight:600">{_btc_fsig}</div>
+  <div style="font-size:9px;color:#4b5563;margin-top:3px">{_oc_tooltips.get(_btc_fsig,'')}</div>
+</div>""", unsafe_allow_html=True)
+    with _oc2:
+        _fc = _oc_sig_colors.get(_eth_fsig, "#9ca3af")
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid {_fc}40;border-radius:8px;padding:12px;
+            border-top:3px solid {_fc}">
+  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">ETH Funding Rate</div>
+  <div style="font-size:20px;font-weight:800;color:{_fc}">{_fmt_fr(_eth_fr)}</div>
+  <div style="font-size:11px;color:{_fc};font-weight:600">{_eth_fsig}</div>
+  <div style="font-size:9px;color:#4b5563;margin-top:3px">{_oc_tooltips.get(_eth_fsig,'')}</div>
+</div>""", unsafe_allow_html=True)
+    with _oc3:
+        _oi7_c = "#10b981" if (_btc_oi7 or 0) >= 0 else "#ef4444"
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;
+            border-top:3px solid #6366f1">
+  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">BTC Open Interest</div>
+  <div style="font-size:20px;font-weight:800;color:#6366f1">{_fmt_oi(_btc_oi)}</div>
+  <div style="font-size:11px;color:{_oi7_c}">7d: {_fmt_oi7(_btc_oi7)}</div>
+  <div style="font-size:9px;color:#4b5563;margin-top:3px">Rising OI + rising price = healthy trend</div>
+</div>""", unsafe_allow_html=True)
+    with _oc4:
+        _oi7_c = "#10b981" if (_eth_oi7 or 0) >= 0 else "#ef4444"
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;
+            border-top:3px solid #8b5cf6">
+  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">ETH Open Interest</div>
+  <div style="font-size:20px;font-weight:800;color:#8b5cf6">{_fmt_oi(_eth_oi)}</div>
+  <div style="font-size:11px;color:{_oi7_c}">7d: {_fmt_oi7(_eth_oi7)}</div>
+  <div style="font-size:9px;color:#4b5563;margin-top:3px">Rising OI + rising price = healthy trend</div>
+</div>""", unsafe_allow_html=True)
+    st.caption(f"Source: {_oc_src} · Cached 15 min · Updated: {_ocs.get('timestamp','')[:19]}")
+
+    st.markdown("---")
+
+    # ── Protocol Health — DeFiLlama Fee Revenue (#57) ─────────────────────────
+    st.markdown("#### RWA Protocol Health — Fee Revenue")
+    st.caption("DeFiLlama fees endpoint · 24h and 30d fee collection for top RWA protocols. "
+               "Declining fees = shrinking origination. GREEN = on pace, YELLOW = slowing, RED = declining.")
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _load_protocol_fees():
+        try:
+            return _df.fetch_protocol_fees()
+        except Exception:
+            return {}
+
+    _pf = _load_protocol_fees()
+    _pf_ts = _pf.get("timestamp", "")
+
+    # Key RWA protocol slugs to display
+    _PF_DISPLAY = [
+        ("centrifuge",    "Centrifuge"),
+        ("maple",         "Maple Finance"),
+        ("goldfinch",     "Goldfinch"),
+        ("clearpool",     "Clearpool"),
+        ("truefi",        "TrueFi"),
+        ("ondo-finance",  "Ondo Finance"),
+    ]
+    _PF_HEALTH_COLORS = {"GREEN": "#10b981", "YELLOW": "#f59e0b", "RED": "#ef4444"}
+
+    def _fmt_fee(v):
+        if v is None or v == 0: return "—"
+        if v >= 1e6: return f"${v/1e6:.2f}M"
+        if v >= 1e3: return f"${v/1e3:.1f}K"
+        return f"${v:.0f}"
+
+    _pf_entries = [(slug, label, _pf.get(slug)) for slug, label in _PF_DISPLAY if _pf.get(slug)]
+    if _pf_entries:
+        _pf_cols = st.columns(min(len(_pf_entries), 3))
+        for _pfi, (slug, label, pdata) in enumerate(_pf_entries):
+            with _pf_cols[_pfi % 3]:
+                _health     = pdata.get("health", "YELLOW")
+                _h_color    = _PF_HEALTH_COLORS.get(_health, "#9ca3af")
+                _fees24h    = pdata.get("fees_24h", 0)
+                _fees30d    = pdata.get("fees_30d", 0)
+                _annualized = pdata.get("annualized", 0)
+                st.markdown(f"""
+<div style="background:#111827;border:1px solid {_h_color}40;border-radius:8px;
+            padding:12px;margin-bottom:8px;border-top:3px solid {_h_color}">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <div style="font-size:12px;font-weight:600;color:#e2e8f0">{label}</div>
+    <div style="font-size:10px;font-weight:700;color:{_h_color};background:{_h_color}20;
+                padding:2px 8px;border-radius:4px">{_health}</div>
+  </div>
+  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Fees 24h</div>
+  <div style="font-size:16px;font-weight:700;color:{_h_color}">{_fmt_fee(_fees24h)}</div>
+  <div style="font-size:10px;color:#4b5563;margin-top:4px">
+    30d: {_fmt_fee(_fees30d)} &nbsp;·&nbsp; Ann: {_fmt_fee(_annualized)}
+  </div>
+</div>""", unsafe_allow_html=True)
+        st.caption(f"Source: DeFiLlama Fees · Cached 1h · Updated: {_pf_ts[:19]}")
+    else:
+        st.info("Protocol fee data loading... Requires DeFiLlama fees API connection (api.llama.fi).")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
