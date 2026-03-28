@@ -35,7 +35,12 @@ TX_COSTS = {
     "Commodities":          0.20,   # 20 bps
     "Equities":             0.10,   # 10 bps
     "Tokenized Equities":   0.05,   # 5 bps — liquid DEX markets (Dinari, Robinhood, Gains)
-    "Carbon Credits":       0.50,   # 50 bps
+    "Carbon Credits":       0.50,   # 50 bps (legacy key)
+    "Voluntary Carbon":     0.50,   # 50 bps
+    "Nature-Based Solutions": 0.50,
+    "Compliance Carbon":    0.30,
+    "Precious Metals":      0.20,   # DEX liquid, similar to commodities
+    "Yield Derivatives":    0.20,   # Pendle AMM — low tx cost
     "Intellectual Property":1.00,   # 1% (thin market)
     "Art & Collectibles":   3.00,   # 3% (very illiquid)
     "Private Equity":       2.00,   # 2% round-trip

@@ -1012,7 +1012,7 @@ RWA_UNIVERSE = [
     {
         "id": "MCO2",
         "name": "Moss.Earth Carbon Credit Token",
-        "category": "Carbon Credits",
+        "category": "Voluntary Carbon",
         "subcategory": "Voluntary Carbon Market",
         "chain": "Ethereum / Polygon",
         "protocol": "Moss.Earth",
@@ -1033,7 +1033,7 @@ RWA_UNIVERSE = [
     {
         "id": "NBO",
         "name": "Toucan Protocol Nature Carbon Tonne",
-        "category": "Carbon Credits",
+        "category": "Nature-Based Solutions",
         "subcategory": "Nature-Based Solutions",
         "chain": "Polygon",
         "protocol": "Toucan Protocol",
@@ -1054,7 +1054,7 @@ RWA_UNIVERSE = [
     {
         "id": "KLIMA",
         "name": "KlimaDAO Carbon Treasury",
-        "category": "Carbon Credits",
+        "category": "Voluntary Carbon",
         "subcategory": "Carbon Treasury",
         "chain": "Polygon",
         "protocol": "KlimaDAO",
@@ -1383,7 +1383,7 @@ RWA_UNIVERSE = [
     {
         "id": "FLOWCARBON_GNT",
         "name": "Flowcarbon Goodness Nature Token",
-        "category": "Carbon Credits",
+        "category": "Nature-Based Solutions",
         "subcategory": "Nature-Based Solutions",
         "chain": "Polygon",
         "protocol": "Flowcarbon",
@@ -3333,6 +3333,115 @@ RWA_UNIVERSE = [
         "regulatory_jurisdiction": "International",
         "audit_score": 60,
     },
+
+    # ── YIELD DERIVATIVES (Pendle Finance) ───────────────────────────────────
+    {
+        "id": "PT_SUSDE_MAR26",
+        "name": "Pendle PT sUSDe Mar 2026",
+        "category": "Yield Derivatives",
+        "subcategory": "Principal Token",
+        "chain": "Ethereum",
+        "protocol": "Pendle Finance",
+        "token_symbol": "PT-sUSDe",
+        "coingecko_id": "",
+        "defillama_slug": "pendle",
+        "expected_yield_pct": 12.8,
+        "risk_score": 4,
+        "liquidity_score": 7,
+        "regulatory_score": 5,
+        "min_investment_usd": 1,
+        "inception_date": "2025-09-01",
+        "description": "Fixed-rate principal token on Ethena sUSDe, expires Mar 2026",
+        "tags": ["defi-native", "yield-derivatives", "pendle", "fixed-rate", "principal-token"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 82,
+    },
+    {
+        "id": "PT_EETH_DEC25",
+        "name": "Pendle PT eETH Dec 2025",
+        "category": "Yield Derivatives",
+        "subcategory": "Principal Token",
+        "chain": "Ethereum",
+        "protocol": "Pendle Finance",
+        "token_symbol": "PT-eETH",
+        "coingecko_id": "",
+        "defillama_slug": "pendle",
+        "expected_yield_pct": 4.5,
+        "risk_score": 4,
+        "liquidity_score": 7,
+        "regulatory_score": 5,
+        "min_investment_usd": 1,
+        "inception_date": "2025-06-01",
+        "description": "Fixed-rate principal token on ether.fi eETH",
+        "tags": ["defi-native", "yield-derivatives", "pendle", "fixed-rate", "principal-token", "ether-fi"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 82,
+    },
+    {
+        "id": "YT_SUSDE_MAR26",
+        "name": "Pendle YT sUSDe Mar 2026",
+        "category": "Yield Derivatives",
+        "subcategory": "Yield Token",
+        "chain": "Ethereum",
+        "protocol": "Pendle Finance",
+        "token_symbol": "YT-sUSDe",
+        "coingecko_id": "",
+        "defillama_slug": "pendle",
+        "expected_yield_pct": 85.0,
+        "risk_score": 8,
+        "liquidity_score": 6,
+        "regulatory_score": 4,
+        "min_investment_usd": 1,
+        "inception_date": "2025-09-01",
+        "description": "Yield token on Ethena sUSDe — leveraged yield exposure, high risk",
+        "tags": ["defi-native", "yield-derivatives", "pendle", "yield-token", "leveraged", "high-risk"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 82,
+    },
+
+    # ── TOKENIZED SILVER (Precious Metals) ───────────────────────────────────
+    {
+        "id": "SLVT",
+        "name": "Paxos Silver (PAXG equivalent)",
+        "category": "Precious Metals",
+        "subcategory": "Silver",
+        "chain": "Ethereum",
+        "protocol": "Sprott",
+        "token_symbol": "SLVT",
+        "coingecko_id": "silver",
+        "defillama_slug": "",
+        "expected_yield_pct": 0.0,
+        "risk_score": 2,
+        "liquidity_score": 7,
+        "regulatory_score": 8,
+        "min_investment_usd": 1,
+        "inception_date": "2024-01-01",
+        "description": "LBMA-backed tokenized silver — physical allocated silver",
+        "tags": ["retail", "silver", "precious-metals", "physical-backed", "lbma"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 85,
+    },
+    {
+        "id": "XAGT",
+        "name": "Tether Gold Silver-Backed (XAUT-equivalent)",
+        "category": "Precious Metals",
+        "subcategory": "Silver",
+        "chain": "Ethereum",
+        "protocol": "Sprott Physical Silver Trust",
+        "token_symbol": "XAGT",
+        "coingecko_id": "silver",
+        "defillama_slug": "",
+        "expected_yield_pct": 0.0,
+        "risk_score": 2,
+        "liquidity_score": 7,
+        "regulatory_score": 7,
+        "min_investment_usd": 1,
+        "inception_date": "2024-01-01",
+        "description": "Tokenized silver backed by LBMA-vaulted physical silver",
+        "tags": ["retail", "silver", "precious-metals", "physical-backed", "lbma"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
+    },
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3378,7 +3487,7 @@ PORTFOLIO_TIERS = {
             "Private Credit":   20,
             "Real Estate":      15,
             "Commodities":      15,
-            "Carbon Credits":    3,
+            "Voluntary Carbon":  3,
             "Trade Finance":     2,
         },
         "subcategory_bias": ["US Treasury", "Cash Management", "Residential Rental", "Gold", "Silver"],
@@ -3404,7 +3513,7 @@ PORTFOLIO_TIERS = {
             "Infrastructure":    8,
             "Equities":          7,
             "Tokenized Equities": 5,   # NASDAQ/Dinari/Robinhood tokenized stocks
-            "Carbon Credits":    3,
+            "Voluntary Carbon":  3,
             "Trade Finance":     2,
         },
         "subcategory_bias": ["US Treasury", "Emerging Market Loans", "Residential Rental", "Gold", "Renewable Energy", "Tokenized Stocks"],
@@ -3430,7 +3539,7 @@ PORTFOLIO_TIERS = {
             "Infrastructure":   10,
             "Equities":          7,
             "Tokenized Equities": 5,  # DEX/platform tokenized stocks (Dinari, Gains, Synthetix)
-            "Carbon Credits":    4,
+            "Voluntary Carbon":  4,
             "Art & Collectibles": 1,
             "Insurance":         2,
         },
@@ -3455,7 +3564,8 @@ PORTFOLIO_TIERS = {
             "Real Estate":      15,
             "Intellectual Property": 10,
             "Art & Collectibles": 8,
-            "Carbon Credits":    7,
+            "Voluntary Carbon":  4,
+            "Nature-Based Solutions": 3,
             "Infrastructure":    5,
             "Insurance":         3,
             "Trade Finance":     2,
@@ -3608,9 +3718,13 @@ CATEGORY_COLORS = {
     "Private Credit":       "#34D399",
     "Real Estate":          "#A78BFA",
     "Commodities":          "#FBBF24",
+    "Precious Metals":      "#D4AF37",   # gold-toned — tokenized silver and other precious metals
     "Equities":             "#F97316",
     "Infrastructure":       "#06B6D4",
-    "Carbon Credits":       "#10B981",
+    "Carbon Credits":       "#10B981",   # legacy — kept for DB/portfolio backward compat
+    "Voluntary Carbon":     "#10B981",   # tokenized voluntary carbon offsets (MCO2, KlimaDAO)
+    "Nature-Based Solutions": "#22C55E", # nature-based carbon credits (Toucan NCT, Flowcarbon GNT)
+    "Compliance Carbon":    "#16A34A",   # EUA / CCA compliance credits
     "Intellectual Property":"#EC4899",
     "Art & Collectibles":   "#8B5CF6",
     "Private Equity":       "#EF4444",
@@ -3620,6 +3734,7 @@ CATEGORY_COLORS = {
     "Liquid Staking":       "#7C3AED",   # deep violet — ETH/SOL/BTC liquid staking
     "DeFi Yield":           "#0EA5E9",   # sky blue — Pendle, Morpho, Ethena yield
     "PayFi":                "#F59E0B",   # amber — payment finance stablecoins
+    "Yield Derivatives":    "#A855F7",   # purple — Pendle PT/YT fixed and variable yield tokens
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3768,7 +3883,12 @@ _CATEGORY_FEE_BPS_DEFAULT: dict = {
     "Tokenized Equities":   20,
     "Equities":             20,
     "Private Equity":      200,
-    "Carbon Credits":       20,
+    "Carbon Credits":       20,   # legacy key — kept for backward compat
+    "Voluntary Carbon":     20,
+    "Nature-Based Solutions": 20,
+    "Compliance Carbon":    20,
+    "Precious Metals":      20,
+    "Yield Derivatives":    30,   # Pendle protocol fee ~0.3%
     "Intellectual Property":150,
     "Art & Collectibles":  200,
     "Infrastructure":      100,
@@ -3827,14 +3947,20 @@ _REDEMPTION_WINDOW_MAP: dict = {
 
 # Category-level fallback windows
 _REDEMPTION_WINDOW_CATEGORY_DEFAULT: dict = {
-    "Government Bonds":   "T+1",
-    "Private Credit":     "30-90 days",
-    "Real Estate":        "30+ days",
-    "Commodities":        "Instant",
-    "Tokenized Equities": "T+2",
-    "Liquid Staking":     "7 days",
-    "DeFi Yield":         "Instant",
-    "PayFi":              "T+1",
+    "Government Bonds":     "T+1",
+    "Private Credit":       "30-90 days",
+    "Real Estate":          "30+ days",
+    "Commodities":          "Instant",
+    "Precious Metals":      "T+2",
+    "Tokenized Equities":   "T+2",
+    "Liquid Staking":       "7 days",
+    "DeFi Yield":           "Instant",
+    "PayFi":                "T+1",
+    "Carbon Credits":       "Instant",
+    "Voluntary Carbon":     "Instant",
+    "Nature-Based Solutions": "Instant",
+    "Compliance Carbon":    "T+1",
+    "Yield Derivatives":    "Instant",
 }
 
 
@@ -3927,6 +4053,13 @@ ASSET_DURATION_YEARS: dict = {
     # Carbon — effectively zero duration
     "MCO2":         0.00,
     "BCT":          0.00,
+    # Yield Derivatives — Pendle PT/YT maturity-based
+    "PT_SUSDE_MAR26": 0.00,  # expired/near-maturity Mar 2026
+    "PT_EETH_DEC25":  0.00,  # expired Dec 2025
+    "YT_SUSDE_MAR26": 0.00,  # expired/near-maturity Mar 2026
+    # Precious Metals — zero rate duration
+    "SLVT":         0.00,
+    "XAGT":         0.00,
     # Tokenized Equities — equity duration (~15-20yr theoretical, but for rate sensitivity use ~5yr)
     "ONDO-GM":      5.00,
     "DSHARES":      5.00,
@@ -3961,7 +4094,12 @@ _CATEGORY_DURATION_DEFAULT: dict = {
     "Tokenized Equities":    5.00,
     "Equities":              5.00,
     "Private Equity":        7.00,
-    "Carbon Credits":        0.00,
+    "Carbon Credits":        0.00,   # legacy key — kept for backward compat
+    "Voluntary Carbon":      0.00,
+    "Nature-Based Solutions": 0.00,
+    "Compliance Carbon":     0.00,
+    "Precious Metals":       0.00,
+    "Yield Derivatives":     0.25,   # avg Pendle PT maturity ~3-6 months
     "Intellectual Property": 3.00,
     "Art & Collectibles":    0.00,
     "Infrastructure":        8.00,   # long-duration infra assets
@@ -4032,6 +4170,13 @@ ASSET_LIQUIDITY_META: dict = {
     "XAUm":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
     "MCO2":         {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
     "BCT":          {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    # Precious Metals — DEX liquid
+    "SLVT":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "XAGT":         {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    # Yield Derivatives — Pendle AMM DEX liquid
+    "PT_SUSDE_MAR26": {"redemption_days": 0, "has_secondary": True,  "secondary_depth": 2},
+    "PT_EETH_DEC25":  {"redemption_days": 0, "has_secondary": True,  "secondary_depth": 2},
+    "YT_SUSDE_MAR26": {"redemption_days": 0, "has_secondary": True,  "secondary_depth": 1},
     # Tokenized Equities
     "ONDO-GM":      {"redemption_days": 1,   "has_secondary": False, "secondary_depth": 0},
     "DSHARES":      {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 1},
@@ -4072,6 +4217,11 @@ _CATEGORY_LIQUIDITY_DEFAULT: dict = {
     "Equities":              {"redemption_days": 2,   "has_secondary": True,  "secondary_depth": 1},
     "Private Equity":        {"redemption_days": 365, "has_secondary": False, "secondary_depth": 0},
     "Carbon Credits":        {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    "Voluntary Carbon":      {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
+    "Nature-Based Solutions":{"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 1},
+    "Compliance Carbon":     {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "Precious Metals":       {"redemption_days": 1,   "has_secondary": True,  "secondary_depth": 2},
+    "Yield Derivatives":     {"redemption_days": 0,   "has_secondary": True,  "secondary_depth": 2},
     "Intellectual Property": {"redemption_days": 180, "has_secondary": False, "secondary_depth": 0},
     "Art & Collectibles":    {"redemption_days": 180, "has_secondary": False, "secondary_depth": 0},
     "Infrastructure":        {"redemption_days": 365, "has_secondary": False, "secondary_depth": 0},
@@ -4155,15 +4305,20 @@ ASSET_EXIT_VELOCITY_META: dict = {
 }
 
 _CATEGORY_EXIT_VELOCITY_DEFAULT: dict = {
-    "Government Bonds":   {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": True},
-    "Private Credit":     {"lockup_days": 60,  "otc_available": False, "min_exit_usd": 50_000,  "partial_exit": False},
-    "Real Estate":        {"lockup_days": 90,  "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
-    "Commodities":        {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
-    "Tokenized Equities": {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100,     "partial_exit": True},
-    "Carbon Credits":     {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
-    "Trade Finance":      {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
-    "Infrastructure":     {"lockup_days": 365, "otc_available": False, "min_exit_usd": 100_000, "partial_exit": False},
-    "Stablecoins":        {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
+    "Government Bonds":    {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": True},
+    "Private Credit":      {"lockup_days": 60,  "otc_available": False, "min_exit_usd": 50_000,  "partial_exit": False},
+    "Real Estate":         {"lockup_days": 90,  "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
+    "Commodities":         {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
+    "Precious Metals":     {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
+    "Tokenized Equities":  {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 100,     "partial_exit": True},
+    "Carbon Credits":      {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
+    "Voluntary Carbon":    {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
+    "Nature-Based Solutions": {"lockup_days": 0, "otc_available": False, "min_exit_usd": 1,      "partial_exit": True},
+    "Compliance Carbon":   {"lockup_days": 1,   "otc_available": True,  "min_exit_usd": 1_000,   "partial_exit": True},
+    "Yield Derivatives":   {"lockup_days": 0,   "otc_available": False, "min_exit_usd": 1,       "partial_exit": True},
+    "Trade Finance":       {"lockup_days": 30,  "otc_available": False, "min_exit_usd": 10_000,  "partial_exit": False},
+    "Infrastructure":      {"lockup_days": 365, "otc_available": False, "min_exit_usd": 100_000, "partial_exit": False},
+    "Stablecoins":         {"lockup_days": 0,   "otc_available": True,  "min_exit_usd": 1,       "partial_exit": True},
 }
 
 

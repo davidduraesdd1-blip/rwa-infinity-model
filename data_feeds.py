@@ -429,6 +429,58 @@ def fetch_gold_price() -> float:
     return paxg.get("price_usd", 3200.0)  # fallback updated for 2026 gold price
 
 
+def fetch_silver_price() -> float:
+    """Fetch spot silver price in USD per troy ounce.
+
+    Sources tried in order:
+      1. CoinGecko simple price for 'silver'
+      2. yfinance SI=F (silver futures — front month)
+      3. Hardcoded fallback: $30.0 (approximate March 2026 price)
+    Result cached for 15 minutes.
+    """
+    _SILVER_FALLBACK = 30.0
+
+    def _fetch():
+        # Source 1: CoinGecko simple price API
+        try:
+            _coingecko_limiter.acquire()
+            url = f"{COINGECKO_BASE}/simple/price"
+            r = _session.get(
+                url,
+                params={"ids": "silver", "vs_currencies": "usd"},
+                timeout=REQUEST_TIMEOUT,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                price = data.get("silver", {}).get("usd")
+                if price and float(price) > 0:
+                    logger.debug("[Silver] CoinGecko price: $%.2f", price)
+                    return float(price)
+        except Exception as e:
+            logger.debug("[Silver] CoinGecko fetch failed: %s", e)
+
+        # Source 2: yfinance SI=F (silver front-month futures)
+        try:
+            import yfinance as yf
+            hist = yf.Ticker("SI=F").history(period="5d")
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+                if price > 0:
+                    logger.debug("[Silver] yfinance SI=F price: $%.2f", price)
+                    return price
+        except Exception as e:
+            logger.debug("[Silver] yfinance SI=F failed: %s", e)
+
+        # Source 3: hardcoded fallback
+        logger.debug("[Silver] Using hardcoded fallback: $%.2f", _SILVER_FALLBACK)
+        return None  # signal to _cached_get that fetch failed — use stale or fallback below
+
+    cached = _cached_get("silver_price", 900, _fetch)  # 15-min TTL
+    if cached is None:
+        return _SILVER_FALLBACK
+    return float(cached)
+
+
 def fetch_coinmarketcap_prices(symbols: List[str]) -> Dict[str, dict]:
     """
     Fetch prices from CoinMarketCap (supplementary / fallback).

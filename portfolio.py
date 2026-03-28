@@ -115,6 +115,10 @@ CATEGORY_CORRELATIONS: dict = {
     ("Government Bonds",     "Equities"):            -0.10,
     ("Government Bonds",     "Commodities"):          0.05,
     ("Government Bonds",     "Carbon Credits"):      -0.05,
+    ("Government Bonds",     "Voluntary Carbon"):    -0.05,
+    ("Government Bonds",     "Nature-Based Solutions"):-0.05,
+    ("Government Bonds",     "Precious Metals"):      0.05,
+    ("Government Bonds",     "Yield Derivatives"):    0.10,
     ("Government Bonds",     "Trade Finance"):        0.30,
     ("Government Bonds",     "Infrastructure"):       0.20,
     ("Government Bonds",     "Private Equity"):       0.10,
@@ -137,10 +141,28 @@ CATEGORY_CORRELATIONS: dict = {
     ("Equities",             "Private Equity"):       0.60,
     ("Equities",             "Infrastructure"):       0.35,
     ("Equities",             "Carbon Credits"):       0.25,
+    ("Equities",             "Voluntary Carbon"):     0.25,
+    ("Equities",             "Nature-Based Solutions"):0.25,
+    ("Equities",             "Precious Metals"):     -0.05,
+    ("Equities",             "Yield Derivatives"):    0.30,
     ("Commodities",          "Commodities"):          0.55,
+    ("Commodities",          "Precious Metals"):      0.60,
     ("Commodities",          "Infrastructure"):       0.30,
     ("Carbon Credits",       "Carbon Credits"):       0.65,
+    ("Carbon Credits",       "Voluntary Carbon"):     0.85,
+    ("Carbon Credits",       "Nature-Based Solutions"):0.70,
     ("Carbon Credits",       "Infrastructure"):       0.20,
+    ("Voluntary Carbon",     "Voluntary Carbon"):     0.65,
+    ("Voluntary Carbon",     "Nature-Based Solutions"):0.70,
+    ("Voluntary Carbon",     "Infrastructure"):       0.20,
+    ("Nature-Based Solutions","Nature-Based Solutions"):0.65,
+    ("Nature-Based Solutions","Infrastructure"):      0.20,
+    ("Precious Metals",      "Precious Metals"):      0.75,
+    ("Precious Metals",      "Commodities"):          0.60,
+    ("Precious Metals",      "Government Bonds"):     0.05,
+    ("Yield Derivatives",    "Yield Derivatives"):    0.70,
+    ("Yield Derivatives",    "DeFi Yield"):           0.80,
+    ("Yield Derivatives",    "Government Bonds"):     0.15,
     ("Intellectual Property","Intellectual Property"):0.45,
     ("Art & Collectibles",   "Art & Collectibles"):   0.35,
     ("Private Equity",       "Private Equity"):       0.65,
@@ -157,6 +179,10 @@ CATEGORY_CORRELATIONS: dict = {
     ("Tokenized Equities",   "Commodities"):          0.20,
     ("Tokenized Equities",   "Infrastructure"):       0.30,
     ("Tokenized Equities",   "Carbon Credits"):       0.25,
+    ("Tokenized Equities",   "Voluntary Carbon"):     0.25,
+    ("Tokenized Equities",   "Nature-Based Solutions"):0.25,
+    ("Tokenized Equities",   "Precious Metals"):     -0.05,
+    ("Tokenized Equities",   "Yield Derivatives"):    0.30,
     ("Tokenized Equities",   "Trade Finance"):        0.30,
     ("Tokenized Equities",   "Insurance"):            0.20,
     ("Tokenized Equities",   "Art & Collectibles"):   0.15,
@@ -661,8 +687,15 @@ def _risk_to_vol(risk_score: float, asset: dict = None) -> float:
         base_vol *= 1.35   # 35% extra for oracle divergence + liquidation cascades
 
     # Carbon credits: regulatory risk multiplier (policy can crater value overnight)
-    if asset.get("category") == "Carbon Credits":
+    if asset.get("category") in ("Carbon Credits", "Voluntary Carbon",
+                                  "Nature-Based Solutions", "Compliance Carbon"):
         base_vol *= 1.20
+    # Yield Derivatives: high vol for YT tokens; modest for PT (fixed-rate, at-maturity)
+    if asset.get("category") == "Yield Derivatives":
+        if "YT" in asset.get("id", ""):
+            base_vol *= 1.80  # leveraged yield token — extreme vol
+        else:
+            base_vol *= 0.80  # PT = discounted fixed-rate bond — lower vol
 
     # Art & Collectibles: very thin market, high bid-ask spread risk
     if asset.get("category") == "Art & Collectibles":

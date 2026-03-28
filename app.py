@@ -813,6 +813,13 @@ with _mode_col2:
 _pro_mode  = st.session_state["pro_mode"]
 _demo_mode = st.session_state["demo_mode"]
 
+# #65 Beginner Mode banner
+if not _pro_mode:
+    st.info(
+        "📊 **Beginner Mode active** — simplified view. "
+        "Enable **Pro Mode** in the toggle above for full quant metrics (VaR, CVaR, Sharpe, Sortino, IC…)."
+    )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SCREENER CACHE — defined here (module-level) so it is registered once per
