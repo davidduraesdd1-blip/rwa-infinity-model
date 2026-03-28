@@ -281,7 +281,7 @@ def _get_api_health():
 # Placed here — after _get_api_health() is defined — to avoid NameError on startup.
 with st.sidebar:
     # ── Personal API Keys (session-only, never saved to disk) ─────────────────
-    with st.sidebar.expander("🔑 API Keys (Session Only)", expanded=False):
+    with st.expander("🔑 API Keys (Session Only)", expanded=False):
         st.caption("Keys stored in session only — cleared on refresh. Never saved to disk.")
         _user_cg_key     = st.text_input("CoinGecko Pro Key",  type="password", key="user_cg_key")
         _user_tiingo_key = st.text_input("Tiingo Key",         type="password", key="user_tiingo_key")

@@ -3703,8 +3703,8 @@ def fetch_crypto_onchain_signals() -> dict:
         bybit_oi      = fetch_binance_open_interest(["BTCUSDT", "ETHUSDT"])
         bybit_prices  = fetch_coingecko_prices()
 
-        btc_price = float(bybit_prices.get("bitcoin", {}).get("usd", 0) or 0)
-        eth_price = float(bybit_prices.get("ethereum", {}).get("usd", 0) or 0)
+        btc_price = float(bybit_prices.get("bitcoin", {}).get("price_usd", 0) or 0)
+        eth_price = float(bybit_prices.get("ethereum", {}).get("price_usd", 0) or 0)
 
         btc_fr = bybit_funding.get("BTCUSDT")
         eth_fr = bybit_funding.get("ETHUSDT")
