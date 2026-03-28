@@ -5076,6 +5076,114 @@ def fetch_erc7540_redemption_depth(symbol: str) -> dict:
     }
 
 
+def fetch_erc7540_redemption_queue(
+    contract_address: str,
+    chain_rpc: str = "https://eth.llamarpc.com",
+) -> dict:
+    """
+    Read ERC-7540 async vault redemption queue depth.
+
+    ERC-7540 extends ERC-4626 with async deposit/redeem for illiquid assets.
+    Since most RWA vaults don't expose a public queue depth without a specific
+    request ID, this function uses proxy metrics:
+
+    1. Calls totalSupply() and totalAssets() to compute coverage ratio.
+    2. Attempts to read redemptionQueue() or queuedRedemptions() if available.
+    3. Flags the vault as ERC-7540 compatible if async request functions exist.
+
+    Returns:
+        {
+            "contract":          str,
+            "erc7540_compatible": bool,
+            "queue_depth_usd":   float | None,
+            "total_supply":      float,
+            "total_assets":      float,
+            "coverage_ratio":    float,   # total_assets / total_supply; < 1.0 = undercollateralized
+            "risk_signal":       "GREEN" | "YELLOW" | "RED",
+        }
+    """
+    result: dict = {
+        "contract":           contract_address,
+        "erc7540_compatible": False,
+        "queue_depth_usd":    None,
+        "total_supply":       0.0,
+        "total_assets":       0.0,
+        "coverage_ratio":     1.0,
+        "risk_signal":        "GREEN",
+    }
+
+    if not contract_address or not contract_address.startswith("0x"):
+        result["error"] = "invalid_address"
+        return result
+
+    # ERC-4626/7540 function selectors
+    _SEL_TOTAL_SUPPLY       = "0x18160ddd"  # totalSupply()
+    _SEL_TOTAL_ASSETS_7540  = "0x01e1d114"  # totalAssets()
+    _SEL_REDEMPTION_QUEUE   = "0x5cf0f357"  # redemptionQueue() — common ERC-7540 extension
+    _SEL_QUEUED_REDEMPTIONS = "0x8db68df2"  # queuedRedemptions() — alternative selector
+
+    # ── Read totalSupply and totalAssets ──────────────────────────────────
+    raw_ts  = _etherscan_call(contract_address, _SEL_TOTAL_SUPPLY)
+    raw_ta  = _etherscan_call(contract_address, _SEL_TOTAL_ASSETS_7540)
+
+    try:
+        total_supply = int(raw_ts, 16) / 1e18 if raw_ts and raw_ts != "0x" else 0.0
+    except (ValueError, TypeError):
+        total_supply = 0.0
+    try:
+        total_assets = int(raw_ta, 16) / 1e18 if raw_ta and raw_ta != "0x" else 0.0
+    except (ValueError, TypeError):
+        total_assets = 0.0
+
+    result["total_supply"] = total_supply
+    result["total_assets"] = total_assets
+
+    # ── Coverage ratio ────────────────────────────────────────────────────
+    if total_supply > 0:
+        coverage = total_assets / total_supply
+    else:
+        coverage = 1.0
+    result["coverage_ratio"] = round(coverage, 6)
+
+    # ── Risk signal ───────────────────────────────────────────────────────
+    if coverage < 0.95:
+        result["risk_signal"] = "RED"
+    elif coverage < 0.99:
+        result["risk_signal"] = "YELLOW"
+    else:
+        result["risk_signal"] = "GREEN"
+
+    # ── Attempt to read redemption queue depth ────────────────────────────
+    queue_depth: Optional[float] = None
+    for sel in (_SEL_REDEMPTION_QUEUE, _SEL_QUEUED_REDEMPTIONS):
+        raw_q = _etherscan_call(contract_address, sel)
+        if raw_q and raw_q not in ("0x", "0x0", None, ""):
+            try:
+                queue_depth = int(raw_q, 16) / 1e18
+                break
+            except (ValueError, TypeError):
+                pass
+
+    # ── ERC-7540 compatibility check ──────────────────────────────────────
+    # ERC-7540 adds pendingRedeemRequest — selector 0x0dfe1681 (requestId, controller)
+    # We can't call it without a requestId, but check if the function exists
+    # by looking for a non-revert on a zero-padded call
+    _SEL_PENDING_REDEEM = "0x0dfe1681" + "0" * 128  # pendingRedeemRequest(0, 0x0)
+    raw_pr = _etherscan_call(contract_address, _SEL_PENDING_REDEEM)
+    erc7540_compat = raw_pr is not None and raw_pr != "" and "revert" not in str(raw_pr).lower()
+
+    result["erc7540_compatible"] = erc7540_compat
+    result["queue_depth_usd"]    = queue_depth
+
+    if queue_depth is None:
+        if erc7540_compat:
+            result["note"] = "ERC-7540 compatible — queue depth not publicly readable without requestId"
+        else:
+            result["note"] = "Standard ERC-4626 — no async redemption queue"
+
+    return result
+
+
 def fetch_erc3643_compliance(contract: str, wallet: str = "") -> dict:
     """
     ERC-3643 (T-REX) compliance reads — isVerified() + canTransfer() for a wallet.
@@ -5358,6 +5466,136 @@ def fetch_chainlink_price(pair: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11"  # Deployed on all EVM chains
+
+# Minimal ABI for Multicall3.aggregate3() — used when web3 is available
+_MULTICALL3_ABI = [
+    {
+        "name": "aggregate3",
+        "type": "function",
+        "inputs": [{
+            "name": "calls",
+            "type": "tuple[]",
+            "components": [
+                {"name": "target",       "type": "address"},
+                {"name": "allowFailure", "type": "bool"},
+                {"name": "callData",     "type": "bytes"},
+            ],
+        }],
+        "outputs": [{
+            "name": "returnData",
+            "type": "tuple[]",
+            "components": [
+                {"name": "success",    "type": "bool"},
+                {"name": "returnData", "type": "bytes"},
+            ],
+        }],
+    }
+]
+
+# ERC-4626 function selectors for Multicall vault reads
+_SEL_TOTAL_ASSETS    = "0x01e1d114"  # totalAssets()
+_SEL_PRICE_PER_SHARE = "0x99530b06"  # pricePerShare()
+
+_MULTICALL_VAULT_CACHE: dict = {}
+_MULTICALL_VAULT_LOCK  = threading.Lock()
+_MULTICALL_VAULT_TTL   = 300  # 5 min
+
+
+def fetch_multicall_vault_data(
+    vault_addresses: list,
+    chain_rpc: str = "https://eth.llamarpc.com",
+) -> dict:
+    """
+    Batch-read totalAssets() and pricePerShare() for multiple ERC-4626 vaults.
+
+    Uses web3.py Multicall3 aggregate3() for a single RPC round-trip when
+    web3 is available; otherwise falls back to individual Etherscan eth_call
+    reads for each vault.
+
+    Args:
+        vault_addresses: list of EVM contract addresses (0x...)
+        chain_rpc:       JSON-RPC endpoint (default: public Ethereum via llamarpc)
+
+    Returns:
+        {
+            "0xADDRESS": {
+                "total_assets":    float,   # raw token units / 10^decimals
+                "price_per_share": float,   # normalised share price
+                "success":         bool,
+            },
+            ...
+        }
+    """
+    if not vault_addresses:
+        return {}
+
+    # Normalise to checksummed lower-case strings
+    addrs = [str(a).lower() for a in vault_addresses]
+
+    cache_key = "multicall_vault:" + ",".join(sorted(addrs))
+    with _MULTICALL_VAULT_LOCK:
+        cached = _MULTICALL_VAULT_CACHE.get(cache_key)
+        if cached and (time.time() - cached.get("_ts", 0)) < _MULTICALL_VAULT_TTL:
+            return {k: v for k, v in cached.items() if k != "_ts"}
+
+    results: dict = {}
+
+    # ── Try web3 Multicall3 first ──────────────────────────────────────────
+    _web3_success = False
+    try:
+        from web3 import Web3   # optional — graceful fallback if not installed
+        w3 = Web3(Web3.HTTPProvider(chain_rpc, request_kwargs={"timeout": 10}))
+        if w3.is_connected():
+            mc = w3.eth.contract(
+                address=Web3.to_checksum_address(_MULTICALL3_ADDRESS),
+                abi=_MULTICALL3_ABI,
+            )
+            calls = []
+            addr_order = []
+            for addr in addrs:
+                ca = Web3.to_checksum_address(addr)
+                calls.append((ca, True, bytes.fromhex(_SEL_TOTAL_ASSETS[2:])))
+                calls.append((ca, True, bytes.fromhex(_SEL_PRICE_PER_SHARE[2:])))
+                addr_order.append(addr)
+
+            return_data = mc.functions.aggregate3(calls).call()
+
+            for i, addr in enumerate(addr_order):
+                ta_result  = return_data[i * 2]
+                pps_result = return_data[i * 2 + 1]
+                success    = ta_result[0] or pps_result[0]
+                ta_raw  = int(ta_result[1].hex() or "0", 16) if ta_result[0] and ta_result[1] else 0
+                pps_raw = int(pps_result[1].hex() or "0", 16) if pps_result[0] and pps_result[1] else 0
+                results[addr] = {
+                    "total_assets":    ta_raw  / 1e18,
+                    "price_per_share": pps_raw / 1e18,
+                    "success":         success,
+                }
+            _web3_success = True
+    except Exception as _we:
+        logger.debug("[Multicall3] web3 path failed (%s) — falling back to Etherscan", _we)
+
+    # ── Fallback: individual Etherscan eth_call reads ──────────────────────
+    if not _web3_success:
+        for addr in addrs:
+            try:
+                ta_raw  = _etherscan_call(addr, _SEL_TOTAL_ASSETS)
+                pps_raw = _etherscan_call(addr, _SEL_PRICE_PER_SHARE)
+                ta  = int(ta_raw,  16) / 1e18 if ta_raw  and ta_raw  != "0x" else 0.0
+                pps = int(pps_raw, 16) / 1e18 if pps_raw and pps_raw != "0x" else 0.0
+                results[addr] = {
+                    "total_assets":    ta,
+                    "price_per_share": pps,
+                    "success":         bool(ta or pps),
+                }
+            except Exception as _fe:
+                logger.debug("[Multicall3] fallback eth_call for %s failed: %s", addr, _fe)
+                results[addr] = {"total_assets": 0.0, "price_per_share": 0.0, "success": False}
+
+    with _MULTICALL_VAULT_LOCK:
+        _MULTICALL_VAULT_CACHE[cache_key] = {**results, "_ts": time.time()}
+
+    return results
 
 
 def fetch_multicall3_prices(pairs: list) -> dict:

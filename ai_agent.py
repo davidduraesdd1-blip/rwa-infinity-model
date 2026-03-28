@@ -1713,3 +1713,81 @@ def get_30sec_briefing(tier: int, metrics: dict, holdings: list[dict]) -> str:
             f"Tier {tier} portfolio: {yield_pct:.1f}% yield, Sharpe {sharpe:.2f}. "
             f"Briefing service temporarily unavailable."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LANGGRAPH TOOL-USE STUBS  (#115)
+# LangGraph-compatible tool definitions.
+# These stubs allow future upgrade to full LangGraph tool-use without breaking
+# changes. They can be wired into a real LangGraph StateGraph when ready.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tool_get_asset_data(asset_id: str) -> dict:
+    """Tool: Get current data for a specific RWA asset."""
+    try:
+        from data_feeds import refresh_all_assets
+        assets_list = refresh_all_assets()  # returns List[dict]
+        # Build lookup dict by asset id
+        assets_map = {a.get("id", ""): a for a in (assets_list or [])}
+        return assets_map.get(asset_id, {"error": f"Asset {asset_id} not found"})
+    except Exception as e:
+        logger.warning("[Tool:get_asset_data] %s", e)
+        return {"error": str(e)}
+
+
+def _tool_get_macro_regime() -> dict:
+    """Tool: Get current macro regime and risk signals."""
+    try:
+        from data_feeds import fetch_hmm_macro_regime
+        return fetch_hmm_macro_regime()
+    except Exception as e:
+        logger.warning("[Tool:get_macro_regime] %s", e)
+        return {"error": str(e)}
+
+
+def _tool_run_scenario(shocks: dict) -> dict:
+    """Tool: Run portfolio stress scenario with given macro shocks."""
+    try:
+        from data_feeds import run_scenario_simulation
+        return run_scenario_simulation(shocks)
+    except Exception as e:
+        logger.warning("[Tool:run_scenario] %s", e)
+        return {"error": str(e)}
+
+
+def _tool_get_portfolio_health() -> dict:
+    """Tool: Get current portfolio health score and breakdown."""
+    try:
+        return compute_portfolio_health_score({}, [])
+    except Exception as e:
+        logger.warning("[Tool:get_portfolio_health] %s", e)
+        return {"error": str(e)}
+
+
+# Tool registry for agent dispatch
+AGENT_TOOLS: dict = {
+    "get_asset_data":       _tool_get_asset_data,
+    "get_macro_regime":     _tool_get_macro_regime,
+    "run_scenario":         _tool_run_scenario,
+    "get_portfolio_health": _tool_get_portfolio_health,
+}
+
+
+def dispatch_agent_tool(tool_name: str, **kwargs) -> dict:
+    """
+    Dispatch a tool call from the AI agent by name.
+
+    Args:
+        tool_name: One of the keys in AGENT_TOOLS.
+        **kwargs:  Arguments forwarded to the tool function.
+
+    Returns:
+        Tool result dict, or {"error": str} on failure.
+    """
+    if tool_name not in AGENT_TOOLS:
+        return {"error": f"Unknown tool: {tool_name}. Available: {list(AGENT_TOOLS.keys())}"}
+    try:
+        return AGENT_TOOLS[tool_name](**kwargs)
+    except Exception as e:
+        logger.warning("[dispatch_agent_tool] tool=%s error=%s", tool_name, e)
+        return {"error": str(e)}

@@ -4568,6 +4568,13 @@ FEATURES: dict = {
     "global_indices":       True,   # Global equity ETFs via yfinance (no key needed)
     "tokenized_stocks":     True,   # Tokenized stock reference prices via yfinance (no key needed)
     "coinmarketcap_global": bool(COINMARKETCAP_API_KEY),  # CMC global metrics (key required)
+    # Batch 8 (#21) — key-presence auto-enable aliases
+    "coingecko":            bool(COINGECKO_API_KEY),                                  # alias for coingecko_pro
+    "fred":                 bool(FRED_API_KEY),                                       # alias for fred_macro
+    "anthropic":            bool(_os.environ.get("ANTHROPIC_API_KEY") or _os.environ.get("RWA_ANTHROPIC_API_KEY")),  # alias for ai_agent
+    "tiingo":               bool(_os.environ.get("RWA_TIINGO_API_KEY")),              # Tiingo stocks/crypto
+    "coinmetrics":          bool(_os.environ.get("RWA_COIN_METRICS_API_KEY")),        # CoinMetrics on-chain
+    "web3":                 True,   # web3 feature always enabled (library may not be installed)
 }
 
 SENTRY_DSN: str | None = _os.environ.get("RWA_SENTRY_DSN")

@@ -6,6 +6,7 @@ Powered by Claude claude-sonnet-4-6 AI | DeFiLlama | CoinGecko
 Run: streamlit run app.py
 """
 
+import json
 import logging
 import os
 import threading
@@ -81,7 +82,7 @@ import pdf_export as _pdf
 from config import (
     PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
     RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
-    XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled,
+    XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled, FEATURES,
     get_redemption_window,
     RWA_TAM_USD, RWA_ONCHAIN_USD, RWA_MILESTONES,
 )
@@ -1032,7 +1033,7 @@ with tab_portfolio:
         )
 
     # ── 30-Second AI Briefing (#64) ──────────────────────────────────────────
-    if metrics:
+    if metrics and FEATURES["anthropic"]:
         _regime_nm  = _regime  # captured above from fetch_macro_regime / market fallback
         _brief_key  = (
             f"brief_{selected_tier}_{round(metrics.get('weighted_yield_pct', 0), 1)}"
@@ -2906,6 +2907,108 @@ with tab_ai:
         else:
             st.info("x402 not installed — run `pip install x402` to enable micropayment rail.")
 
+    # ── RWA Agent Tool Query (#115) ──────────────────────────────────────────
+    st.markdown('<div class="section-header">Ask the RWA Agent</div>', unsafe_allow_html=True)
+    st.caption(
+        "Natural-language questions dispatched to live data tools. "
+        "Examples: 'What is the health of BUIDL?' · 'Run a scenario with HY spreads +200bp' · "
+        "'What is the current macro regime?'"
+    )
+    _agent_question = st.text_input(
+        "Your question",
+        placeholder="e.g. What is the health of BUIDL? or Run a scenario with HY spreads +200bp",
+        key="agent_tool_question",
+        max_chars=300,
+    )
+    if st.button("Ask Agent", key="btn_ask_agent", type="primary"):
+        if _agent_question.strip():
+            with st.spinner("Thinking…"):
+                try:
+                    _q_lower = _agent_question.lower()
+                    # Detect intent and dispatch matching tool(s)
+                    _tool_ctx: dict = {}
+                    if any(kw in _q_lower for kw in ("macro", "regime", "risk", "fear", "vix")):
+                        _tool_ctx["macro_regime"] = _agent.dispatch_agent_tool("get_macro_regime")
+                    if any(kw in _q_lower for kw in ("health", "portfolio", "score", "sharpe")):
+                        _tool_ctx["portfolio_health"] = _agent.dispatch_agent_tool("get_portfolio_health")
+                    if any(kw in _q_lower for kw in ("scenario", "stress", "shock", "spread", "bp")):
+                        _tool_ctx["scenario"] = _agent.dispatch_agent_tool(
+                            "run_scenario", shocks={"hy_spread_bps": 200}
+                        )
+                    # Try asset lookup for known RWA symbols
+                    for _sym in ["BUIDL", "OUSG", "USDY", "WSTETH", "STBT", "USYC", "ONDO"]:
+                        if _sym.lower() in _q_lower:
+                            _tool_ctx[f"asset_{_sym}"] = _agent.dispatch_agent_tool(
+                                "get_asset_data", asset_id=_sym
+                            )
+
+                    # Build context summary for Claude
+                    _ctx_lines = []
+                    for _tn, _td in _tool_ctx.items():
+                        if _td and not _td.get("error"):
+                            _ctx_lines.append(f"[{_tn}] {json.dumps(_td, default=str)[:400]}")
+                    _ctx_str = "\n".join(_ctx_lines) if _ctx_lines else "No tool data available."
+
+                    # Generate answer with Claude
+                    _key_for_q = _get_effective_claude_key()
+                    _q_sanitized = _agent_question[:300].replace("<", "&lt;").replace(">", "&gt;")
+                    _agent_answer = None
+                    if _key_for_q:
+                        try:
+                            import anthropic as _ant_q
+                            _client_q = _ant_q.Anthropic(api_key=_key_for_q, timeout=20.0)
+                            _msg_q = _client_q.messages.create(
+                                model="claude-haiku-4-5",
+                                max_tokens=400,
+                                messages=[{
+                                    "role": "user",
+                                    "content": (
+                                        f"You are the RWA Infinity portfolio assistant. "
+                                        f"Answer concisely using the tool data below.\n\n"
+                                        f"Tool data:\n{_ctx_str}\n\n"
+                                        f"User question: {_q_sanitized}"
+                                    ),
+                                }],
+                            )
+                            _agent_answer = _msg_q.content[0].text.strip() if _msg_q.content else "No answer."
+                        except Exception as _claude_err:
+                            logger.warning("[AgentQuery] Claude call failed: %s", _claude_err)
+                            _agent_answer = None
+                    # Rule-based fallback when no key or Claude call failed
+                    if _agent_answer is None:
+                        if _tool_ctx:
+                            _agent_answer = (
+                                f"Tool data retrieved: {', '.join(_tool_ctx.keys())}. "
+                                f"Connect ANTHROPIC_API_KEY for AI-synthesized answers."
+                            )
+                        else:
+                            _agent_answer = (
+                                "No matching tool found for that question. Try asking about "
+                                "'macro regime', 'portfolio health', a specific asset like BUIDL, "
+                                "or 'run a stress scenario'."
+                            )
+                    st.markdown(
+                        f"""<div style="background:#0D1117;border:1px solid #00D4FF;border-radius:8px;
+                                        padding:14px 16px;margin-top:8px">
+                            <div style="font-size:10px;color:#00D4FF;font-weight:700;
+                                        text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">
+                                RWA Agent Response
+                            </div>
+                            <div style="font-size:13px;color:#E2E8F0;line-height:1.6;white-space:pre-line">
+                                {_agent_answer}
+                            </div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+                    if _tool_ctx:
+                        with st.expander("Tool data used", expanded=False):
+                            for _tn2, _td2 in _tool_ctx.items():
+                                st.caption(f"**{_tn2}**: {str(_td2)[:200]}")
+                except Exception as _aq_err:
+                    st.warning(f"Agent query failed: {_aq_err}")
+        else:
+            st.warning("Please enter a question above.")
+
     # Performance feedback loop
     st.markdown('<div class="section-header">AI Feedback Loop</div>', unsafe_allow_html=True)
     perf_df = _db.get_agent_performance()
@@ -4553,6 +4656,55 @@ with tab_onchain:
 """, unsafe_allow_html=True)
     else:
         st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-7540 queue depth.")
+
+    # ─── ERC-7540 Redemption Queue — Coverage & Risk Signal (#104 enhanced) ──
+    if _pro_mode and (feature_enabled("erc4626") or feature_enabled("etherscan")):
+        st.markdown("---")
+        st.markdown("#### 🔒 ERC-7540 Vault Coverage & Risk Signal (Pro)")
+        st.caption(
+            "totalAssets / totalSupply coverage ratio — below 1.0 = undercollateralized. "
+            "RED signal if coverage < 0.95."
+        )
+
+        _ERC7540_VAULTS = {
+            "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
+            "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbe39B",
+        }
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _load_erc7540_queue(addr: str) -> dict:
+            return _df.fetch_erc7540_redemption_queue(addr)
+
+        _rq_cols = st.columns(len(_ERC7540_VAULTS))
+        for _rqi, (_rq_sym, _rq_addr) in enumerate(_ERC7540_VAULTS.items()):
+            _rqd = _load_erc7540_queue(_rq_addr)
+            _cov     = _rqd.get("coverage_ratio", 1.0)
+            _sig     = _rqd.get("risk_signal", "GREEN")
+            _ta7     = _rqd.get("total_assets", 0.0)
+            _ts7     = _rqd.get("total_supply", 0.0)
+            _qdepth  = _rqd.get("queue_depth_usd")
+            _compat  = _rqd.get("erc7540_compatible", False)
+            _sig_clr = {"GREEN": "#10b981", "YELLOW": "#f59e0b", "RED": "#ef4444"}.get(_sig, "#6b7280")
+            _cov_str = f"{_cov:.4f}" if _cov else "—"
+            _qdep_str = (f"${_qdepth/1e6:.1f}M" if _qdepth and _qdepth >= 1e6
+                         else f"${_qdepth:,.0f}" if _qdepth else "N/A")
+            with _rq_cols[_rqi]:
+                st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-left:4px solid {_sig_clr};
+            border-radius:10px;padding:14px">
+  <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px">
+    {_rq_sym}
+    <span style="font-size:10px;font-weight:400;color:{_sig_clr};margin-left:8px">{_sig}</span>
+  </div>
+  <div style="font-size:10px;color:#6b7280">Coverage Ratio</div>
+  <div style="font-size:20px;font-weight:700;color:{_sig_clr}">{_cov_str}</div>
+  <div style="font-size:10px;color:#6b7280;margin-top:6px">Queue Depth</div>
+  <div style="font-size:13px;color:#9ca3af">{_qdep_str}</div>
+  <div style="font-size:10px;color:#6b7280;margin-top:4px">
+    ERC-7540: {"Compatible" if _compat else "Standard ERC-4626"}
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     # ─── Wallet Address Input (#110) + ERC-3643 + Zerion ─────────────────────
     st.markdown("---")
