@@ -749,7 +749,27 @@ def run_monte_carlo(portfolio: dict, n_simulations: int = MC_SIMULATIONS,
     # For a DIVERSIFIED RWA portfolio (20+ protocols), portfolio-level jump rate is lower
     # Mean jump = -4% (unchanged: mostly negative but occasionally +3-4% from price recovery)
     # Std = 9% (increased slightly: tail events are fatter when they do occur)
-    jump_intensity = 0.50 / 252   # ~0.5 jump events per year (down from 0.8, reflecting maturity)
+    base_jump_intensity = 0.50 / 252   # ~0.5 jump events per year (base rate)
+
+    # #44 — Audit Score Adjustment: incorporate weighted-average audit score from holdings
+    # adjusted_jump_intensity = base * (1.0 + (70 - audit_score) / 100.0)
+    # Score 70 = no adjustment, score 40 = +30% intensity, score 95 = -25% intensity
+    try:
+        from config import RWA_UNIVERSE as _rwa_uni
+        _audit_map = {a["id"]: a.get("audit_score", 70) for a in _rwa_uni}
+        _scores = [
+            _audit_map.get(h.get("id", ""), 70)
+            for h in holdings
+            if h.get("id")
+        ]
+        _avg_audit = sum(_scores) / len(_scores) if _scores else 70
+        _jump_adj  = 1.0 + (70 - _avg_audit) / 100.0
+        _jump_adj  = max(0.5, min(2.0, _jump_adj))   # clamp to [0.5, 2.0]
+    except Exception:
+        _avg_audit = 70
+        _jump_adj  = 1.0
+
+    jump_intensity = base_jump_intensity * _jump_adj
     jump_mean      = -0.04         # average jump = -4% (unchanged, negatively skewed)
     jump_std       = 0.09          # jump std dev = 9% (slightly wider tails for rare big events)
 

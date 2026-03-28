@@ -869,6 +869,29 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_portfolio:
+
+    # ── #39 Anomaly Detection Banners (shown at TOP before all content) ───────
+    try:
+        _anomalies = _df.detect_anomalies()
+        _critical  = [a for a in _anomalies if a.get("severity") == "CRITICAL"]
+        _warnings  = [a for a in _anomalies if a.get("severity") == "WARNING"]
+        for _anom in _critical:
+            st.error(
+                f"CRITICAL TVL DROP — {_anom['asset_name']}: "
+                f"{_anom['pct_change']:+.1f}% "
+                f"(${abs(_anom.get('abs_drop_usd', 0)) / 1e6:.1f}M drop) "
+                f"vs 24h baseline"
+            )
+        for _anom in _warnings:
+            st.warning(
+                f"TVL Warning — {_anom['asset_name']}: "
+                f"{_anom['pct_change']:+.1f}% "
+                f"(${abs(_anom.get('abs_drop_usd', 0)) / 1e6:.1f}M drop) "
+                f"vs 24h baseline"
+            )
+    except Exception as _anom_err:
+        logger.debug("[UI] Anomaly detection skipped: %s", _anom_err)
+
     portfolio = _load_portfolio(selected_tier, portfolio_value)
     if _demo_mode:
         # Demo mode: inject synthetic portfolio data so no real API call is needed
@@ -1414,6 +1437,111 @@ with tab_portfolio:
     except Exception as e:
         logger.warning("[UI] Credit warnings failed: %s", e)
 
+    # ── #38 Scenario Simulation ───────────────────────────────────────────────
+    with st.expander("Scenario Simulation", expanded=False):
+        st.markdown(
+            '<div style="font-size:12px;color:#9CA3AF;margin-bottom:10px">'
+            'Enter macro shock parameters to estimate portfolio-level impact across all RWA assets. '
+            'Positive HY spread and Fed rate = tightening. Negative M2 = liquidity contraction.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        _sc_col1, _sc_col2, _sc_col3, _sc_col4 = st.columns(4)
+        with _sc_col1:
+            _sc_hy = st.number_input(
+                "HY Spread Change (bps)", min_value=-500, max_value=500, value=0, step=25,
+                key="sc_hy_spread",
+                help="High-yield credit spread change in basis points. +200 = stress scenario",
+            )
+        with _sc_col2:
+            _sc_fed = st.number_input(
+                "Fed Rate Change (bps)", min_value=-200, max_value=200, value=0, step=25,
+                key="sc_fed_rate",
+                help="Federal funds rate change in basis points. +50 = one Fed hike",
+            )
+        with _sc_col3:
+            _sc_m2 = st.number_input(
+                "M2 Change (%)", min_value=-15.0, max_value=15.0, value=0.0, step=0.5,
+                key="sc_m2",
+                help="M2 money supply % change. Negative = liquidity tightening",
+            )
+        with _sc_col4:
+            _sc_vix = st.number_input(
+                "VIX Change (pts)", min_value=-20, max_value=40, value=0, step=5,
+                key="sc_vix",
+                help="VIX volatility index point change. +10 = elevated fear environment",
+            )
+
+        if st.button("Run Scenario", key="btn_run_scenario", use_container_width=False):
+            _shocks = {
+                "hy_spread_bps": _sc_hy,
+                "fed_rate_bps":  _sc_fed,
+                "m2_pct":        _sc_m2,
+                "vix_change":    _sc_vix,
+            }
+            with st.spinner("Running scenario simulation..."):
+                try:
+                    _sim = _df.run_scenario_simulation(_shocks)
+                except Exception as _sim_err:
+                    logger.warning("[UI] Scenario sim error: %s", _sim_err)
+                    _sim = None
+
+            if _sim is None:
+                st.error("Scenario simulation failed. Please try again.")
+            else:
+                _total_pct = _sim.get("total_portfolio_impact_pct", 0.0)
+                _sc_color  = "#34D399" if _total_pct >= 0 else "#EF4444"
+                _sc_arrow  = "▲" if _total_pct >= 0 else "▼"
+                st.markdown(
+                    f"""<div style="background:#111827;border:2px solid {_sc_color}40;
+                        border-radius:10px;padding:14px 20px;margin:10px 0;text-align:center">
+                        <div style="font-size:11px;color:#6B7280;text-transform:uppercase;
+                                    letter-spacing:0.1em">Scenario: {_sim.get('scenario_name','')}</div>
+                        <div style="font-size:32px;font-weight:900;color:{_sc_color}">
+                            {_sc_arrow} {abs(_total_pct):.3f}%</div>
+                        <div style="font-size:11px;color:#9CA3AF">
+                            Estimated avg portfolio impact across {_sim.get('n_assets',0)} assets</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+                _sc_left, _sc_right = st.columns(2)
+                with _sc_left:
+                    st.markdown(
+                        '<div style="font-size:12px;font-weight:700;color:#EF4444;'
+                        'margin-bottom:6px">Most Impacted (Worst)</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _worst = _sim.get("worst_assets", [])
+                    for _w in _worst[:5]:
+                        _w_pct = _w.get("impact_pct", 0)
+                        st.markdown(
+                            f'<div style="background:#1F2937;border-radius:6px;padding:6px 10px;'
+                            f'margin:3px 0;font-size:12px">'
+                            f'<span style="color:#E2E8F0">{_w.get("name","")[:40]}</span>'
+                            f'<span style="color:#EF4444;float:right;font-weight:700">'
+                            f'{_w_pct:+.2f}%</span></div>',
+                            unsafe_allow_html=True,
+                        )
+
+                with _sc_right:
+                    st.markdown(
+                        '<div style="font-size:12px;font-weight:700;color:#34D399;'
+                        'margin-bottom:6px">Best Performers (Beneficiaries)</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _best = _sim.get("best_assets", [])
+                    for _b in _best[:5]:
+                        _b_pct = _b.get("impact_pct", 0)
+                        st.markdown(
+                            f'<div style="background:#1F2937;border-radius:6px;padding:6px 10px;'
+                            f'margin:3px 0;font-size:12px">'
+                            f'<span style="color:#E2E8F0">{_b.get("name","")[:40]}</span>'
+                            f'<span style="color:#34D399;float:right;font-weight:700">'
+                            f'{_b_pct:+.2f}%</span></div>',
+                            unsafe_allow_html=True,
+                        )
+
     # ── PDF Export ────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Export Report</div>', unsafe_allow_html=True)
     if _pdf._REPORTLAB:
@@ -1548,6 +1676,18 @@ with tab_universe:
             return get_redemption_window(row.get("id", ""), row.get("category", ""))
         filtered_df["redemption_window"] = filtered_df.apply(_redeem_window, axis=1)
 
+        # #43/#44 — Enrich with regulatory_jurisdiction and audit_score from RWA_UNIVERSE
+        if "regulatory_jurisdiction" not in filtered_df.columns or \
+                filtered_df["regulatory_jurisdiction"].isna().all():
+            _rj_map = {a["id"]: a.get("regulatory_jurisdiction", "US")
+                       for a in RWA_UNIVERSE if a.get("id")}
+            filtered_df["regulatory_jurisdiction"] = filtered_df["id"].map(_rj_map).fillna("US")
+        if "audit_score" not in filtered_df.columns or \
+                filtered_df["audit_score"].isna().all():
+            _as_map = {a["id"]: a.get("audit_score", 70)
+                       for a in RWA_UNIVERSE if a.get("id")}
+            filtered_df["audit_score"] = filtered_df["id"].map(_as_map).fillna(70)
+
         # Asset table
         show_cols = {
             "id": "ID", "name": "Name", "category": "Category",
@@ -1562,6 +1702,8 @@ with tab_universe:
             "exit_label": "Exit Speed",
             "trust_score": "Trust /10",
             "regulatory_score": "Regulatory",
+            "regulatory_jurisdiction": "Jurisdiction",
+            "audit_score": "Audit Score",
             "composite_score": "Score",
             "min_investment_usd": "Min Investment",
         }

@@ -8,6 +8,8 @@ import logging
 import time
 import threading
 import json
+import hashlib
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 import xml.etree.ElementTree as _ET
@@ -5190,3 +5192,390 @@ def fetch_cmc_global_metrics() -> dict:
             _CMC_GLOBAL_CACHE["ts"]   = time.time()
 
     return data
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #38 — SCENARIO SIMULATION AGENT
+# Accepts macro shock parameters and estimates portfolio-level impact
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SCENARIO_CACHE: Dict[str, dict] = {}
+_SCENARIO_CACHE_LOCK = threading.Lock()
+_SCENARIO_CACHE_TTL  = 300   # 5 minutes (shorter than default — scenarios re-run frequently)
+
+# Category sensitivity mapping for each shock type
+_SCENARIO_SENSITIVITIES = {
+    # HY spread shock: impacts credit-sensitive assets at ~-0.3x NAV per 100bp
+    "hy_spread_bps": {
+        "Private Credit":    -0.003,   # -0.3% NAV per bp = -0.3 per 100bp
+        "Trade Finance":     -0.003,
+        "Government Bonds":  -0.001,   # investment-grade bonds: smaller impact
+        "Corporate Bonds":   -0.003,
+        "Insurance":         -0.002,
+        "DeFi Yield":        -0.002,
+        "PayFi":             -0.002,
+    },
+    # Fed rate shock: duration-sensitive assets
+    # T-bills: minimal impact, long bonds: -7% per 100bp, real estate: -3% per 100bp
+    "fed_rate_bps": {
+        "Government Bonds":  -0.02,    # ~-2% per 100bp (mix of short and longer duration)
+        "Real Estate":       -0.03,    # -3% per 100bp
+        "Infrastructure":    -0.04,    # longer duration infrastructure debt
+        "Private Equity":    -0.03,
+        "Private Credit":    -0.015,   # floating rate cushion
+        "Commodities":        0.005,   # gold/commodities slightly positive (inflation hedge)
+        "Tokenized Equities": -0.025,
+        "Liquid Staking":    -0.01,
+    },
+    # M2 shock: gold/commodities (+0.5x for -1% M2), crypto (+1.5x for -1% M2)
+    # Note: negative M2 change = tighter liquidity = POSITIVE for gold, negative for crypto
+    # Impact_pct = -m2_pct_change * sensitivity  (negative M2 = positive effect on gold)
+    "m2_pct": {
+        "Commodities":        0.005,   # +0.5% per -1% M2 (gold benefits from tight money)
+        "DeFi Yield":         0.015,   # +1.5% per -1% M2 (crypto hurt by tight money)
+        "Liquid Staking":     0.015,
+        "Tokenized Equities": 0.008,
+        "Equities":           0.008,
+        "PayFi":              0.005,
+    },
+    # VIX shock: universal risk-off, -0.5% per +1 VIX point for risky assets
+    "vix_change": {
+        "Private Credit":    -0.005,
+        "Trade Finance":     -0.005,
+        "Private Equity":    -0.007,
+        "Real Estate":       -0.004,
+        "Commodities":       -0.002,
+        "Carbon Credits":    -0.006,
+        "Intellectual Property": -0.005,
+        "Art & Collectibles":-0.006,
+        "Insurance":         -0.004,
+        "DeFi Yield":        -0.008,
+        "Tokenized Equities":-0.007,
+        "Liquid Staking":    -0.007,
+        "Equities":          -0.007,
+        "PayFi":             -0.005,
+        "Government Bonds":  -0.001,   # flight to safety: minimal negative impact
+    },
+}
+
+# Minimum impact threshold — assets < this are considered unaffected (avoid noise)
+_SCENARIO_MIN_IMPACT = 0.001
+
+
+def run_scenario_simulation(shocks: dict) -> Optional[dict]:
+    """
+    Run a macro stress scenario simulation across all RWA asset categories.
+
+    Args:
+        shocks: dict with optional keys:
+            - "hy_spread_bps"  : HY credit spread change in basis points (e.g. +200)
+            - "fed_rate_bps"   : Fed funds rate change in basis points (e.g. +50)
+            - "m2_pct"         : M2 money supply % change (e.g. -5.0)
+            - "vix_change"     : VIX index point change (e.g. +10)
+
+    Returns:
+        {
+            "scenario_name":             str,
+            "total_portfolio_impact_pct": float,
+            "asset_impacts":             {asset_id: impact_pct},
+            "worst_assets":              [{"id", "name", "category", "impact_pct"}],
+            "best_assets":               [{"id", "name", "category", "impact_pct"}],
+            "shock_breakdown":           {shock_type: total_impact},
+            "timestamp":                 ISO str,
+        }
+    Returns None on error.
+    """
+    try:
+        from config import RWA_UNIVERSE
+
+        # Build cache key from shocks dict
+        shocks_key = hashlib.md5(
+            json.dumps(shocks, sort_keys=True).encode()
+        ).hexdigest()[:12]
+        cache_key = f"scenario_{shocks_key}"
+
+        with _SCENARIO_CACHE_LOCK:
+            cached = _SCENARIO_CACHE.get(cache_key)
+            if cached and (time.time() - cached.get("_ts", 0)) < _SCENARIO_CACHE_TTL:
+                return {k: v for k, v in cached.items() if k != "_ts"}
+
+        hy_spread  = float(shocks.get("hy_spread_bps", 0))
+        fed_rate   = float(shocks.get("fed_rate_bps", 0))
+        m2_change  = float(shocks.get("m2_pct", 0))
+        vix_change = float(shocks.get("vix_change", 0))
+
+        # Build scenario name
+        parts = []
+        if hy_spread != 0:
+            parts.append(f"HY{'+' if hy_spread > 0 else ''}{hy_spread:.0f}bp")
+        if fed_rate != 0:
+            parts.append(f"Fed{'+' if fed_rate > 0 else ''}{fed_rate:.0f}bp")
+        if m2_change != 0:
+            parts.append(f"M2{'+' if m2_change > 0 else ''}{m2_change:.1f}%")
+        if vix_change != 0:
+            parts.append(f"VIX{'+' if vix_change > 0 else ''}{vix_change:.0f}")
+        scenario_name = " | ".join(parts) if parts else "Baseline (no shock)"
+
+        asset_impacts: Dict[str, float] = {}
+        shock_breakdown: Dict[str, float] = {
+            "hy_spread": 0.0, "fed_rate": 0.0, "m2": 0.0, "vix": 0.0
+        }
+
+        for asset in RWA_UNIVERSE:
+            asset_id  = asset.get("id", "")
+            category  = asset.get("category", "")
+            total_impact = 0.0
+
+            # 1. HY spread shock
+            if hy_spread != 0:
+                sens = _SCENARIO_SENSITIVITIES["hy_spread_bps"].get(category, 0.0)
+                impact = hy_spread * sens  # sens is already % per bp (e.g. -0.003 = -0.3% per 100bp)
+                total_impact += impact
+                shock_breakdown["hy_spread"] += impact
+
+            # 2. Fed rate shock
+            if fed_rate != 0:
+                sens = _SCENARIO_SENSITIVITIES["fed_rate_bps"].get(category, 0.0)
+                impact = fed_rate * sens  # already in percent per 100bp units above
+                total_impact += impact
+                shock_breakdown["fed_rate"] += impact
+
+            # 3. M2 shock: negative M2 = tighter money
+            # Commodities (gold) benefit from tight money (inverse relationship)
+            # Crypto/risky assets hurt by tight money
+            if m2_change != 0:
+                sens = _SCENARIO_SENSITIVITIES["m2_pct"].get(category, 0.0)
+                # For Commodities: negative M2 pct → positive impact (gold safe haven)
+                # For DeFi/Crypto: negative M2 pct → negative impact (liquidity drain)
+                impact = -m2_change * sens  # invert: -M2 = positive for gold; sens in % per % M2
+                total_impact += impact
+                shock_breakdown["m2"] += impact
+
+            # 4. VIX shock: universal risk-off for all risky assets
+            if vix_change != 0:
+                sens = _SCENARIO_SENSITIVITIES["vix_change"].get(category, -0.003)
+                impact = vix_change * sens  # sens is % per VIX point (e.g. -0.003 = -0.3% per +1 VIX)
+                total_impact += impact
+                shock_breakdown["vix"] += impact
+
+            asset_impacts[asset_id] = round(total_impact, 4)
+
+        # Calculate total portfolio impact (equal-weighted average for now)
+        if asset_impacts:
+            total_impact_pct = round(
+                sum(asset_impacts.values()) / len(asset_impacts), 4
+            )
+        else:
+            total_impact_pct = 0.0
+
+        # Sort for worst/best
+        sorted_impacts = sorted(asset_impacts.items(), key=lambda x: x[1])
+
+        def _enrich(asset_id: str, impact_pct: float) -> dict:
+            asset = next((a for a in RWA_UNIVERSE if a["id"] == asset_id), {})
+            return {
+                "id":          asset_id,
+                "name":        asset.get("name", asset_id),
+                "category":    asset.get("category", ""),
+                "impact_pct":  impact_pct,
+            }
+
+        worst_assets = [_enrich(aid, imp) for aid, imp in sorted_impacts[:5]]
+        best_assets  = [_enrich(aid, imp) for aid, imp in sorted_impacts[-5:][::-1]]
+
+        # Normalize shock breakdown by asset count
+        n = max(len(asset_impacts), 1)
+        shock_breakdown = {k: round(v / n, 4) for k, v in shock_breakdown.items()}
+
+        result = {
+            "scenario_name":              scenario_name,
+            "total_portfolio_impact_pct": total_impact_pct,
+            "asset_impacts":              asset_impacts,
+            "worst_assets":               worst_assets,
+            "best_assets":                best_assets,
+            "shock_breakdown":            shock_breakdown,
+            "n_assets":                   len(asset_impacts),
+            "timestamp":                  datetime.now(timezone.utc).isoformat(),
+        }
+
+        with _SCENARIO_CACHE_LOCK:
+            _SCENARIO_CACHE[cache_key] = {**result, "_ts": time.time()}
+
+        return result
+
+    except Exception as e:
+        logger.warning("[ScenarioSim] failed: %s", e)
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #39 — ANOMALY DETECTION AGENT
+# Compares current TVL against a 24h baseline and flags large drops
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ANOMALY_BASELINE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "anomaly_baseline.json"
+)
+_ANOMALY_LOCK        = threading.Lock()
+_ANOMALY_CACHE_TTL   = 300   # 5 min for anomaly re-runs (reads from cached TVL data)
+_ANOMALY_BASELINE_AGE = 86400  # update baseline every 24 hours
+
+_anomaly_result_cache: Dict[str, Any] = {"ts": 0, "data": None}
+
+
+def _load_anomaly_baseline() -> dict:
+    """Load the 24h TVL baseline from JSON file. Returns {} on missing/corrupt file."""
+    try:
+        with open(_ANOMALY_BASELINE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_anomaly_baseline(baseline: dict) -> None:
+    """Save TVL snapshot to JSON file as the new 24h baseline."""
+    try:
+        with open(_ANOMALY_BASELINE_FILE, "w", encoding="utf-8") as f:
+            json.dump(baseline, f, indent=2)
+    except Exception as e:
+        logger.warning("[AnomalyDetect] could not save baseline: %s", e)
+
+
+def _get_current_tvl_snapshot() -> Dict[str, float]:
+    """
+    Collect current TVL for each RWA asset using available data sources.
+    Returns {asset_id: tvl_usd}.
+    Uses DeFiLlama protocol data + asset config fallbacks.
+    """
+    from config import RWA_UNIVERSE
+
+    snapshot: Dict[str, float] = {}
+
+    # Pull DeFiLlama protocol data (already cached)
+    try:
+        protocols = fetch_defillama_protocols()
+        slug_to_tvl: Dict[str, float] = {
+            p["slug"]: float(p.get("tvl") or 0) for p in protocols
+        }
+    except Exception:
+        slug_to_tvl = {}
+
+    for asset in RWA_UNIVERSE:
+        asset_id = asset.get("id", "")
+        if not asset_id:
+            continue
+
+        # Try DeFiLlama slug first
+        slug = asset.get("defillama_slug") or asset.get("defillama_id") or ""
+        tvl  = slug_to_tvl.get(slug, 0.0) if slug else 0.0
+
+        # Fallback to config tvl_usd (static estimate)
+        if tvl == 0:
+            tvl = float(asset.get("tvl_usd") or 0)
+
+        snapshot[asset_id] = tvl
+
+    return snapshot
+
+
+def detect_anomalies() -> List[dict]:
+    """
+    Detect RWA assets with significant TVL drops vs the 24h baseline.
+
+    Flags:
+      - Any asset with > 15% TVL drop (WARNING)
+      - Any asset with > 30% TVL drop (CRITICAL)
+      - Any asset with > $50M absolute TVL drop (regardless of %)
+
+    Returns list of anomaly dicts with keys:
+      {asset_id, asset_name, current_tvl, baseline_tvl, pct_change, severity, timestamp}
+    Returns [] if no anomalies or on error.
+    """
+    with _ANOMALY_LOCK:
+        cached = _anomaly_result_cache
+        if cached["data"] is not None and (time.time() - cached["ts"]) < _ANOMALY_CACHE_TTL:
+            return cached["data"]
+
+    try:
+        from config import RWA_UNIVERSE
+        asset_names = {a["id"]: a.get("name", a["id"]) for a in RWA_UNIVERSE}
+
+        # Load baseline
+        baseline = _load_anomaly_baseline()
+        baseline_ts = float(baseline.get("_timestamp", 0))
+        now = time.time()
+
+        # Get current snapshot
+        current_snapshot = _get_current_tvl_snapshot()
+
+        # Check if baseline needs updating (first run or >24h old)
+        if not baseline or (now - baseline_ts) > _ANOMALY_BASELINE_AGE:
+            new_baseline = dict(current_snapshot)
+            new_baseline["_timestamp"] = now
+            _save_anomaly_baseline(new_baseline)
+            logger.info("[AnomalyDetect] baseline updated (%d assets)", len(current_snapshot))
+            # No anomalies on first run (no comparison data)
+            with _ANOMALY_LOCK:
+                _anomaly_result_cache["data"] = []
+                _anomaly_result_cache["ts"]   = now
+            return []
+
+        anomalies: List[dict] = []
+        ts_str = datetime.now(timezone.utc).isoformat()
+
+        for asset_id, current_tvl in current_snapshot.items():
+            baseline_tvl = float(baseline.get(asset_id, 0))
+
+            # Skip assets with no meaningful TVL data
+            if baseline_tvl < 100_000:
+                continue
+            if current_tvl <= 0:
+                continue
+
+            pct_change = (current_tvl - baseline_tvl) / baseline_tvl
+
+            # Absolute drop
+            abs_drop = baseline_tvl - current_tvl
+
+            # Check thresholds
+            triggered = False
+            if pct_change < -0.30:
+                severity  = "CRITICAL"
+                triggered = True
+            elif pct_change < -0.15:
+                severity  = "WARNING"
+                triggered = True
+            elif abs_drop > 50_000_000:
+                severity  = "WARNING"
+                triggered = True
+                # Upgrade to CRITICAL if both large absolute AND > 15% drop
+                if pct_change < -0.15:
+                    severity = "CRITICAL"
+
+            if triggered:
+                anomalies.append({
+                    "asset_id":    asset_id,
+                    "asset_name":  asset_names.get(asset_id, asset_id),
+                    "current_tvl": round(current_tvl, 2),
+                    "baseline_tvl": round(baseline_tvl, 2),
+                    "pct_change":  round(pct_change * 100, 2),
+                    "abs_drop_usd": round(abs_drop, 2),
+                    "severity":    severity,
+                    "timestamp":   ts_str,
+                })
+
+        # Sort by severity (CRITICAL first), then by pct_change
+        anomalies.sort(key=lambda x: (0 if x["severity"] == "CRITICAL" else 1, x["pct_change"]))
+
+        with _ANOMALY_LOCK:
+            _anomaly_result_cache["data"] = anomalies
+            _anomaly_result_cache["ts"]   = now
+
+        if anomalies:
+            logger.warning("[AnomalyDetect] %d anomalies detected", len(anomalies))
+
+        return anomalies
+
+    except Exception as e:
+        logger.warning("[AnomalyDetect] failed: %s", e)
+        return []

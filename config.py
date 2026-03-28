@@ -230,6 +230,8 @@ RWA_UNIVERSE = [
         "redemption_window": "Monthly",
         "description": "BlackRock's tokenized money market fund backed by US Treasury bills. Institutional grade, $100+ billion AUM manager.",
         "tags": ["institutional", "treasury", "money-market", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 95,
     },
     {
         "id": "BENJI",
@@ -250,6 +252,8 @@ RWA_UNIVERSE = [
         "redemption_window": "Daily",
         "description": "First US-registered fund to use public blockchain for transaction processing. US govt securities + overnight repos.",
         "tags": ["retail", "treasury", "money-market", "registered-fund"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 93,
     },
     {
         "id": "USTB",
@@ -269,6 +273,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-08-01",
         "description": "SEC-registered 40-Act fund tokenized on Ethereum. Direct competitor to BUIDL with broader access.",
         "tags": ["institutional", "treasury", "registered-fund", "sec"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
     {
         "id": "TBILL",
@@ -289,6 +295,8 @@ RWA_UNIVERSE = [
         "redemption_window": "T+1",
         "description": "24/7 T-bill yield vault with daily liquidity. Licensed in Singapore, backed by US short-duration Treasuries.",
         "tags": ["institutional", "treasury", "defi-native", "singapore"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
     },
     {
         "id": "OUSG",
@@ -309,6 +317,8 @@ RWA_UNIVERSE = [
         "redemption_window": "Daily",
         "description": "Tokenized BlackRock iShares Short Treasury Bond ETF. $2.5B+ TVL (March 2026). Multi-chain, daily NAV updates, KYC required. Ondo Markets perps launched. ADGM regulatory approval.",
         "tags": ["institutional", "treasury", "multi-chain", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 92,
     },
     {
         "id": "OMMF",
@@ -328,6 +338,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-06-01",
         "description": "Tokenized US money market fund. Holds overnight repos and T-bills. 1:1 USD redeemable.",
         "tags": ["institutional", "money-market", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
     {
         "id": "USDM",
@@ -347,6 +359,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-09-01",
         "description": "Yield-bearing stablecoin backed by T-bills. Rebasing token — balance grows daily. Bermuda-regulated.",
         "tags": ["retail", "stablecoin", "treasury", "yield-bearing", "rebasing"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 82,
     },
     {
         "id": "USDY",
@@ -367,6 +381,8 @@ RWA_UNIVERSE = [
         "redemption_window": "24-48 hours",
         "description": "Tokenized note backed by US bank demand deposits and Treasuries. Transferable after 40-day lockup. ADGM approved. Multi-chain: Ethereum, Solana, Mantle, Aptos.",
         "tags": ["retail", "stablecoin", "treasury", "yield-bearing"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 92,
     },
     {
         "id": "STBT",
@@ -386,6 +402,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-03-01",
         "description": "First Asian tokenized short-term T-bill by Matrixdock (Matrixport). Rebases daily to distribute yield. Used as DeFi collateral on Curve. Expanding to precious metals (silver, platinum, palladium) in 2025.",
         "tags": ["institutional", "treasury", "defi-collateral", "matrixdock", "asian-market", "rebasing"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
 
     {
@@ -407,6 +425,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 400_000_000,
         "description": "Midas tokenized US T-bill fund (~$400M TVL). ERC-20 yield token backed by short-duration US Treasuries. MiCA-compliant, deployed on Ethereum and Base. Redeemable T+1.",
         "tags": ["institutional", "treasury", "midas", "mica-compliant", "multi-chain"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 82,
     },
     {
         "id": "MBASIS",
@@ -427,6 +447,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 50_000_000,
         "description": "Midas tokenized basis trade — captures the funding rate spread between spot BTC/ETH and perpetual futures. Higher yield than T-bills with moderate market risk. MiCA-compliant EU issuance.",
         "tags": ["institutional", "basis-trade", "midas", "mica-compliant", "funding-rate"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 78,
     },
 
     # ── PRIVATE CREDIT / DEBT ────────────────────────────────────────────────
@@ -448,6 +470,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-06-01",
         "description": "Institutional lending pools for accredited borrowers. Senior secured, overcollateralized positions.",
         "tags": ["institutional", "private-credit", "lending", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
     },
     {
         "id": "MAPLE_HIGH_YIELD",
@@ -467,6 +491,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-01-01",
         "description": "Higher-yield pools targeting emerging market borrowers and growth-stage crypto companies.",
         "tags": ["institutional", "high-yield", "private-credit", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
     {
         "id": "GFI_SENIOR",
@@ -486,6 +512,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-01-01",
         "description": "Automated senior pool lending to emerging market borrowers (India, SE Asia, Africa). Auto-diversified.",
         "tags": ["retail", "private-credit", "emerging-markets", "senior"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
     {
         "id": "GFI_TRANCHED",
@@ -505,6 +533,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-06-01",
         "description": "Junior tranche pools with higher yield. Absorbs first-loss risk from senior pool capital.",
         "tags": ["retail", "private-credit", "emerging-markets", "junior", "high-yield"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 76,
     },
     {
         "id": "TRUEFI_SECURED",
@@ -524,6 +554,8 @@ RWA_UNIVERSE = [
         "inception_date": "2020-11-01",
         "description": "On-chain credit rating system for institutional borrowers. Community-voted credit decisions.",
         "tags": ["institutional", "private-credit", "secured", "credit-scoring"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
     {
         "id": "CFG_TINLAKE",
@@ -543,6 +575,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-05-01",
         "description": "NFT-backed real-world loan pools. Asset types: freight invoices, US real estate bridge loans, consumer credit.",
         "tags": ["retail", "private-credit", "trade-finance", "invoices", "nft"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
     },
     {
         "id": "ARCA_DIGITAL",
@@ -563,6 +597,8 @@ RWA_UNIVERSE = [
         "redemption_window": "Daily",
         "description": "SEC-registered digital fund combining US Treasuries with a small credit allocation. Daily NAV.",
         "tags": ["institutional", "treasury", "credit-blend", "registered-fund"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 85,
     },
 
     # ── REAL ESTATE ──────────────────────────────────────────────────────────
@@ -584,6 +620,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-10-01",
         "description": "Fractional US residential real estate. Rental income paid weekly in xDAI. Properties in Detroit, Chicago, Cleveland.",
         "tags": ["retail", "real-estate", "residential", "rental-income", "fractional"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 65,
     },
     {
         "id": "LOFTY_RES",
@@ -603,6 +641,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-04-01",
         "description": "Algorand-based fractional real estate. 100+ US properties, daily rent payouts, secondary market trading.",
         "tags": ["retail", "real-estate", "residential", "rental-income", "algorand"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 67,
     },
     {
         "id": "TANGIBLE_USDR",
@@ -622,6 +662,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-10-01",
         "description": "Stablecoin backed by tokenized UK real estate + TNGBL token insurance fund. Yield from rental income.",
         "tags": ["retail", "real-estate", "stablecoin", "yield-bearing", "uk"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 62,
     },
     {
         "id": "PARCL",
@@ -641,6 +683,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-03-01",
         "description": "Synthetic real estate indices on Solana. Go long/short on NYC, Miami, LA, SF real estate price indices.",
         "tags": ["retail", "real-estate", "synthetic", "index", "leverage"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 68,
     },
     {
         "id": "PROPY",
@@ -660,6 +704,8 @@ RWA_UNIVERSE = [
         "inception_date": "2017-01-01",
         "description": "Blockchain property titles and real estate NFT marketplace. US + international properties.",
         "tags": ["retail", "real-estate", "title-nft", "marketplace"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 70,
     },
     {
         "id": "LANDSHARES",
@@ -679,6 +725,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-06-01",
         "description": "Fractional US farmland ownership. Passive income from crop leases + land appreciation.",
         "tags": ["retail", "real-estate", "farmland", "agriculture"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 60,
     },
     {
         "id": "BLOCKS_COM",
@@ -698,6 +746,8 @@ RWA_UNIVERSE = [
         "inception_date": "2020-01-01",
         "description": "European commercial property tokenization platform. Hotels, offices, retail spaces.",
         "tags": ["retail", "real-estate", "commercial", "europe"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 60,
     },
     {
         "id": "DIGISHARES",
@@ -717,6 +767,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-01-01",
         "description": "White-label tokenization platform for real estate developers. Global coverage.",
         "tags": ["retail", "real-estate", "white-label", "global"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 60,
     },
 
     # ── COMMODITIES ──────────────────────────────────────────────────────────
@@ -738,6 +790,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-09-01",
         "description": "Each PAXG = 1 fine troy oz of gold in LBMA-accredited vaults. Redeemable for physical gold. NYDFS regulated.",
         "tags": ["retail", "gold", "commodity", "store-of-value", "nydfs"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
     {
         "id": "XAUT",
@@ -757,6 +811,8 @@ RWA_UNIVERSE = [
         "inception_date": "2020-01-01",
         "description": "Gold-backed token by Tether. Each token = 1 troy fine ounce on specific gold bars in Switzerland.",
         "tags": ["retail", "gold", "commodity", "tether"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 72,
     },
     {
         "id": "CACHE_GOLD",
@@ -776,6 +832,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-01-01",
         "description": "Physical gold stored in Singapore FreePort. Each CGT = 1 gram of gold. Storage fee applies.",
         "tags": ["retail", "gold", "commodity", "singapore"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
     {
         "id": "BACKED_SILVER",
@@ -795,6 +853,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-01-01",
         "description": "Tokenized silver-backed ETC. Physical silver stored in Swiss vaults. Backed by iShares Silver Trust.",
         "tags": ["retail", "silver", "commodity", "swiss"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 78,
     },
     {
         "id": "BACKED_OIL",
@@ -814,6 +874,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-06-01",
         "description": "Tokenized crude oil exposure backed by ProShares Ultra DJ-AIG Crude Oil ETF.",
         "tags": ["retail", "oil", "commodity", "energy"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 76,
     },
 
     # ── CORPORATE BONDS / FIXED INCOME ──────────────────────────────────────
@@ -835,6 +897,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-12-01",
         "description": "Tokenized iShares iBoxx USD Investment Grade Corporate Bond ETF. Swiss FINMA-supervised, 1:1 backing.",
         "tags": ["retail", "corporate-bond", "etf", "ig", "swiss"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 80,
     },
     {
         "id": "BACKED_CSPX",
@@ -854,6 +918,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-03-01",
         "description": "Tokenized S&P 500 ETF exposure on-chain. FINMA-supervised. Non-US investors only.",
         "tags": ["retail", "equities", "sp500", "index", "swiss"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 80,
     },
     {
         "id": "SWARM_TSLA",
@@ -873,6 +939,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-11-01",
         "description": "Fully-backed tokenized TSLA shares on Polygon. BaFin-licensed. 24/7 trading vs T+2 settlement.",
         "tags": ["retail", "equities", "single-stock", "bafin", "germany"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 72,
     },
     {
         "id": "SWARM_AAPL",
@@ -892,6 +960,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-11-01",
         "description": "Fully-backed tokenized AAPL shares. BaFin-licensed, fully regulated German marketplace.",
         "tags": ["retail", "equities", "single-stock", "bafin", "germany"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 72,
     },
 
     # ── INFRASTRUCTURE ───────────────────────────────────────────────────────
@@ -913,6 +983,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-05-01",
         "description": "Tokenized solar energy infrastructure. Revenue from energy sales creates on-chain yield.",
         "tags": ["retail", "infrastructure", "solar", "green-energy"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 55,
     },
     {
         "id": "ONDO_INFRA",
@@ -932,6 +1004,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-12-01",
         "description": "Senior secured infrastructure debt in transportation, utilities, and social infrastructure.",
         "tags": ["institutional", "infrastructure", "senior-secured", "debt"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 85,
     },
 
     # ── CARBON CREDITS ───────────────────────────────────────────────────────
@@ -953,6 +1027,8 @@ RWA_UNIVERSE = [
         "inception_date": "2020-08-01",
         "description": "Each MCO2 = 1 tonne CO2 offset from Amazon rainforest preservation projects. VCS certified.",
         "tags": ["retail", "carbon-credit", "amazon", "vcs", "voluntary"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 68,
     },
     {
         "id": "NBO",
@@ -972,6 +1048,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-10-01",
         "description": "Pool of Verra-certified nature-based carbon credits on Polygon. Tradeable DeFi carbon pool.",
         "tags": ["retail", "carbon-credit", "nature-based", "toucan", "defi-native"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 63,
     },
     {
         "id": "KLIMA",
@@ -991,6 +1069,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-10-18",
         "description": "DAO governing a treasury of tokenized carbon offsets. Staking yields paid in KLIMA.",
         "tags": ["retail", "carbon-credit", "dao", "staking", "treasury"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 58,
     },
 
     # ── INTELLECTUAL PROPERTY / ROYALTIES ────────────────────────────────────
@@ -1012,6 +1092,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-11-01",
         "description": "Fractional music streaming royalties from artists like Nas, The Chainsmokers, Kygo.",
         "tags": ["retail", "music-royalties", "ip", "streaming"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 65,
     },
     {
         "id": "OPULOUS",
@@ -1031,6 +1113,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-07-01",
         "description": "Music copyright-backed DeFi loans and fractional royalty tokens on Algorand.",
         "tags": ["retail", "music-royalties", "ip", "algorand", "defi"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 60,
     },
 
     # ── ART & COLLECTIBLES ───────────────────────────────────────────────────
@@ -1052,6 +1136,8 @@ RWA_UNIVERSE = [
         "inception_date": "2017-01-01",
         "description": "SEC-qualified shares in authenticated blue-chip art (Banksy, Basquiat, Picasso). Average 14.1% annualized.",
         "tags": ["retail", "fine-art", "collectibles", "sec-reg-a", "illiquid"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
     {
         "id": "FREEPORT_ART",
@@ -1071,6 +1157,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-01-01",
         "description": "Tokenized fractional ownership of physical art stored in climate-controlled vaults.",
         "tags": ["retail", "fine-art", "fractional", "nft"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 60,
     },
 
     # ── PRIVATE EQUITY ───────────────────────────────────────────────────────
@@ -1092,6 +1180,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-09-01",
         "description": "Tokenized pre-IPO and secondary market private equity. Access to Stripe, SpaceX, Databricks-type deals.",
         "tags": ["institutional", "private-equity", "pre-ipo", "secondary"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 72,
     },
     {
         "id": "ADDX_PE",
@@ -1111,6 +1201,8 @@ RWA_UNIVERSE = [
         "inception_date": "2020-01-01",
         "description": "MAS-licensed Singapore exchange for tokenized PE funds, hedge funds, and private credit.",
         "tags": ["institutional", "private-equity", "singapore", "mas-licensed"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 80,
     },
 
     # ── INSURANCE & ALTERNATIVE RISK ─────────────────────────────────────────
@@ -1132,6 +1224,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-05-23",
         "description": "Decentralized mutual insurance protocol. Stake NXM to underwrite covers, earn assessment rewards.",
         "tags": ["retail", "insurance", "defi-cover", "mutual"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 78,
     },
     {
         "id": "RISK_HARBOR",
@@ -1151,6 +1245,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-07-01",
         "description": "Automated smart contract insurance using actuarial models instead of human voting.",
         "tags": ["institutional", "insurance", "automated", "protocol-cover"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 58,
     },
 
     # ── SUPPLY CHAIN / TRADE FINANCE ─────────────────────────────────────────
@@ -1172,6 +1268,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-01-01",
         "description": "Institutional credit marketplace on Solana. LatAm B2B trade finance, working capital loans.",
         "tags": ["institutional", "trade-finance", "latam", "solana", "private-credit"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 70,
     },
     {
         "id": "POLYTRADE",
@@ -1191,6 +1289,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-10-01",
         "description": "Invoice financing using USDC. Invoices from Fortune 500 companies as collateral.",
         "tags": ["retail", "trade-finance", "invoice", "polygon"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
 
     # ── MAKER DAO RWA VAULTS ──────────────────────────────────────────────────
@@ -1212,6 +1312,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-04-01",
         "description": "MakerDAO's off-chain collateral vaults holding T-bills, corporate bonds, and real estate. Backing DAI stablecoin.",
         "tags": ["institutional", "private-credit", "makerdao", "dai-backing"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 85,
     },
 
     # ── HASHNOTE — Largest institutional T-bill token ────────────────────────
@@ -1233,6 +1335,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-10-01",
         "description": "DRW/Cumberland-backed institutional T-bill fund. $1.8B TVL (March 2026) — one of the top 3 tokenized treasury vehicles globally.",
         "tags": ["institutional", "treasury", "drw", "cumberland", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
     {
         "id": "USCC",
@@ -1252,6 +1356,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-06-01",
         "description": "Tokenized fund capturing crypto carry premium (perpetual funding rates, basis). Higher yield vs pure T-bill.",
         "tags": ["institutional", "carry-trade", "crypto-basis", "superstate"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 88,
     },
     {
         "id": "CLEARPOOL_USDC",
@@ -1271,6 +1377,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-03-01",
         "description": "Permissionless single-borrower pools for institutional unsecured credit. Dynamic interest via utilization curve.",
         "tags": ["retail", "private-credit", "unsecured", "multi-chain"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
     {
         "id": "FLOWCARBON_GNT",
@@ -1290,6 +1398,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-05-01",
         "description": "a16z + Samsung-backed nature-based carbon credits on Polygon. VCS and Gold Standard certified offsets.",
         "tags": ["retail", "carbon-credit", "nature-based", "a16z", "vcs"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
     {
         "id": "BACKED_IBTA",
@@ -1309,6 +1419,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-09-01",
         "description": "Tokenized iShares USD Treasury Bond 1-3yr ETF (bIBTA). Swiss FINMA-supervised. Non-US investors.",
         "tags": ["retail", "treasury", "etf", "swiss", "non-us"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 80,
     },
     {
         "id": "AGROTOKEN_SOY",
@@ -1328,6 +1440,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-08-01",
         "description": "Argentine soy, corn, and wheat grain tokens used as DeFi collateral by farmers. Pioneer in agri-RWA.",
         "tags": ["retail", "agriculture", "commodity", "argentina", "latam"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 60,
     },
     {
         "id": "ANOTE_MUSIC",
@@ -1347,6 +1461,8 @@ RWA_UNIVERSE = [
         "inception_date": "2020-06-01",
         "description": "Fractional music publishing rights. Revenue from radio, TV, sync licensing, streaming.",
         "tags": ["retail", "music-royalties", "publishing", "ip", "marketplace"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 63,
     },
     {
         "id": "ENZYME_RWA",
@@ -1366,6 +1482,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-01-01",
         "description": "On-chain fund management with automated rebalancing. Supports RWA tokens as vault assets.",
         "tags": ["retail", "automated-vault", "fund-management", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
 
     # ── AVALANCHE — KKR, Apollo, Hamilton Lane (via Securitize) ──────────────
@@ -1387,6 +1505,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-01-01",
         "description": "Tokenized access to Hamilton Lane's $823B AUM private market fund via Securitize. First major PE firm fully tokenized on Avalanche.",
         "tags": ["institutional", "private-equity", "hamilton-lane", "avalanche", "securitize", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 88,
     },
     {
         "id": "KKR_HEALTH_TOKEN",
@@ -1406,6 +1526,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-09-01",
         "description": "KKR's healthcare-focused PE fund tokenized on Avalanche via Securitize. Pioneering tokenized private equity for qualified purchasers.",
         "tags": ["institutional", "private-equity", "kkr", "healthcare", "avalanche", "securitize", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
     {
         "id": "APOLLO_CREDIT_TOKEN",
@@ -1425,6 +1547,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-01-01",
         "description": "Apollo's $500B AUM diversified credit strategy tokenized on Avalanche. Accredited investor access to institutional private credit.",
         "tags": ["institutional", "private-credit", "apollo", "avalanche", "securitize", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 88,
     },
     {
         "id": "SPIKO_TBILL_AVAX",
@@ -1444,6 +1568,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-11-01",
         "description": "Spiko tokenized US and EU T-bills on Avalanche. AMF-regulated (France). Retail accessible from €100 with daily accrual.",
         "tags": ["retail", "treasury", "avalanche", "amf-regulated", "france", "daily-yield"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 82,
     },
 
     # ── BASE CHAIN (Coinbase L2) — Dinari dShares, RWA ecosystem ─────────────
@@ -1465,6 +1591,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-07-01",
         "description": "Fully-regulated 1:1 stock-backed tokens on Base and Arbitrum. 200+ US equities (AAPL, MSFT, NVDA, SPY, QQQ). 24/7 trading, T+0 settlement.",
         "tags": ["retail", "equities", "tokenized-stocks", "base", "arbitrum", "regulated", "24-7-trading", "dinari"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 82,
     },
     {
         "id": "OPENTRADE_BASE",
@@ -1484,6 +1612,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-10-01",
         "description": "Circle-backed institutional treasury vaults on Base. Protocols earn T-bill yields on idle USDC. FCA-regulated, daily liquidity.",
         "tags": ["institutional", "treasury", "base", "usdc-yield", "circle-backed", "fca-regulated"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 82,
     },
 
     # ── HEDERA (HBAR) — Institutional tokenization ────────────────────────────
@@ -1505,6 +1635,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-06-01",
         "description": "FCA-regulated UK exchange Archax tokenizing T-bills and money market funds on Hedera. Standard Chartered and Cboe partnership.",
         "tags": ["institutional", "money-market", "hedera", "archax", "fca-regulated", "standard-chartered"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 85,
     },
     {
         "id": "HEDERA_STABLECOIN",
@@ -1524,6 +1656,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-06-01",
         "description": "Enterprise RWA tokenization on Hedera via Hedera Token Service. DLA Piper legal framework. aBey, Standard Chartered, Cboe Digital integrations.",
         "tags": ["institutional", "private-credit", "hedera", "enterprise", "dla-piper", "cboe"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
 
     # ── XRP LEDGER — Ripple RWA ecosystem ─────────────────────────────────────
@@ -1545,6 +1679,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-12-01",
         "description": "Ripple's enterprise-grade stablecoin backed by US Treasuries and cash equivalents. NYDFS approved. Bridges XRP Ledger to DeFi.",
         "tags": ["retail", "stablecoin", "xrpl", "ripple", "treasury-backed", "nydfs"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 85,
     },
     {
         "id": "ARCHAX_XRPL",
@@ -1564,6 +1700,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-03-01",
         "description": "FCA-regulated tokenized T-bills on XRP Ledger. Part of Ripple's $1B+ institutional RWA strategy and XRPL AMM integration.",
         "tags": ["institutional", "treasury", "xrpl", "archax", "ripple", "fca-regulated"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 85,
     },
 
     # ── TEZOS — SocGen FORGE and EU-regulated security tokens ─────────────────
@@ -1585,6 +1723,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-04-01",
         "description": "France's largest bank SocGen issued €100M+ covered bonds and structured products as MiCA-compliant security tokens on Tezos and Ethereum.",
         "tags": ["institutional", "covered-bonds", "tezos", "societe-generale", "mica-compliant", "eu-regulated"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 92,
     },
     {
         "id": "AXA_BOND_TEZ",
@@ -1604,6 +1744,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-06-01",
         "description": "AXA IM tokenized green bond on Tezos. Part of the EU Blockchain Securities Pilot Regime. €200B AUM manager using on-chain settlement.",
         "tags": ["institutional", "corporate-bonds", "tezos", "axa", "green-bond", "eu-pilot", "mica"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 92,
     },
 
     # ── PROVENANCE BLOCKCHAIN — Figure Technologies, USDF ─────────────────────
@@ -1625,6 +1767,8 @@ RWA_UNIVERSE = [
         "inception_date": "2018-06-01",
         "description": "World's largest blockchain-native HELOC originator — $9B+ in loans originated on Provenance Blockchain. US home equity-backed credit.",
         "tags": ["institutional", "mortgage", "heloc", "provenance", "real-estate-credit", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
     },
     {
         "id": "USDF_PROVENANCE",
@@ -1644,6 +1788,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-01-01",
         "description": "Bank-minted stablecoin on Provenance Blockchain backed by FDIC-insured deposits. NY Community Bank, Bell Bank, NBH Bank consortium.",
         "tags": ["institutional", "stablecoin", "provenance", "bank-backed", "fdic-insured", "consortium"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 82,
     },
 
     # ── APTOS — Emerging institutional RWA ────────────────────────────────────
@@ -1665,6 +1811,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-01-01",
         "description": "Aptos-native CDP stablecoin partially backed by RWA collateral. Thala's DeFi suite leads Aptos ecosystem RWA adoption.",
         "tags": ["retail", "stablecoin", "aptos", "cdp", "rwa-collateral", "move-language"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
     {
         "id": "ONDO_APTOS",
@@ -1684,6 +1832,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-06-01",
         "description": "Ondo's USDY yield token deployed on Aptos, bringing T-bill-backed yield to the Aptos Move ecosystem.",
         "tags": ["retail", "stablecoin", "aptos", "treasury", "yield-bearing", "ondo"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
 
     # ── CARDANO — RealFi and emerging tokenization ─────────────────────────────
@@ -1705,6 +1855,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-11-01",
         "description": "Cardano's real-world finance initiative bridging DeFi to real economies in Africa and emerging markets. DID-based identity lending.",
         "tags": ["retail", "private-credit", "cardano", "emerging-markets", "africa", "identity", "realfi"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
     {
         "id": "NMKR_CARDANO",
@@ -1724,6 +1876,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-03-01",
         "description": "Cardano's leading tokenization platform supporting real estate, art, and commodities. 10M+ NFTs minted. EU regulatory framework.",
         "tags": ["retail", "real-estate", "cardano", "tokenization", "multi-asset", "eu"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 62,
     },
 
     # ── SUI — Emerging RWA ecosystem ──────────────────────────────────────────
@@ -1745,6 +1899,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-04-01",
         "description": "Sui-native CDP stablecoin with RWA collateral integration. Leading DeFi protocol on Sui exploring tokenized T-bill backing.",
         "tags": ["retail", "stablecoin", "sui", "cdp", "rwa-collateral"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 60,
     },
 
     # ── TOKENIZED STOCKS — NASDAQ, Robinhood, DEX Platforms ───────────────────
@@ -1766,6 +1922,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-06-01",
         "description": "Robinhood's 24/7 tokenized US stocks on Arbitrum for EU customers. 200+ equities, fractional shares, MiFID II compliant. Global expansion imminent.",
         "tags": ["retail", "equities", "tokenized-stocks", "arbitrum", "robinhood", "24-7-trading", "mifid2", "fractional"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 85,
     },
     {
         "id": "NASDAQ_TOKENIZED",
@@ -1785,6 +1943,8 @@ RWA_UNIVERSE = [
         "inception_date": "2026-03-18",
         "description": "SEC approved March 18, 2026 — Russell 1000 stocks + S&P 500/Nasdaq-100 ETFs tokenized via DTC clearing. First token-settled trades targeted Q3 2026. Full T+0 instant settlement, 24/7 markets.",
         "tags": ["institutional", "equities", "nasdaq", "t0-settlement", "dtc", "tokenized-stocks", "sec-approved", "russell-1000", "sp500", "breaking-2026"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 95,
     },
     {
         "id": "NYSE_TOKENIZED",
@@ -1804,6 +1964,8 @@ RWA_UNIVERSE = [
         "inception_date": "2026-01-01",
         "description": "NYSE / Intercontinental Exchange developing tokenized securities platform: 24/7 trading, instant settlement, stablecoin funding. Leverages ICE's existing DTC membership and Bakkt digital asset infrastructure.",
         "tags": ["institutional", "equities", "nyse", "ice", "bakkt", "t0-settlement", "tokenized-stocks", "stablecoin-settlement", "24-7-trading"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 95,
     },
     {
         "id": "ONDO_GLOBAL_MARKETS",
@@ -1823,6 +1985,8 @@ RWA_UNIVERSE = [
         "inception_date": "2025-09-01",
         "description": "#1 tokenized stocks platform. $600M+ TVL, 200+ U.S. stocks & ETFs (TSLA, NVDA, AAPL, MSFT, AMZN, QQQ, SPY), 60% market share. ADGM/Binance approved March 2026. Non-US investors via equity-linked notes. Ethereum/BNB/Solana.",
         "tags": ["retail", "equities", "ondo", "tokenized-stocks", "multinchain", "adgm", "binance", "metamask", "sp500", "nasdaq100", "ando-finance"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
     {
         "id": "GAINS_TOKENIZED",
@@ -1842,6 +2006,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-06-01",
         "description": "Decentralized perpetual trading of 150+ tokenized stocks, forex, and crypto on Arbitrum/Polygon. 24/7 markets, up to 150x leverage.",
         "tags": ["retail", "equities", "synthetic-stocks", "dex", "leverage", "gains-network", "24-7-trading", "perpetuals"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
     {
         "id": "TZERO_PLATFORM",
@@ -1861,6 +2027,8 @@ RWA_UNIVERSE = [
         "inception_date": "2018-08-01",
         "description": "First SEC-registered Alternative Trading System (ATS) for security tokens. Overstock-backed tokenized securities exchange with broker-dealer license.",
         "tags": ["institutional", "equities", "security-tokens", "ats", "sec-registered", "tzero", "broker-dealer"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
     },
     {
         "id": "BACKED_NASDAQ100",
@@ -1880,6 +2048,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-06-01",
         "description": "Tokenized Invesco QQQ (Nasdaq-100) ETF on Ethereum and Base. FINMA-supervised. Non-US investors only. Tech sector exposure on-chain.",
         "tags": ["retail", "equities", "nasdaq100", "index", "qqq", "backed-finance", "swiss"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 80,
     },
     {
         "id": "SYNTHETIX_STOCKS",
@@ -1899,6 +2069,8 @@ RWA_UNIVERSE = [
         "inception_date": "2018-06-01",
         "description": "Synthetix protocol enables on-chain synthetic exposure to stocks, indices, and forex via Kwenta DEX on Optimism and Base.",
         "tags": ["retail", "equities", "synthetic-stocks", "dex", "optimism", "kwenta", "snx", "perps"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
 
     # ── ADDITIONAL REAL ESTATE ─────────────────────────────────────────────────
@@ -1920,6 +2092,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-09-01",
         "description": "Amazon-backed fractional single-family and vacation rental properties from $100. $100M+ in properties. Quarterly dividends, SEC-qualified.",
         "tags": ["retail", "real-estate", "residential", "rental-income", "fractional", "amazon-backed", "vacation-rental", "sec"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 72,
     },
     {
         "id": "ROOFSTOCK_ONCHAIN",
@@ -1939,6 +2113,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-11-01",
         "description": "Full property ownership via NFT. Single-family rental homes deeded to LLC, transferred via NFT sale. First end-to-end tokenized home purchase ever.",
         "tags": ["institutional", "real-estate", "residential", "single-family", "nft-deed", "full-ownership"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 72,
     },
     {
         "id": "HOMEBASE_SOL",
@@ -1958,6 +2134,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-08-01",
         "description": "Solana-native fractional real estate from $100. US residential properties in Sunbelt markets. Rental income paid in USDC with weekly distributions.",
         "tags": ["retail", "real-estate", "residential", "solana", "usdc-yield", "sunbelt", "fractional"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 65,
     },
     {
         "id": "REPUBLIC_RE",
@@ -1977,6 +2155,8 @@ RWA_UNIVERSE = [
         "inception_date": "2020-07-01",
         "description": "Republic's Reg A+ and Reg D tokenized real estate. Mixed US commercial and residential properties. $2B+ raised across all Republic verticals.",
         "tags": ["retail", "real-estate", "commercial", "residential", "reg-a", "reg-d", "republic"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 70,
     },
     {
         "id": "VESTA_EQUITY",
@@ -1996,6 +2176,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-01-01",
         "description": "Tokenized home equity agreements. Homeowners monetize equity with no monthly payments; investors receive appreciation share upon sale.",
         "tags": ["retail", "real-estate", "home-equity", "appreciation", "alternative-mortgage"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 65,
     },
     {
         "id": "REALBLOCKS",
@@ -2015,6 +2197,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-01-01",
         "description": "Institutional tokenized real estate fund access platform. Connects accredited investors to top-tier commercial real estate managers globally.",
         "tags": ["institutional", "real-estate", "commercial", "fund-access", "accredited", "global"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 68,
     },
     {
         "id": "REALT_EUROPE",
@@ -2034,6 +2218,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-01-01",
         "description": "RealT's European expansion: tokenized residential properties in France, Germany, Spain. MiCA-compliant structure. Yield paid in xDAI.",
         "tags": ["retail", "real-estate", "residential", "europe", "gnosis", "mica", "xdai-yield"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 65,
     },
 
     # ── WISDOMTREE — Multi-chain tokenized funds ───────────────────────────────
@@ -2055,6 +2241,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-05-01",
         "description": "WisdomTree's tokenized physical gold on Stellar and Ethereum. $100B+ AUM manager. App-based, SEC-reviewed, audited vaults.",
         "tags": ["retail", "gold", "commodity", "stellar", "wisdomtree", "sec-reviewed", "app-native"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 88,
     },
     # ── USUAL PROTOCOL — USD0 T-bill backed stablecoin ───────────────────────
     {
@@ -2075,6 +2263,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-08-01",
         "description": "USD0 stablecoin backed 1:1 by BUIDL (BlackRock T-bill fund). Usual token holders earn yield from treasury portfolio. TVL $1B+. MiCA-eligible structure.",
         "tags": ["retail", "stablecoin", "treasury", "yield-bearing", "buidl-backed", "mica"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 78,
     },
     # ── AGORA FINANCE — AUSD T-bill backed stablecoin ────────────────────────
     {
@@ -2095,6 +2285,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-06-01",
         "description": "Agora's AUSD is a regulated, institutionally-custodied stablecoin backed by US Treasuries and overnight repos. Dragonfly + White Star capital-backed.",
         "tags": ["retail", "stablecoin", "treasury", "yield-bearing", "institutional"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
     # ── PENDLE FINANCE — Yield tokenization of RWA ───────────────────────────
     {
@@ -2115,6 +2307,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-11-01",
         "description": "Pendle Principal Token wrapping USDY (Ondo T-bill yield). Locks in fixed APY above spot USDY yield — buy at discount, redeem at par at maturity. Fully tradeable.",
         "tags": ["retail", "treasury", "yield-stripping", "fixed-rate", "pendle", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 80,
     },
     {
         "id": "PENDLE_YT_USDY",
@@ -2134,6 +2328,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-11-01",
         "description": "Pendle Yield Token capturing all future USDY yield flows. Leveraged exposure to T-bill rates — benefits from rate hikes, loses on rate cuts. Speculative.",
         "tags": ["retail", "treasury", "yield-stripping", "speculative", "pendle", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 80,
     },
     {
         "id": "PENDLE_PT_USDM",
@@ -2153,6 +2349,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-01-01",
         "description": "Pendle fixed-rate position on Mountain Protocol USDM. Maturity-based T-bill yield locked in. Multi-chain. Pendle TVL $3B+.",
         "tags": ["retail", "treasury", "yield-stripping", "fixed-rate", "pendle", "multi-chain"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 80,
     },
     # ── HUMA FINANCE — PayFi/Trade Finance ───────────────────────────────────
     {
@@ -2173,6 +2371,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-06-01",
         "description": "PayFi protocol financing cross-border payments, remittances, and trade settlements. Real yield from payment networks (Arf, Bitso). $200M+ in real-world payment financing.",
         "tags": ["institutional", "trade-finance", "payfi", "payments", "remittance", "solana", "cross-border"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 72,
     },
     # ── MORPHO BLUE — Institutional RWA Vaults ───────────────────────────────
     {
@@ -2193,6 +2393,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-01-01",
         "description": "Morpho Blue vault managed by Steakhouse Financial. USDC earns T-bill yield via on-chain treasury collateral. $300M+ TVL. Risk-curated, daily withdrawals.",
         "tags": ["institutional", "treasury", "morpho", "vault", "usdc-yield", "defi-native", "steakhouse"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 82,
     },
     {
         "id": "MORPHO_RE7",
@@ -2212,6 +2414,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-03-01",
         "description": "Morpho vault curated by Re7 Capital targeting RWA-backed credit markets. Diversified across private credit protocols. Institutional risk management.",
         "tags": ["institutional", "private-credit", "morpho", "vault", "re7-capital", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 80,
     },
     # ── SKY / MAKERDAO USDS — DAI Successor with enhanced yield ──────────────
     {
@@ -2232,6 +2436,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-08-01",
         "description": "MakerDAO's rebrand to Sky protocol. USDS replaces DAI with native 4.75% Sky Savings Rate (SSR). Backed by BUIDL + real-world assets. $5B+ DAI-equivalent circulating.",
         "tags": ["retail", "stablecoin", "yield-bearing", "sky", "makerdao", "dai-successor", "rwa-backed"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 85,
     },
     # ── NOBLE — Cosmos T-bill infrastructure ──────────────────────────────────
     {
@@ -2252,6 +2458,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-04-01",
         "description": "Noble is the Cosmos chain for native asset issuance. Ondo USDY and tokenized T-bills flow through Noble to 40+ IBC-connected chains (Osmosis, dYdX, Celestia).",
         "tags": ["institutional", "treasury", "cosmos", "ibc", "noble", "cross-chain", "ondo"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 82,
     },
     # ── KAMINO FINANCE — Solana yield with T-bill backing ─────────────────────
     {
@@ -2272,6 +2480,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-08-01",
         "description": "Kamino's leading Solana lending protocol. kUSDC earns from lending rates backed by T-bill collateral. $1B+ TVL. Auto-compounding USDC yield on Solana's fastest DEX ecosystem.",
         "tags": ["retail", "yield-vault", "solana", "usdc-yield", "auto-compound", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 70,
     },
     # ── JPMORGAN KINEXYS — Institutional tokenized repo ──────────────────────
     {
@@ -2292,6 +2502,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-01-01",
         "description": "JPMorgan Kinexys (formerly Onyx) tokenized intraday repo on private EVM. $1T+ in daily transaction volume. Used by Goldman Sachs, BNY Mellon, BlackRock for institutional repo settlement.",
         "tags": ["institutional", "repo", "jpmorgan", "kinexys", "private-chain", "t0-settlement", "qualified-purchaser"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 97,
     },
     # ── HSBC ORION — Tokenized bonds ─────────────────────────────────────────
     {
@@ -2312,6 +2524,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-10-01",
         "description": "HSBC Orion platform for tokenized bond issuance. Launched Hong Kong Government tokenized green bonds ($750M), HSBC digital bond ($1B). FCA + HKMA regulated.",
         "tags": ["institutional", "digital-bond", "hsbc", "green-bond", "hkma", "fca-regulated", "sovereign"],
+        "regulatory_jurisdiction": "UK",
+        "audit_score": 95,
     },
     # ── UBS TOKENIZED MMF ─────────────────────────────────────────────────────
     {
@@ -2332,6 +2546,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-02-01",
         "description": "UBS Asset Management tokenized MMF on Ethereum using Chainlink CCIP for cross-chain transfers. Part of Project Guardian (MAS Singapore). $3.6T AUM manager.",
         "tags": ["institutional", "money-market", "ubs", "chainlink-ccip", "mas-singapore", "project-guardian", "accredited"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 95,
     },
     # ── CANTON NETWORK — Goldman Sachs GS DAP / DTCC Tokenized Treasuries ──────
     {
@@ -2352,6 +2568,8 @@ RWA_UNIVERSE = [
         "inception_date": "2025-06-24",
         "description": "Goldman Sachs GS DAP on Canton Network — purpose-built institutional privacy blockchain. DTCC tokenizing DTC-custodied US Treasuries on Canton (Dec 2025). BNY Mellon + GS first US tokenized MMF. $135M raised Jun 2025. GS DAP spinning out as independent company by mid-2026.",
         "tags": ["institutional", "treasury", "goldman-sachs", "canton-network", "dtcc", "bny-mellon", "digital-asset", "privacy-chain", "qualified-purchaser"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 96,
     },
     # ── KINESIS MONEY — Gold + Silver with velocity yield ─────────────────────
     {
@@ -2372,6 +2590,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-11-01",
         "description": "1:1 gold-backed token earning velocity yield — holders receive a share of all transaction fees from the Kinesis monetary system. Unique: physical gold that generates income.",
         "tags": ["retail", "gold", "commodity", "yield-bearing", "velocity-yield", "physical-backed"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
     {
         "id": "KINESIS_KAG",
@@ -2391,6 +2611,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-11-01",
         "description": "1:1 silver-backed token earning velocity yield from Kinesis network transaction fees. Higher yield than KAU due to greater trading velocity. Physical silver vaulted globally.",
         "tags": ["retail", "silver", "commodity", "yield-bearing", "velocity-yield", "physical-backed"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
     # ── TERM FINANCE — Fixed-rate repo lending ────────────────────────────────
     {
@@ -2411,6 +2633,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-05-01",
         "description": "Fixed-rate, fixed-term repo protocol on Ethereum. Borrowers post USDC/wBTC/stETH collateral, lenders earn fixed rate. No duration mismatch. IOSG + Electric Capital backed.",
         "tags": ["institutional", "private-credit", "fixed-rate", "repo", "overcollateralized", "defi-native"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
     # ── NOTIONAL FINANCE v3 — Fixed rate lending ──────────────────────────────
     {
@@ -2431,6 +2655,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-09-01",
         "description": "Fixed-rate lending and borrowing on Arbitrum. USDC/DAI/ETH at fixed rates up to 1 year. Leveraged vault strategies for enhanced yield. Paradigm-backed.",
         "tags": ["institutional", "private-credit", "fixed-rate", "lending", "arbitrum", "paradigm-backed"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 75,
     },
     # ── SDX — SIX Digital Exchange, Switzerland DLT Act ─────────────────────
     {
@@ -2451,6 +2677,8 @@ RWA_UNIVERSE = [
         "inception_date": "2021-11-01",
         "description": "SIX Digital Exchange — Switzerland DLT Act-regulated institutional bond exchange. UBS CHF 375M digital bond, World Bank digital bonds, T+0 atomic settlement. Integrated with SIX Swiss Exchange CSD. World's most advanced tokenization legal framework.",
         "tags": ["institutional", "digital-bond", "swiss", "sdx", "six-group", "ubs", "world-bank", "dlt-act", "t0-settlement", "csd", "qualified-purchaser"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 92,
     },
     # ── SIEMENS DIGITAL BOND — First corporate digital bond on public chain ───
     {
@@ -2471,6 +2699,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-02-01",
         "description": "Siemens issued €60M 1-year digital bond on Polygon — first corporate bond on public blockchain under German Electronic Securities Act (eWpG). BaFin regulated, DekaBank custodian.",
         "tags": ["institutional", "corporate-bond", "polygon", "siemens", "bafin-regulated", "ewpg", "digital-bond"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 95,
     },
     # ── PLUME NETWORK — Purpose-built RWA blockchain ─────────────────────────
     {
@@ -2491,6 +2721,8 @@ RWA_UNIVERSE = [
         "inception_date": "2025-06-05",
         "description": "Plume Genesis mainnet launched June 5, 2025 with 50+ protocols on day one including Morpho and Curve. First purpose-built RWA L1 blockchain. rTBILL is the native T-bill token. EVM-compatible, compliance-native.",
         "tags": ["retail", "treasury", "plume", "rwa-chain", "compliance-native", "evm", "morpho", "curve"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 68,
     },
     {
         "id": "PLUME_RE",
@@ -2510,6 +2742,8 @@ RWA_UNIVERSE = [
         "inception_date": "2025-06-05",
         "description": "Real estate tokenization on Plume Network (mainnet June 2025) via OpenEden, Nest Credit and other Plume ecosystem protocols. 50+ protocols launched day one. Purpose-built compliance layer reduces legal overhead.",
         "tags": ["retail", "real-estate", "plume", "rwa-chain", "compliance-native"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 65,
     },
     # ── MANTRA CHAIN — Dubai-licensed RWA appchain ─────────────────────────────
     {
@@ -2530,6 +2764,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-07-01",
         "description": "Mantra is a purpose-built, licensed RWA blockchain (VARA Dubai). $1B+ in deals signed with MAG Group, Damac Properties, NEOM. Cosmos-based, IBC-connected. Token rebranded from OM to MANTRA (1:4 split, March 2026) with $25M buyback program.",
         "tags": ["institutional", "private-credit", "mantra", "dubai", "vara-licensed", "cosmos", "real-estate-deals"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 68,
     },
     # ── SWARM MARKETS Additional Stocks ──────────────────────────────────────
     {
@@ -2550,6 +2786,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-03-01",
         "description": "Fully-backed tokenized MSFT shares on Polygon. BaFin-licensed. 24/7 trading. Largest market cap stock available in tokenized form on Swarm.",
         "tags": ["retail", "equities", "single-stock", "bafin", "germany", "swarm"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 72,
     },
     {
         "id": "SWARM_NVDA",
@@ -2569,6 +2807,8 @@ RWA_UNIVERSE = [
         "inception_date": "2022-06-01",
         "description": "Fully-backed tokenized NVDA shares. BaFin-licensed. Highest volatility tokenized stock (AI/GPU demand-driven). 24/7 trading on Polygon.",
         "tags": ["retail", "equities", "single-stock", "bafin", "germany", "swarm", "ai-exposure"],
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 72,
     },
     # ── MAPLE FINANCE — New Pool Structures ──────────────────────────────────
     {
@@ -2589,6 +2829,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-10-01",
         "description": "Maple's blue-chip secured lending pool. Over-collateralized loans to institutional crypto firms using BTC and ETH as collateral. Lower yield but substantially lower risk than unsecured pools.",
         "tags": ["institutional", "private-credit", "secured", "overcollateralized", "btc-collateral", "eth-collateral"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
     },
     # ── REPUBLIC NOTE — Revenue-share alternative investment ─────────────────
     {
@@ -2609,6 +2851,8 @@ RWA_UNIVERSE = [
         "inception_date": "2019-07-01",
         "description": "SEC Reg D compliant revenue-share note giving holders a share of Republic's deal fee revenue. Unique cash-flow instrument tied to Republic's investment banking activity.",
         "tags": ["retail", "private-equity", "revenue-share", "republic", "sec-reg-d", "alternative"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 70,
     },
     # ── CLEARPOOL PRIME — Institutional prime brokerage pools ────────────────
     {
@@ -2629,6 +2873,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-01-01",
         "description": "Clearpool Prime enables institutional prime brokerage on-chain. Borrowers: top market makers and trading firms. Lenders earn above-market yield with credit score transparency.",
         "tags": ["institutional", "private-credit", "prime-brokerage", "market-makers", "credit-scoring", "multi-chain"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
     # ── ETHENA USDe — Synthetic Dollar (unique RWA-adjacent yield) ────────────
     {
@@ -2649,6 +2895,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-02-01",
         "description": "Ethena USDe delta-neutral synthetic dollar backed by stETH + short ETH perp. sUSDe earns staking + funding rate yield. $3B+ TVL. Not strictly RWA but captures real yield from crypto basis.",
         "tags": ["retail", "synthetic-yield", "basis-trade", "defi-native", "staked", "delta-neutral", "funding-rate"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 78,
     },
 
     # ── WISDOMTREE_GOVT (original kept below this) ─────────────────────────────
@@ -2670,6 +2918,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-05-01",
         "description": "WisdomTree's tokenized short-term government bond fund on Stellar and Ethereum. Daily yield accrual via WisdomTree Prime app.",
         "tags": ["retail", "treasury", "stellar", "wisdomtree", "sec-reviewed", "daily-yield"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 88,
     },
 
     # ── LIQUID STAKING ────────────────────────────────────────────────────────
@@ -2692,6 +2942,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 15_000_000_000,
         "description": "EigenLayer restaking protocol with $15B+ TVL. Stake ETH or LSTs to secure Actively Validated Services (AVS). EIGEN token staking incentives provide 3.8–12% APY on top of base staking yield.",
         "tags": ["retail", "liquid-staking", "restaking", "ethereum", "eigenlayer", "avs", "defi-native"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 80,
     },
     {
         "id": "LIDO_WSTETH",
@@ -2712,6 +2964,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 33_000_000_000,
         "description": "Lido's wrapped staked ETH token — largest liquid staking protocol with $33B+ TVL. wstETH is non-rebasing, cross-chain via Chainlink CCIP, and used as collateral across DeFi. ~3-4% base ETH staking APY.",
         "tags": ["retail", "liquid-staking", "ethereum", "lido", "cross-chain", "ccip", "defi-collateral"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 85,
     },
     {
         "id": "JITO_JITOSOL",
@@ -2732,6 +2986,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 2_400_000_000,
         "description": "Jito's jitoSOL holds 15.1M SOL staked and delivers ~11.8% APY including MEV (Maximal Extractable Value) tips distributed to stakers. Leading Solana LST by MEV yield. JTO governance token.",
         "tags": ["retail", "liquid-staking", "solana", "jito", "mev", "jto-governance", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
     {
         "id": "LOMBARD_LBTC",
@@ -2751,6 +3007,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-07-01",
         "description": "LBTC is a Bitcoin liquid staking token built on Babylon's Bitcoin staking protocol. Holders earn ~5% APY from Bitcoin security provision to Proof-of-Stake chains. LBTC is DeFi-compatible on Ethereum.",
         "tags": ["retail", "liquid-staking", "bitcoin", "babylon", "lombard", "btc-yield", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 72,
     },
 
     # ── DEFI YIELD PROTOCOLS ──────────────────────────────────────────────────
@@ -2773,6 +3031,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 5_700_000_000,
         "description": "Pendle Finance tokenizes yield-bearing assets into Principal Tokens (PT) and Yield Tokens (YT). PT gives fixed rates of 2–19% APY on RWA assets (USDY, USDM, sUSDe, wstETH). $5.7B avg TVL. Leading yield-stripping protocol.",
         "tags": ["retail", "defi-yield", "yield-tokenization", "fixed-rate", "pendle", "pt", "yt", "rwa-native", "multi-chain"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 82,
     },
     # ── Pendle Boros — Yield Derivatives (#45) ─────────────────────────────────
     {
@@ -2799,8 +3059,8 @@ RWA_UNIVERSE = [
             "Part of Pendle's v3 architecture (launched Q4 2024–Q1 2025)."
         ),
         "tags": ["institutional", "defi-yield", "yield-derivatives", "leveraged", "boros", "pendle", "fixed-rate"],
-        "jurisdiction": "N/A (DeFi)",
-        "audit_score": 8,    # Pendle audited by multiple firms (Dedaub, Ackee, etc.)
+        "regulatory_jurisdiction": "International",
+        "audit_score": 82,
     },
     # ── Soil Protocol (XRPL) — Agricultural RWA (#42) ──────────────────────────
     {
@@ -2827,8 +3087,8 @@ RWA_UNIVERSE = [
             "Uses XLS-20 NFT standard for loan certificates."
         ),
         "tags": ["institutional", "private-credit", "agricultural", "xrpl", "developing-markets", "nft-backed"],
-        "jurisdiction": "EU / Switzerland",
-        "audit_score": 6,
+        "regulatory_jurisdiction": "EU",
+        "audit_score": 65,
     },
     {
         "id": "MORPHO_METAMORPHO",
@@ -2848,6 +3108,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-01-01",
         "description": "Morpho MetaMorpho vaults are curator-managed lending pools on Morpho Blue. Top vaults (Re7, Steakhouse, Gauntlet) reach up to 30.36% APR by optimizing across Morpho markets. Permissionless, non-custodial.",
         "tags": ["institutional", "defi-yield", "lending", "morpho", "metamorpho", "curated-vaults", "re7", "steakhouse", "multi-chain"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 82,
     },
     {
         "id": "ETHENA_USDE",
@@ -2868,6 +3130,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 12_000_000_000,
         "description": "Ethena's USDe is a delta-neutral synthetic dollar with $12B supply. sUSDe earns 4.72–10% APY from ETH staking + perpetual funding rates. Non-custodial, no bank counterparty risk. The 'internet bond' alternative.",
         "tags": ["retail", "defi-yield", "synthetic-dollar", "delta-neutral", "ethena", "susde", "funding-rate", "internet-bond"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 78,
     },
 
     # ── INSTITUTIONAL RWA (NEW ADDITIONS) ────────────────────────────────────
@@ -2890,6 +3154,8 @@ RWA_UNIVERSE = [
         "tvl_usd": 580_000_000,
         "description": "Aave Horizon is a permissioned lending market for institutions using tokenized RWAs as collateral (T-bills, BUIDL). $580M net deposits. KYC-gated, WhiteListed borrowers borrow against T-bill collateral at institutional rates.",
         "tags": ["institutional", "private-credit", "aave", "permissioned", "tbill-collateral", "kyc-gated", "rwa-lending"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 88,
     },
     {
         "id": "ONDO_NEXUS",
@@ -2909,6 +3175,8 @@ RWA_UNIVERSE = [
         "inception_date": "2025-03-01",
         "description": "Ondo Nexus brings tokenized US equities and ETFs natively to Solana's high-speed ecosystem. Part of Ondo's L1 blockchain for tokenized assets vision. Integrates with Jupiter, Kamino, and other Solana DeFi protocols.",
         "tags": ["retail", "equities", "tokenized-stocks", "solana", "ondo", "ondo-nexus", "l1-vision", "defi-native"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 90,
     },
     {
         "id": "PLUME_NETWORK",
@@ -2928,6 +3196,8 @@ RWA_UNIVERSE = [
         "inception_date": "2025-06-05",
         "description": "Plume Network is the first RWA-native L1 with compliance natively embedded. Features leverage looping vaults for RWA strategies: deposit T-bills, borrow stablecoins, rebuy T-bills — achieving 14%+ leveraged yield. 50+ protocols on launch.",
         "tags": ["institutional", "private-credit", "plume", "rwa-chain", "leverage-looping", "compliance-native", "evm"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 65,
     },
     {
         "id": "APOLLO_ACRED",
@@ -2947,6 +3217,33 @@ RWA_UNIVERSE = [
         "inception_date": "2024-01-01",
         "description": "Apollo ACRED tokenizes Apollo's diversified credit fund. Used in DeFi looping strategies (deposit ACRED → borrow USDC → rebuy ACRED) achieving 15–20% leveraged yield. Morpho and Euler Finance integration.",
         "tags": ["institutional", "private-credit", "apollo", "acred", "leverage-looping", "morpho", "avalanche", "securitize", "accredited"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 88,
+    },
+
+    {
+        "id": "ACRED",
+        "name": "Apollo Diversified Credit ETF",
+        "category": "Private Credit",
+        "protocol": "Apollo Global Management",
+        "chain": "ethereum",
+        "contract": "",
+        "coingecko_id": "",
+        "defillama_id": "",
+        "token_symbol": "ACRED",
+        "expected_yield_pct": 8.5,
+        "maturity": "Open-ended",
+        "risk_tier": 2,
+        "risk_score": 4,
+        "liquidity_score": 5,
+        "regulatory_score": 9,
+        "redemption_window": "Monthly",
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
+        "min_investment_usd": 10_000,
+        "inception_date": "2024-01-01",
+        "description": "Apollo Diversified Credit ETF — tokenized access to Apollo's diversified credit strategy. Open-ended with monthly redemptions.",
+        "tags": ["institutional", "private-credit", "apollo", "credit-etf", "ethereum"],
     },
 
     # ── PAYFI / STABLECOIN YIELD ──────────────────────────────────────────────
@@ -2968,6 +3265,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-09-01",
         "description": "Clearpool's cpUSD is a yield-bearing stablecoin backed by PayFi vaults (real payment flows — cross-border payments, merchant financing). 8–15% APR from real-economy payment activity. Non-custodial, multi-chain.",
         "tags": ["retail", "payfi", "stablecoin", "yield-bearing", "clearpool", "payment-flows", "multi-chain"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 70,
     },
     {
         "id": "FALCON_USDF",
@@ -2987,6 +3286,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-10-01",
         "description": "Falcon Finance's USDf is a synthetic dollar backed by a combination of crypto collateral and tokenized RWAs. 8–12% APY from diversified backing strategy. Offers higher collateral diversity than Ethena.",
         "tags": ["retail", "payfi", "synthetic-dollar", "rwa-backed", "falcon", "stablecoin", "defi-native"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 65,
     },
     {
         "id": "AGORA_AUSD_PAYFI",
@@ -3006,6 +3307,8 @@ RWA_UNIVERSE = [
         "inception_date": "2024-06-01",
         "description": "Agora's AUSD is a regulated, institutional-grade yield-bearing stablecoin backed by US Treasuries and overnight repos. Dragonfly + White Star capital-backed. Distributed to DeFi protocols and neobanks as productive cash alternative.",
         "tags": ["retail", "payfi", "stablecoin", "yield-bearing", "agora", "treasury-backed", "institutional"],
+        "regulatory_jurisdiction": "US",
+        "audit_score": 78,
     },
 
     # ── AI AGENT INFRASTRUCTURE ────────────────────────────────────────────────
@@ -3027,6 +3330,8 @@ RWA_UNIVERSE = [
         "inception_date": "2023-11-01",
         "description": "Virtuals Protocol enables creation, ownership and monetization of AI agents on-chain. 18,000+ deployed agents, $75M+ protocol revenue. Co-ownership model distributes agent revenue to VIRTUAL token stakers. Base-native, Coinbase partnership.",
         "tags": ["retail", "ai-agents", "base", "defi-native", "revenue-sharing", "coinbase-ecosystem"],
+        "regulatory_jurisdiction": "International",
+        "audit_score": 60,
     },
 ]
 
