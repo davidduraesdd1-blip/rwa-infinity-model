@@ -1546,6 +1546,15 @@ _CATEGORY_FACTOR_EXPOSURES: Dict[str, Dict[str, float]] = {
     "Trade Finance":        {"duration_risk": 0.2,  "credit_risk": 0.5,  "inflation": 0.2,  "liquidity": 0.4,  "crypto_beta": 0.0},
     "Infrastructure":       {"duration_risk": 0.5,  "credit_risk": 0.3,  "inflation": 0.5,  "liquidity": 0.3,  "crypto_beta": 0.0},
     "Carbon Credits":       {"duration_risk": 0.0,  "credit_risk": 0.1,  "inflation": 0.3,  "liquidity": 0.5,  "crypto_beta": 0.1},
+    # Additional categories present in RWA_UNIVERSE
+    "Private Equity":       {"duration_risk": 0.3,  "credit_risk": 0.4,  "inflation": 0.2,  "liquidity": 0.2,  "crypto_beta": 0.1},
+    "Insurance":            {"duration_risk": 0.2,  "credit_risk": 0.3,  "inflation": 0.1,  "liquidity": 0.4,  "crypto_beta": 0.0},
+    "Art & Collectibles":   {"duration_risk": 0.0,  "credit_risk": 0.1,  "inflation": 0.4,  "liquidity": 0.1,  "crypto_beta": 0.1},
+    "Intellectual Property":{"duration_risk": 0.1,  "credit_risk": 0.2,  "inflation": 0.2,  "liquidity": 0.3,  "crypto_beta": 0.1},
+    "Voluntary Carbon":     {"duration_risk": 0.0,  "credit_risk": 0.1,  "inflation": 0.3,  "liquidity": 0.4,  "crypto_beta": 0.1},
+    "Nature-Based Solutions":{"duration_risk": 0.0, "credit_risk": 0.1,  "inflation": 0.3,  "liquidity": 0.3,  "crypto_beta": 0.1},
+    "Liquid Staking":       {"duration_risk": 0.0,  "credit_risk": 0.1,  "inflation": 0.1,  "liquidity": 0.7,  "crypto_beta": 0.8},
+    "PayFi":                {"duration_risk": 0.1,  "credit_risk": 0.3,  "inflation": 0.1,  "liquidity": 0.6,  "crypto_beta": 0.3},
     # Default fallback
     "_default":             {"duration_risk": 0.2,  "credit_risk": 0.2,  "inflation": 0.1,  "liquidity": 0.5,  "crypto_beta": 0.1},
 }

@@ -4959,7 +4959,7 @@ _ERC4626_DECIMALS        = "0x313ce567"  # decimals() selector
 # Known ERC-4626 vault addresses for tracked RWA assets
 _ERC4626_VAULTS: dict = {
     "BUIDL":  {"address": "0x7712c34205737192402172409a8F7ccef8aA2AEc", "chain": "ethereum", "decimals": 6},
-    "OUSG":   {"address": "0x1B19C19393e2d034D8Ff31ff34c81252FcBbe39B", "chain": "ethereum", "decimals": 18},
+    "OUSG":   {"address": "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92", "chain": "ethereum", "decimals": 18},
     "USDY":   {"address": "0x96F6ef951840721AdBF46Ac996b59E0235CB985C", "chain": "ethereum", "decimals": 18},
     "WSTETH": {"address": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", "chain": "ethereum", "decimals": 18},
 }
@@ -5186,7 +5186,8 @@ def fetch_xrpl_mpt_data() -> dict:
 try:
     from xrpl.clients import JsonRpcClient as _XrplJsonRpcClient  # type: ignore
     _XRPL_AVAILABLE = True
-except ImportError:
+except Exception:
+    # Catch ImportError and any other failure (AttributeError, version mismatch, etc.)
     _XRPL_AVAILABLE = False
 
 _XRPL_DATA_CACHE: dict = {}
