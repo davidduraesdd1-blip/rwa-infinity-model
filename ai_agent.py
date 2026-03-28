@@ -1749,7 +1749,11 @@ def _tool_run_scenario(shocks: dict) -> dict:
     """Tool: Run portfolio stress scenario with given macro shocks."""
     try:
         from data_feeds import run_scenario_simulation
-        return run_scenario_simulation(shocks)
+        result = run_scenario_simulation(shocks)
+        # run_scenario_simulation returns None on error — convert to error dict
+        if result is None:
+            return {"error": "Simulation failed — invalid shocks or internal error"}
+        return result
     except Exception as e:
         logger.warning("[Tool:run_scenario] %s", e)
         return {"error": str(e)}
