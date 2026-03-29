@@ -888,7 +888,7 @@ with col_status:
         st.markdown(f'<div style="font-size:12px"><span class="status-live"></span><span style="color:#34D399">Live</span>&nbsp;&nbsp;<span style="color:#6B7280">Updated {last_time}</span></div>', unsafe_allow_html=True)
 
 with col_ctrl:
-    if st.button("⟳ Refresh Now", use_container_width=True, key="btn_refresh"):
+    if st.button("⟳ Refresh Now", width="stretch", key="btn_refresh"):
         _sched.trigger_refresh()
         st.cache_data.clear()
         st.rerun()
@@ -1065,7 +1065,7 @@ for i, (tier, (icon, label, color)) in enumerate(tier_labels.items()):
         if st.button(
             f"{icon} {label}\n{tier_cfg['target_yield_pct']}% target",
             key=f"tier_btn_{tier}",
-            use_container_width=True,
+            width="stretch",
         ):
             st.session_state["selected_tier"] = tier
             st.rerun()
@@ -1435,14 +1435,14 @@ with tab_portfolio:
             # UPGRADE 21: use cached chart builder
             _weighted_yield = float(metrics.get("weighted_yield_pct") or 0)
             fig_pie = _build_pie_chart(cat_sum, _weighted_yield)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, width="stretch")
 
     with chart_right:
         st.markdown('<div class="section-header">Holdings — Yield vs Risk</div>', unsafe_allow_html=True)
         if holdings:
             # UPGRADE 21: use cached chart builder
             fig_scatter = _build_holdings_scatter(holdings)
-            st.plotly_chart(fig_scatter, use_container_width=True)
+            st.plotly_chart(fig_scatter, width="stretch")
 
     # ── Holdings Table ────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Portfolio Holdings</div>', unsafe_allow_html=True)
@@ -1501,7 +1501,7 @@ with tab_portfolio:
             .set_properties(**{"background-color": "#111827", "color": "#E2E8F0",
                                 "border": "1px solid #1F2937"})
         )
-        st.dataframe(styled, use_container_width=True, height=min(400, 55 + 35 * len(display_df)))
+        st.dataframe(styled, width="stretch", height=min(400, 55 + 35 * len(display_df)))
 
     # ── Yield Breakdown Bar Chart (Phase 7 UI) ───────────────────────────────
     # OPT-14: figure construction wrapped in @st.cache_data via _build_yield_bar()
@@ -1519,7 +1519,7 @@ with tab_portfolio:
                 )
                 _avg_yield = float(metrics.get("weighted_yield_pct", 0))
                 _fig_ybar = _build_yield_bar(_yb_records, _avg_yield)
-                st.plotly_chart(_fig_ybar, use_container_width=True)
+                st.plotly_chart(_fig_ybar, width="stretch")
 
     # ── Risk Metrics (Pro mode only) ───────────────────────────────────────────
     if _pro_mode:
@@ -1653,7 +1653,7 @@ with tab_portfolio:
                     margin=dict(l=60, r=20, t=40, b=40),
                     height=400,
                 )
-                st.plotly_chart(fig_mc, use_container_width=True)
+                st.plotly_chart(fig_mc, width="stretch")
 
     # ── Duration / Interest Rate Risk ────────────────────────────────────────
     if holdings:
@@ -1702,7 +1702,7 @@ with tab_portfolio:
                     scen_df[["label", "Impact", "P&L %"]].rename(
                         columns={"label": "Rate Shift"}
                     ).set_index("Rate Shift"),
-                    use_container_width=True,
+                    width="stretch",
                     height=280,
                 )
 
@@ -1719,7 +1719,7 @@ with tab_portfolio:
                                 "contribution_years": "Contribution (yrs)",
                             }).style.format({"Weight %": "{:.1f}", "Duration (yrs)": "{:.2f}",
                                              "Contribution (yrs)": "{:.4f}"}),
-                            use_container_width=True,
+                            width="stretch",
                         )
         except Exception as e:
             logger.warning("[UI] Duration section failed: %s", e)
@@ -1767,7 +1767,7 @@ with tab_portfolio:
                     showlegend=True, height=250,
                     margin=dict(l=10, r=10, t=10, b=10),
                 )
-                st.plotly_chart(fig_liq, use_container_width=True)
+                st.plotly_chart(fig_liq, width="stretch")
         except Exception as e:
             logger.warning("[UI] Liquidity section failed: %s", e)
 
@@ -1829,7 +1829,7 @@ with tab_portfolio:
         if abs(_sc_hy) >= 400:
             st.warning("HY spread change >= 400bp is extreme — results may be unreliable")
 
-        if st.button("Run Scenario", key="btn_run_scenario", use_container_width=False):
+        if st.button("Run Scenario", key="btn_run_scenario", width="content"):
             _shocks = {
                 "hy_spread_bps": _sc_hy,
                 "fed_rate_bps":  _sc_fed,
@@ -1994,7 +1994,7 @@ with tab_universe:
             tuple(cat_counts.index.tolist()),
             tuple(int(v) for v in cat_counts.values.tolist()),
         )
-        st.plotly_chart(fig_cats, use_container_width=True)
+        st.plotly_chart(fig_cats, width="stretch")
 
         # Enrich with Net APY, composite liquidity, exit velocity, trust score
         # OPT-11: consolidated from 5 separate .apply() passes to 2 passes;
@@ -2092,7 +2092,7 @@ with tab_universe:
             table_df.style
                 .format({k: v for k, v in fmt_map.items() if k in table_df.columns})
                 .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-            use_container_width=True,
+            width="stretch",
             height=min(600, 55 + 35 * len(table_df)),
         )
 
@@ -2162,7 +2162,7 @@ with tab_universe:
                             .map(_nav_status_color, subset=["Status"])
                             .map(_nav_pct_color, subset=["Premium %"])
                             .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-                        use_container_width=True,
+                        width="stretch",
                         height=min(400, 55 + 35 * len(_nav_table)),
                     )
             else:
@@ -2333,7 +2333,7 @@ with tab_arb:
     if not arb_df.empty and len(arb_df) > 3:
         _arb_slice = arb_df.head(15)[["asset_a_id", "net_spread_pct", "type"]].to_dict("records")
         fig_arb = _build_arb_bar(_arb_slice)
-        st.plotly_chart(fig_arb, use_container_width=True)
+        st.plotly_chart(fig_arb, width="stretch")
 
     # ── XRPL DEX Arbitrage Scanner (Item 15) ─────────────────────────────────
     st.markdown('<div class="section-header">XRPL DEX Arbitrage Scanner</div>',
@@ -2504,7 +2504,7 @@ with tab_carry:
                     margin=dict(l=50, r=20, t=50, b=100),
                     height=380,
                 )
-                st.plotly_chart(fig_carry, use_container_width=True)
+                st.plotly_chart(fig_carry, width="stretch")
 
             # ── Full opportunity table ────────────────────────────────────────
             st.markdown('<div class="section-header">All Carry Trade Pairs</div>', unsafe_allow_html=True)
@@ -2545,7 +2545,7 @@ with tab_carry:
                          "Gross Spread %": "{:+.2f}%", "Net Spread %": "{:+.2f}%"})
                 .map(_spread_color, subset=["Net Spread %"])
                 .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-                use_container_width=True,
+                width="stretch",
                 height=min(500, 55 + 35 * len(show_carry.head(50))),
             )
 
@@ -2614,7 +2614,7 @@ with tab_compare:
             comp_df.to_dict("records"),
             _tier_colors,
         )
-        st.plotly_chart(fig_compare, use_container_width=True)
+        st.plotly_chart(fig_compare, width="stretch")
 
         # Comparison table
         display_comp = comp_df[["Icon", "Name", "Yield (%)", "Annual Return ($)",
@@ -2629,7 +2629,7 @@ with tab_compare:
                 "Max Drawdown (%)": "{:.2f}%",
                 "VaR 95% (%)": "{:.2f}%",
             }).set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-            use_container_width=True,
+            width="stretch",
         )
 
     # Efficient frontier
@@ -2668,7 +2668,7 @@ with tab_compare:
                     font_color="#E2E8F0",
                     margin=dict(l=60, r=20, t=40, b=40),
                 )
-                st.plotly_chart(fig_ef, use_container_width=True)
+                st.plotly_chart(fig_ef, width="stretch")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2701,7 +2701,7 @@ with tab_ai:
             if st.button(
                 f"{agent_cfg_a['icon']} {agent_cfg_a['name']}",
                 key=f"agent_btn_{agent_id}",
-                use_container_width=True,
+                width="stretch",
             ):
                 st.session_state["agent_name"] = agent_id
                 # Stop old agent if different
@@ -2748,7 +2748,7 @@ with tab_ai:
         agent_is_running = sup_status.get("running", False)
         if not agent_is_running:
             if st.button(f"▶ Start {agent_detail['icon']} {agent_detail['name']}",
-                         use_container_width=True, key="btn_start_agent",
+                         width="stretch", key="btn_start_agent",
                          type="primary"):
                 _agent.supervisor.start(
                     agent_name=selected_agent,
@@ -2759,13 +2759,13 @@ with tab_ai:
                 st.success(f"Agent {selected_agent} started")
                 st.rerun()
         else:
-            if st.button("⏹ Stop Agent", use_container_width=True, key="btn_stop_agent",
+            if st.button("⏹ Stop Agent", width="stretch", key="btn_stop_agent",
                          type="secondary"):
                 _agent.supervisor.stop()
                 st.session_state["agent_running"] = False
                 st.rerun()
     with ac4:
-        if st.button("⚡ Run Now (1 cycle)", use_container_width=True, key="btn_one_cycle",
+        if st.button("⚡ Run Now (1 cycle)", width="stretch", key="btn_one_cycle",
                      help="Execute one analysis cycle immediately — the agent reads live market data, calls Claude for a decision (HOLD/REBALANCE/DEPLOY/REDUCE), and logs the result. Great for testing without starting the full scheduler."):
             with st.spinner(f"Running {agent_detail['name']} cycle...", show_time=True):
                 result = _agent.run_agent_cycle(selected_agent, dry_run=dry_run, cycle_number=0,
@@ -2830,7 +2830,7 @@ with tab_ai:
         show_d["Time"] = show_d["Time"].str[:19]
         st.dataframe(
             show_d.style.set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-            use_container_width=True,
+            width="stretch",
             height=300,
         )
     else:
@@ -2879,7 +2879,7 @@ with tab_ai:
                     for cat, val in sorted(adjs.items(), key=lambda x: -abs(x[1]))
                 ]
                 adj_df = pd.DataFrame(adj_rows)
-                st.dataframe(adj_df, use_container_width=True, hide_index=True)
+                st.dataframe(adj_df, width="stretch", hide_index=True)
 
             # Rationale summary (rationale is a single string)
             if rat:
@@ -2927,7 +2927,7 @@ with tab_ai:
                     if v != 0
                 ]
                 if _fadj_rows:
-                    st.dataframe(pd.DataFrame(_fadj_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(_fadj_rows), width="stretch", hide_index=True)
 
             # Max-Sharpe weight table
             _f_weights = _fopt.get("weights", {})
@@ -2937,7 +2937,7 @@ with tab_ai:
                             if v > 0.5]
                 if _fw_rows:
                     st.markdown("**Factor-Optimal Weights (Max-Sharpe Portfolio)**")
-                    st.dataframe(pd.DataFrame(_fw_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(_fw_rows), width="stretch", hide_index=True)
 
             if _fopt.get("rationale"):
                 st.caption(f"Factor rationale: {_fopt['rationale']}")
@@ -2984,7 +2984,7 @@ with tab_ai:
                             "Direction": "▲ Overweight" if delta > 1 else ("▼ Underweight" if delta < -1 else "— Neutral"),
                         })
                     if _b7_rows:
-                        st.dataframe(pd.DataFrame(_b7_rows), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(_b7_rows), width="stretch", hide_index=True)
 
                 # Factor exposure bar chart
                 _pf_factors = _b7opt.get("portfolio_factors", {})
@@ -3009,7 +3009,7 @@ with tab_ai:
                         font_color="#E2E8F0",
                         legend=dict(orientation="h", y=1.1),
                     )
-                    st.plotly_chart(_fig_f, use_container_width=True)
+                    st.plotly_chart(_fig_f, width="stretch")
 
                 st.caption(f"Optimizer: {_b7opt.get('source', '—')} · Scipy L-BFGS-B minimizes factor vector distance to RISK_ON target")
 
@@ -3047,14 +3047,14 @@ with tab_ai:
             st.markdown("**📊 RLUSD/XRP Bids (top 5)**")
             bids = rlusd_d.get("bids", [])
             if bids:
-                st.dataframe(pd.DataFrame(bids), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(bids), width="stretch", hide_index=True)
             else:
                 st.caption("No bids available" if not ob_err else f"Error: {ob_err}")
         with xrpl_rvb:
             st.markdown("**📊 RLUSD/XRP Asks (top 5)**")
             asks = rlusd_d.get("asks", [])
             if asks:
-                st.dataframe(pd.DataFrame(asks), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(asks), width="stretch", hide_index=True)
             else:
                 st.caption("No asks available" if not ob_err else f"Error: {ob_err}")
 
@@ -3062,7 +3062,7 @@ with tab_ai:
         vaults = xrpl_d.get("soil_vaults", [])
         if vaults:
             vault_df = pd.DataFrame(vaults)
-            st.dataframe(vault_df, use_container_width=True, hide_index=True)
+            st.dataframe(vault_df, width="stretch", hide_index=True)
 
         xls = xrpl_d.get("xls81", {})
         tvl = xrpl_d.get("xrpl_rwa_tvl_bn", 2.3)
@@ -3224,7 +3224,7 @@ with tab_ai:
         st.dataframe(
             perf_df.style.format({"avg_return_pct": "{:.2f}%", "Win Rate %": "{:.1f}%"})
                         .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-            use_container_width=True,
+            width="stretch",
         )
     else:
         st.caption("Feedback data accumulates as the agent runs over multiple cycles.")
@@ -3377,7 +3377,7 @@ with tab_trades:
             t_df.style
                 .format({"Size ($)": lambda x: _fmt_usd(x) if pd.notna(x) else "—"})
                 .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-            use_container_width=True,
+            width="stretch",
             height=500,
         )
     else:
@@ -3428,7 +3428,7 @@ with tab_reg:
                 height=280,
                 margin=dict(l=50, r=20, t=20, b=40),
             )
-            st.plotly_chart(fig_curve, use_container_width=True)
+            st.plotly_chart(fig_curve, width="stretch")
             # KPI row for key rates
             rc1, rc2, rc3, rc4, rc5 = st.columns(5)
             rate_kpis = [
@@ -3857,7 +3857,7 @@ with tab_screener:
 
     st.dataframe(
         pd.DataFrame(tf_rows).set_index("Asset"),
-        use_container_width=True,
+        width="stretch",
     )
 
     st.markdown(
@@ -3995,7 +3995,7 @@ with tab_macro:
             xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickangle=-45, tickfont=dict(size=9)),
             showlegend=False,
         )
-        st.plotly_chart(fig_fg, use_container_width=True)
+        st.plotly_chart(fig_fg, width="stretch")
         _fg_now_val = _fg_current.get("value", _fg_val)
         _fg_now_lbl = _fg_current.get("label", _fg_lbl)
         st.caption(
@@ -4073,7 +4073,7 @@ with tab_macro:
                     yaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
                     xaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
                 )
-                st.plotly_chart(fig_corr, use_container_width=True)
+                st.plotly_chart(fig_corr, width="stretch")
 
                 # Current snapshot bar chart
                 st.markdown(f"**Current {corr_days}-day correlations with BTC**")
@@ -4102,7 +4102,7 @@ with tab_macro:
                     xaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
                     yaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
                 )
-                st.plotly_chart(fig_bar, use_container_width=True)
+                st.plotly_chart(fig_bar, width="stretch")
             else:
                 st.info("Not enough data for rolling correlations. Try a smaller window.")
         else:
@@ -4160,7 +4160,7 @@ with tab_macro:
                 yaxis=dict(title="BTC Price (USD)", gridcolor="rgba(255,255,255,0.07)"),
                 yaxis2=dict(title="M2 ($B)", gridcolor="rgba(255,255,255,0.03)"),
             )
-            st.plotly_chart(fig_m2, use_container_width=True)
+            st.plotly_chart(fig_m2, width="stretch")
             st.caption("Note: M2 84-day shift requires FRED historical API key for full series. Set RWA_FRED_API_KEY in .env to enable.")
         else:
             st.info("BTC historical data unavailable.")
@@ -4546,7 +4546,7 @@ with tab_onchain:
             )
             _fig_oc.update_yaxes(gridcolor="rgba(255,255,255,0.07)")
             _fig_oc.update_xaxes(gridcolor="rgba(255,255,255,0.07)")
-            st.plotly_chart(_fig_oc, use_container_width=True)
+            st.plotly_chart(_fig_oc, width="stretch")
 
         # ── Funding rates from Coinalyze (cross-exchange context) ─────────────
         st.markdown("---")
@@ -4950,7 +4950,7 @@ with tab_onchain:
                         "Value":  f"${_zr.get('value', 0):,.2f}",
                         "Amount": f"{_zr.get('qty', 0):.4f}",
                     })
-                st.dataframe(pd.DataFrame(_z_rows), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(_z_rows), width="stretch", hide_index=True)
     elif not _wallet_addr:
         st.caption("Enter a wallet address above to load Zerion portfolio data.")
     else:
@@ -4980,7 +4980,7 @@ with tab_onchain:
                 "Guardian":   _wv.get("guardian_set", 0),
                 "Tx Hash":    (_wv.get("tx_hash") or "")[:16] + ("…" if _wv.get("tx_hash") else ""),
             })
-        st.dataframe(pd.DataFrame(_wh_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(_wh_rows), width="stretch", hide_index=True)
         st.caption(f"{len(_wh_data)} VAAs · Chain ID {_wh_chain_id} · Wormhole Scan public API")
     else:
         st.caption("No recent VAA data found for this chain.")
@@ -5113,7 +5113,7 @@ with tab_options:
                     xaxis=dict(tickangle=-45, gridcolor="rgba(255,255,255,0.05)"),
                     yaxis=dict(gridcolor="rgba(255,255,255,0.07)", title="OI (contracts)"),
                 )
-                st.plotly_chart(_fig5a, use_container_width=True)
+                st.plotly_chart(_fig5a, width="stretch")
             else:
                 st.info("No OI by strike data available.")
 
@@ -5140,7 +5140,7 @@ with tab_options:
                     xaxis=dict(title="Days to Expiry", gridcolor="rgba(255,255,255,0.05)"),
                     yaxis=dict(title="IV (%)", gridcolor="rgba(255,255,255,0.07)"),
                 )
-                st.plotly_chart(_fig5b, use_container_width=True)
+                st.plotly_chart(_fig5b, width="stretch")
             else:
                 st.info("IV term structure unavailable.")
 
