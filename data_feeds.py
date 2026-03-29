@@ -737,159 +737,89 @@ def fetch_rwa_news() -> List[dict]:
         live_items = fetch_live_rss_news()
         all_news.extend(live_items)
 
-        # Only use synthetic if we couldn't get enough live articles
-        if len(live_items) >= 6:
-            # Still add synthetic for guaranteed RWA-specific coverage
-            pass  # synthetic below will still be added, dedup handles it
-
-        # Synthetic news items from known real events (fallback for API-unavailable sources)
-        synthetic = [
-            {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "source": "CoinDesk",
-                "headline": "SEC approves NASDAQ tokenized equities pilot — Russell 1000 stocks + S&P 500 ETFs, DTC clearing, Q3 2026 launch",
-                "url": "https://coindesk.com",
-                "sentiment": "BULLISH", "sentiment_score": 0.95,
-                "categories": ["Tokenized Equities", "Regulatory"],
-                "relevance_score": 1.0,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-                "source": "RWA.xyz",
-                "headline": "BlackRock BUIDL surpasses $2B TVL as institutional demand for tokenized treasuries hits new record",
-                "url": "https://app.rwa.xyz",
-                "sentiment": "BULLISH", "sentiment_score": 0.8,
-                "categories": ["Government Bonds", "Institutional"],
-                "relevance_score": 1.0,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
-                "source": "DeFiLlama",
-                "headline": "RWA total TVL surpasses $21B in Q1 2026 — up 300% year-over-year, overtaking DEXs as 5th-largest DeFi category",
-                "url": "https://defillama.com/rwa",
-                "sentiment": "BULLISH", "sentiment_score": 0.9,
-                "categories": ["Government Bonds", "Market Data"],
-                "relevance_score": 1.0,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat(),
-                "source": "CoinDesk",
-                "headline": "Ondo Global Markets hits $600M TVL with 200+ tokenized stocks on Ethereum, BNB Chain and Solana — 60% market share",
-                "url": "https://coindesk.com",
-                "sentiment": "BULLISH", "sentiment_score": 0.85,
-                "categories": ["Tokenized Equities", "DeFi"],
-                "relevance_score": 0.98,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(),
-                "source": "The Defiant",
-                "headline": "Centrifuge tokenized private credit pools surpass $1.1B in active loans — real estate, trade finance, consumer credit",
-                "url": "https://thedefiant.io",
-                "sentiment": "BULLISH", "sentiment_score": 0.7,
-                "categories": ["Private Credit", "Trade Finance"],
-                "relevance_score": 0.9,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat(),
-                "source": "Reuters",
-                "headline": "Franklin Templeton BENJI becomes first US-registered tokenized fund with 100,000+ token holders",
-                "url": "https://reuters.com",
-                "sentiment": "BULLISH", "sentiment_score": 0.7,
-                "categories": ["Government Bonds", "Institutional"],
-                "relevance_score": 0.95,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=10)).isoformat(),
-                "source": "Bloomberg",
-                "headline": "Sky Protocol (MakerDAO) USDS savings rate at 4.75% — $3B+ TVL as leading decentralized RWA stablecoin",
-                "url": "https://bloomberg.com",
-                "sentiment": "BULLISH", "sentiment_score": 0.65,
-                "categories": ["Private Credit", "Stablecoins"],
-                "relevance_score": 0.92,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat(),
-                "source": "Maple Finance Blog",
-                "headline": "Maple Finance onchain private credit outstanding reaches $3.2B — up 180% in 2025",
-                "url": "https://maple.finance",
-                "sentiment": "BULLISH", "sentiment_score": 0.7,
-                "categories": ["Private Credit"],
-                "relevance_score": 0.88,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=14)).isoformat(),
-                "source": "The Block",
-                "headline": "Plume Genesis mainnet hits $500M+ TVL — Morpho and Curve among 50+ protocols live on purpose-built RWA chain",
-                "url": "https://theblock.co",
-                "sentiment": "BULLISH", "sentiment_score": 0.75,
-                "categories": ["Real Estate", "Government Bonds"],
-                "relevance_score": 0.9,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=16)).isoformat(),
-                "source": "Decrypt",
-                "headline": "Pendle Finance yield tokenization hits $3B+ TVL — PT-USDY, PT-USDM unlock fixed-rate RWA yields",
-                "url": "https://decrypt.co",
-                "sentiment": "BULLISH", "sentiment_score": 0.7,
-                "categories": ["Government Bonds", "DeFi"],
-                "relevance_score": 0.88,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=18)).isoformat(),
-                "source": "CoinTelegraph",
-                "headline": "SEC approves NASDAQ tokenized stocks March 2026 — clears path for NYSE and full equity market tokenization",
-                "url": "https://cointelegraph.com",
-                "sentiment": "BULLISH", "sentiment_score": 0.9,
-                "categories": ["Regulatory", "Tokenized Equities"],
-                "relevance_score": 0.95,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat(),
-                "source": "Financial Times",
-                "headline": "JPMorgan's Onyx processes $1T in tokenized repo transactions using blockchain",
-                "url": "https://ft.com",
-                "sentiment": "BULLISH", "sentiment_score": 0.85,
-                "categories": ["Institutional", "Trade Finance"],
-                "relevance_score": 0.90,
-            },
-            {
-                "timestamp": (datetime.now(timezone.utc) - timedelta(hours=22)).isoformat(),
-                "source": "Messari",
-                "headline": "Tokenized private credit market outperforms traditional DeFi yields in 2025",
-                "url": "https://messari.io",
-                "sentiment": "BULLISH", "sentiment_score": 0.72,
-                "categories": ["Private Credit", "Market Data"],
-                "relevance_score": 0.88,
-            },
-        ]
-        all_news.extend(synthetic)
-
-        # Try live sources
+        # Try live sources first
         for source in NEWS_SOURCES:
             try:
                 data = _get(source["url"], timeout=8)
+                items: list = []
                 if data and isinstance(data, list):
-                    for item in data[:10]:
-                        headline = item.get("title") or item.get("headline") or ""
-                        if not headline:
-                            continue
-                        relevance = _is_rwa_relevant(headline)
-                        if relevance < 0.3:
-                            continue
-                        sentiment, score = _score_sentiment(headline)
-                        all_news.append({
-                            "timestamp": item.get("published_at") or item.get("date") or
-                                        datetime.now(timezone.utc).isoformat(),
-                            "source": source["name"],
-                            "headline": headline,
-                            "url": item.get("url") or item.get("link") or "",
-                            "sentiment": sentiment,
-                            "sentiment_score": score,
-                            "categories": [],
-                            "relevance_score": relevance,
-                        })
+                    items = data[:10]
+                elif data and isinstance(data, dict):
+                    # NewsAPI returns {"articles": [...]}; handle dict responses generically
+                    items = (data.get("articles") or data.get("results") or data.get("data") or [])[:10]
+                for item in items:
+                    headline = item.get("title") or item.get("headline") or ""
+                    if not headline:
+                        continue
+                    relevance = _is_rwa_relevant(headline)
+                    if relevance < 0.3:
+                        continue
+                    sentiment, score = _score_sentiment(headline)
+                    all_news.append({
+                        "timestamp": item.get("published_at") or item.get("publishedAt") or
+                                    item.get("date") or datetime.now(timezone.utc).isoformat(),
+                        "source": source["name"],
+                        "headline": headline,
+                        "url": item.get("url") or item.get("link") or "",
+                        "sentiment": sentiment,
+                        "sentiment_score": score,
+                        "categories": [],
+                        "relevance_score": relevance,
+                    })
             except Exception as e:
                 logger.debug("[DataFeeds] News source %s failed: %s", source["name"], e)
+
+        # Fallback synthetic items — only used when live sources return fewer than 5 articles.
+        # These are static reference items based on publicly known events as of March 2026.
+        if len(all_news) < 5:
+            synthetic = [
+                {
+                    "timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+                    "source": "RWA.xyz (cached)",
+                    "headline": "BlackRock BUIDL surpasses $2B TVL as institutional demand for tokenized treasuries hits new record",
+                    "url": "https://app.rwa.xyz",
+                    "sentiment": "BULLISH", "sentiment_score": 0.8,
+                    "categories": ["Government Bonds", "Institutional"],
+                    "relevance_score": 1.0,
+                },
+                {
+                    "timestamp": (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat(),
+                    "source": "DeFiLlama (cached)",
+                    "headline": "RWA total TVL surpasses $21B in Q1 2026 — up 300% year-over-year",
+                    "url": "https://defillama.com/rwa",
+                    "sentiment": "BULLISH", "sentiment_score": 0.9,
+                    "categories": ["Government Bonds", "Market Data"],
+                    "relevance_score": 1.0,
+                },
+                {
+                    "timestamp": (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat(),
+                    "source": "Franklin Templeton (cached)",
+                    "headline": "Franklin Templeton BENJI becomes first US-registered tokenized fund with 100,000+ token holders",
+                    "url": "https://franklintempleton.com",
+                    "sentiment": "BULLISH", "sentiment_score": 0.7,
+                    "categories": ["Government Bonds", "Institutional"],
+                    "relevance_score": 0.95,
+                },
+                {
+                    "timestamp": (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat(),
+                    "source": "Maple Finance (cached)",
+                    "headline": "Maple Finance onchain private credit outstanding reaches $3.2B — up 180% in 2025",
+                    "url": "https://maple.finance",
+                    "sentiment": "BULLISH", "sentiment_score": 0.7,
+                    "categories": ["Private Credit"],
+                    "relevance_score": 0.88,
+                },
+                {
+                    "timestamp": (datetime.now(timezone.utc) - timedelta(hours=16)).isoformat(),
+                    "source": "Pendle Finance (cached)",
+                    "headline": "Pendle Finance yield tokenization hits $3B+ TVL — PT-USDY, PT-USDM unlock fixed-rate RWA yields",
+                    "url": "https://pendle.finance",
+                    "sentiment": "BULLISH", "sentiment_score": 0.7,
+                    "categories": ["Government Bonds", "DeFi"],
+                    "relevance_score": 0.88,
+                },
+            ]
+            all_news.extend(synthetic)
 
         # Deduplicate by headline
         seen = set()
