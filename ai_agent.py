@@ -512,6 +512,12 @@ Call tools first to gather intelligence, then respond with ONLY the JSON object.
         logger.warning("[Agent] Claude JSON parse error: %s", e)
         return "HOLD", f"JSON parse error — defaulting to HOLD: {str(e)[:100]}", 30.0, []
     except Exception as e:
+        # Catch authentication errors at WARNING (not ERROR) so Sentry is not
+        # spammed — the real fix is updating ANTHROPIC_API_KEY in Streamlit secrets.
+        err_str = str(e)
+        if "authentication_error" in err_str or "401" in err_str or "invalid_api_key" in err_str:
+            logger.warning("[Agent] Anthropic auth failed — check ANTHROPIC_API_KEY in Streamlit secrets: %s", err_str[:200])
+            return "HOLD", "AI agent disabled — API key invalid (check Streamlit secrets)", 0.0, []
         logger.error("[Agent] Claude call failed: %s", e)
         return "HOLD", f"Claude call failed: {str(e)[:200]}", 0.0, []
 
