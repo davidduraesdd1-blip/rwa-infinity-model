@@ -342,10 +342,10 @@ def fetch_defillama_yields_for_rwa() -> List[dict]:
     """
     def _fetch():
         try:
-            resp = _session.get("https://yields.llama.fi/pools", timeout=15)
-            if resp.status_code != 200:
+            data = _get("https://yields.llama.fi/pools", timeout=15)
+            pools = (data or {}).get("data", []) if isinstance(data, dict) else []
+            if not pools:
                 return []
-            pools = resp.json().get("data", [])
             rwa_keywords = [
                 # Core RWA
                 "ondo", "maple", "centrifuge", "goldfinch", "truefi",
@@ -1275,42 +1275,48 @@ def fetch_rwaxyz_tvl() -> dict:
 
 
 def get_market_summary() -> dict:
-    """Return a high-level market summary dict including macro intelligence."""
-    protocols   = fetch_defillama_protocols()
-    yield_pools = fetch_defillama_yields()
-    total_tvl   = sum(p.get("tvl", 0) or 0 for p in protocols)
-    active_pools = len([p for p in yield_pools if (p.get("tvl_usd") or 0) > 100_000])
-    avg_yield    = (
-        sum(p.get("apy", 0) for p in yield_pools if 0 < (p.get("apy") or 0) < 100)
-        / max(len([p for p in yield_pools if 0 < (p.get("apy") or 0) < 100]), 1)
-    )
-    gold_price   = fetch_gold_price()
+    """Return a high-level market summary dict including macro intelligence.
 
-    # New macro intelligence signals
-    fg           = fetch_fear_greed_index()
-    stable       = fetch_stablecoin_supply()
-    regime       = get_macro_regime()
+    Result is cached for 90 seconds (same TTL as app.py _load_market_summary)
+    to avoid re-running 6 expensive sub-fetches on every Streamlit rerun.
+    """
+    def _build():
+        protocols   = fetch_defillama_protocols()
+        yield_pools = fetch_defillama_yields()
+        total_tvl   = sum(p.get("tvl", 0) or 0 for p in protocols)
+        active_pools = len([p for p in yield_pools if (p.get("tvl_usd") or 0) > 100_000])
+        avg_yield    = (
+            sum(p.get("apy", 0) for p in yield_pools if 0 < (p.get("apy") or 0) < 100)
+            / max(len([p for p in yield_pools if 0 < (p.get("apy") or 0) < 100]), 1)
+        )
+        gold_price   = fetch_gold_price()
 
-    return {
-        "total_rwa_tvl_usd":     total_tvl,
-        "active_pools":          active_pools,
-        "avg_rwa_yield_pct":     round(avg_yield, 2),
-        "gold_price_usd":        gold_price,
-        "protocol_count":        len(protocols),
-        # Fear & Greed
-        "fear_greed_value":      fg.get("current", {}).get("value", 50),
-        "fear_greed_label":      fg.get("current", {}).get("label", "Neutral"),
-        "fear_greed_signal":     fg.get("signal", "Neutral"),
-        # Stablecoin dry powder
-        "stablecoin_total_bn":   stable.get("total_bn", 0),
-        "usdt_supply_bn":        stable.get("usdt_bn", 0),
-        "usdc_supply_bn":        stable.get("usdc_bn", 0),
-        # Macro regime
-        "macro_regime":          regime["regime"],
-        "macro_bias":            regime["bias"],
-        "macro_description":     regime["description"],
-        "last_updated":          datetime.now(timezone.utc).isoformat(),
-    }
+        # Macro intelligence signals
+        fg           = fetch_fear_greed_index()
+        stable       = fetch_stablecoin_supply()
+        regime       = get_macro_regime()
+
+        return {
+            "total_rwa_tvl_usd":     total_tvl,
+            "active_pools":          active_pools,
+            "avg_rwa_yield_pct":     round(avg_yield, 2),
+            "gold_price_usd":        gold_price,
+            "protocol_count":        len(protocols),
+            # Fear & Greed
+            "fear_greed_value":      fg.get("current", {}).get("value", 50),
+            "fear_greed_label":      fg.get("current", {}).get("label", "Neutral"),
+            "fear_greed_signal":     fg.get("signal", "Neutral"),
+            # Stablecoin dry powder
+            "stablecoin_total_bn":   stable.get("total_bn", 0),
+            "usdt_supply_bn":        stable.get("usdt_bn", 0),
+            "usdc_supply_bn":        stable.get("usdc_bn", 0),
+            # Macro regime
+            "macro_regime":          regime["regime"],
+            "macro_bias":            regime["bias"],
+            "macro_description":     regime["description"],
+            "last_updated":          datetime.now(timezone.utc).isoformat(),
+        }
+    return _cached_get("market_summary", 90, _build) or _build()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4878,50 +4884,56 @@ def fetch_nav_premium_discount(asset_ids: Optional[List[str]] = None) -> Dict[st
           ],
           "timestamp": str,
         }
+
+    Results cached for 900 s (15 min) to avoid making one CoinGecko call per
+    asset per Streamlit rerun.  Each per-asset price lookup uses _get() so the
+    SSRF allowlist and rate limiter are applied.
     """
-    targets = asset_ids or list(_NAV_TRACKER_ASSETS.keys())
-    results = []
+    cache_key = "nav_premium_discount_" + "_".join(sorted(asset_ids or []))
 
-    for asset_id in targets:
-        info = _NAV_TRACKER_ASSETS.get(asset_id)
-        if not info:
-            continue
+    def _build():
+        targets = asset_ids or list(_NAV_TRACKER_ASSETS.keys())
+        results = []
 
-        cg_id      = info.get("coingecko_id")
-        nav_target = info.get("nav_per_token")
+        for asset_id in targets:
+            info = _NAV_TRACKER_ASSETS.get(asset_id)
+            if not info:
+                continue
 
-        secondary_price = None
-        if cg_id:
-            try:
-                url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
-                resp = _session.get(url, timeout=8)
-                if resp.status_code == 200:
-                    secondary_price = resp.json().get(cg_id, {}).get("usd")
-            except Exception as e:
-                logger.debug("[NAV Tracker] CoinGecko %s failed: %s", cg_id, e)
+            cg_id      = info.get("coingecko_id")
+            nav_target = info.get("nav_per_token")
 
-        premium_pct = None
-        signal      = "N/A"
-        if secondary_price and nav_target:
-            premium_pct = round((secondary_price - nav_target) / nav_target * 100, 2)
-            if premium_pct > 5:     signal = "PREMIUM"
-            elif premium_pct < -5:  signal = "DISCOUNT"
-            else:                   signal = "NEAR_PAR"
+            secondary_price = None
+            if cg_id:
+                url  = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
+                data = _get(url, timeout=8)
+                if data:
+                    secondary_price = (data.get(cg_id) or {}).get("usd")
 
-        results.append({
-            "id":              asset_id,
-            "secondary_price": secondary_price,
-            "nav_per_token":   nav_target,
-            "premium_pct":     premium_pct,
-            "signal":          signal,
-            "asset_type":      info.get("asset_type", ""),
-        })
+            premium_pct = None
+            signal      = "N/A"
+            if secondary_price and nav_target:
+                premium_pct = round((secondary_price - nav_target) / nav_target * 100, 2)
+                if premium_pct > 5:     signal = "PREMIUM"
+                elif premium_pct < -5:  signal = "DISCOUNT"
+                else:                   signal = "NEAR_PAR"
 
-    return {
-        "assets":    results,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "source":    "coingecko_nav_tracker",
-    }
+            results.append({
+                "id":              asset_id,
+                "secondary_price": secondary_price,
+                "nav_per_token":   nav_target,
+                "premium_pct":     premium_pct,
+                "signal":          signal,
+                "asset_type":      info.get("asset_type", ""),
+            })
+
+        return {
+            "assets":    results,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source":    "coingecko_nav_tracker",
+        }
+
+    return _cached_get(cache_key, 900, _build) or _build()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

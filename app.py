@@ -657,6 +657,16 @@ def _zerion_portfolio(wallet: str):
 def _wh_vaas(chain_id: int):
     return _df.fetch_wormhole_rwa_vaa(emitter_chain_id=chain_id, page_size=15)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_xrpl_mpt():
+    """Cached XRPL MPT issuance data (5 min TTL)."""
+    return _df.fetch_xrpl_mpt_data()
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_deribit_options(currency: str):
+    """Cached Deribit options chain (15 min TTL, keyed by currency)."""
+    return _df.fetch_deribit_options_chain(currency=currency)
+
 
 # ─── UPGRADE 21: Cached chart builders ────────────────────────────────────────
 
@@ -4628,7 +4638,7 @@ with tab_onchain:
     st.markdown("#### 🔷 XRPL Multi-Purpose Tokens (XLS-33d)")
     st.caption("XRPL JSON-RPC ledger_data · MPT issuances + RLUSD gateway supply · Cached 5 min")
 
-    _mpt = _df.fetch_xrpl_mpt_data()
+    _mpt = _load_xrpl_mpt()
     if _mpt.get("source") == "unavailable":
         st.caption("MPT data unavailable — XRPL RPC unreachable.")
     else:
@@ -4988,7 +4998,7 @@ with tab_options:
     st.caption("Deribit public API · no key required · OI by Strike · Put/Call Ratio · IV Term Structure · Max Pain · Cached 15 min")
 
     _opt_curr = st.selectbox("Currency", ["BTC", "ETH"], key="opt_curr_sel")
-    _oc5 = _df.fetch_deribit_options_chain(currency=_opt_curr)
+    _oc5 = _load_deribit_options(_opt_curr)
 
     if _oc5.get("error") and not _oc5.get("oi_by_strike"):
         st.warning(f"Options data unavailable: {_oc5.get('error')}. Deribit may be temporarily unreachable.")
