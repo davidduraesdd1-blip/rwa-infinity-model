@@ -194,7 +194,8 @@ PRICE_INTERVAL_SECONDS   = 300  # price-only refresh every 5 min
 NEWS_INTERVAL_MINUTES    = 30   # news sentiment refresh
 
 # ─── Database ─────────────────────────────────────────────────────────────────
-DB_FILE = "rwa_model.db"
+import os as _os_db
+DB_FILE = _os_db.path.join(_os_db.path.dirname(_os_db.path.abspath(__file__)), "rwa_model.db")
 
 # ─── Anthropic ────────────────────────────────────────────────────────────────
 CLAUDE_MODEL    = "claude-sonnet-4-6"

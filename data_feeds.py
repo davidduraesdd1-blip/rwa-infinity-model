@@ -227,6 +227,8 @@ def _get(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> Optio
             return r.json()
         except requests.exceptions.Timeout:
             logger.debug("[DataFeeds] Timeout attempt %d for %s", attempt + 1, url)
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(1)
         except Exception as e:
             logger.debug("[DataFeeds] %s error: %s", url, e)
         if attempt < MAX_RETRIES - 1:

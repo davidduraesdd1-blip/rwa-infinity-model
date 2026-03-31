@@ -79,13 +79,17 @@ import scheduler as _sched
 import ai_agent as _agent
 import data_feeds as _df
 import pdf_export as _pdf
-from config import (
-    PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
-    RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
-    XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled, FEATURES,
-    get_redemption_window,
-    RWA_TAM_USD, RWA_ONCHAIN_USD, RWA_MILESTONES,
-)
+try:
+    from config import (
+        PORTFOLIO_TIERS, AI_AGENTS, CATEGORY_COLORS,
+        RISK_LABELS, RWA_UNIVERSE, ARB_STRONG_THRESHOLD_PCT,
+        XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled, FEATURES,
+        get_redemption_window,
+        RWA_TAM_USD, RWA_ONCHAIN_USD, RWA_MILESTONES,
+    )
+except Exception as _cfg_err:
+    st.error(f"Configuration error: {_cfg_err}")
+    st.stop()
 
 # ─── Sentry error monitoring (free tier — only loads when DSN is set) ──────────
 if SENTRY_DSN:
@@ -109,7 +113,10 @@ if SENTRY_DSN:
 def _init():
     """Initialize DB + scheduler once per process."""
     _db.init_db()
-    _sched.start()
+    try:
+        _sched.start()
+    except Exception as e:
+        logger.warning("Scheduler start failed: %s", e)
     return True
 
 _init()
@@ -246,6 +253,8 @@ import re as _re_input
 
 def _validate_weights(weights: dict) -> tuple:
     """Validate that portfolio weights sum to at most 100%."""
+    if not weights or not all(isinstance(v, (int, float)) for v in weights.values()):
+        return False, "Invalid weights — all values must be numeric"
     total = sum(weights.values())
     if total > 1.001:
         return False, f"Weights sum to {total:.1%} — must be ≤ 100%"

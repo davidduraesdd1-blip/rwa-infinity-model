@@ -157,7 +157,8 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
 
     # Check max drawdown not breached
     portfolio_vol = metrics.get("portfolio_volatility_pct", 0)
-    tier_cfg      = PORTFOLIO_TIERS[max(1, min(5, int(cfg.get("risk_tier", 3))))]
+    _tier_key     = max(1, min(5, int(cfg.get("risk_tier", 3))))
+    tier_cfg      = PORTFOLIO_TIERS.get(_tier_key, list(PORTFOLIO_TIERS.values())[0])
     max_dd        = tier_cfg["max_drawdown_pct"]
     if portfolio_vol > max_dd:
         return False, f"Portfolio volatility {portfolio_vol:.1f}% > max drawdown limit {max_dd:.1f}%"
@@ -196,6 +197,16 @@ def _check_post_risk(actions: list, cfg: dict, portfolio_value: float) -> tuple[
 _decision_cache: dict = {}
 _decision_cache_lock = threading.Lock()
 _DECISION_TTL = 600  # 10-minute TTL (UPGRADE 16)
+_DECISION_CACHE_MAX = 500
+
+
+def _evict_decision_cache() -> None:
+    """Evict oldest half of _decision_cache when it exceeds _DECISION_CACHE_MAX.
+    Must be called while holding _decision_cache_lock."""
+    if len(_decision_cache) > _DECISION_CACHE_MAX:
+        keys = list(_decision_cache.keys())
+        for k in keys[:len(keys) // 2]:
+            del _decision_cache[k]
 
 
 def _decision_key(agent_name: str, portfolio: dict, arb_opps: list) -> str:
@@ -382,8 +393,8 @@ Current Portfolio (Tier {portfolio.get('tier')}: {_sanitize(portfolio.get('tier_
 
 AGENT PROFILE:
 - Strategy: {_sanitize(agent_cfg['strategy'])}
-- Risk Tier: {agent_cfg['risk_tier']} ({_sanitize(PORTFOLIO_TIERS[agent_cfg['risk_tier']]['name'])})
-- Target Yield: {PORTFOLIO_TIERS[agent_cfg['risk_tier']]['target_yield_pct']}%
+- Risk Tier: {agent_cfg['risk_tier']} ({_sanitize(PORTFOLIO_TIERS.get(agent_cfg['risk_tier'], {}).get('name', 'Unknown'))})
+- Target Yield: {PORTFOLIO_TIERS.get(agent_cfg['risk_tier'], {}).get('target_yield_pct', 8)}%
 - Max Single Trade: {agent_cfg['max_trade_size_pct']}% of portfolio
 
 CURRENT PORTFOLIO:
@@ -464,6 +475,7 @@ Call tools first to gather intelligence, then respond with ONLY the JSON object.
             messages.append({"role": "user", "content": tool_results})
 
         if not raw_text:
+            logger.warning("[Agent] Claude tool loop exhausted (5 rounds) for %s", agent_name)
             return "HOLD", "Empty response from Claude after tool loop", 30.0, []
 
         # Extract JSON from response (safe split — guard against malformed fences)
@@ -504,6 +516,7 @@ Call tools first to gather intelligence, then respond with ONLY the JSON object.
                 "confidence": confidence, "actions": clean_actions,
                 "_ts": time.time()
             }
+            _evict_decision_cache()
 
         logger.info("[Agent] Claude decision: %s (%.0f%% confidence)", decision, confidence)
         return decision, rationale, confidence, clean_actions
@@ -695,6 +708,9 @@ def execute_moonpay_ows(
 
     try:
         import httpx
+    except ImportError:
+        return {"ok": False, "error": "httpx not installed"}
+    try:
         payload = {
             "action":     action.upper(),
             "asset":      asset.upper(),
@@ -1187,6 +1203,7 @@ Format as plain text bullet points, no markdown."""
 
         with _decision_cache_lock:
             _decision_cache[cache_key] = {"data": result, "_ts": time.time()}
+            _evict_decision_cache()
 
         return result
 
