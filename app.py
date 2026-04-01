@@ -2201,7 +2201,7 @@ with tab_universe:
     st.markdown("#### ⛓️ Chainlink On-Chain Prices")
     st.caption("Chainlink AggregatorV3 · latestAnswer() via Etherscan eth_call · Cached 60s · No Chainlink SDK required")
 
-    _cl_prices = _load_chainlink_prices()
+    _cl_prices_raw = _load_chainlink_prices()
     _cl_pairs  = [
         ("XAU/USD",  "Gold (XAU)",   "🥇", "PAXG / XAUt reference"),
         ("XAG/USD",  "Silver (XAG)", "🥈", "Tokenized silver reference"),
@@ -2210,7 +2210,7 @@ with tab_universe:
     ]
     _cl_cols = st.columns(len(_cl_pairs))
     for _cli, (_pair, _label, _icon, _caption) in enumerate(_cl_pairs):
-        _cd = _cl_prices.get(_pair, {})
+        _cd = _cl_prices_raw.get(_pair, {})
         _cp = _cd.get("price")
         _cs = _cd.get("source", "unavailable")
         _cl_clr = "#34D399" if _cs == "chainlink_etherscan" else "#6B7280"

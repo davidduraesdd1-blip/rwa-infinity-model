@@ -8,9 +8,20 @@ import threading
 import json
 import os
 import logging
+import warnings
 from typing import Optional, List, Dict, Any
 import pandas as pd
 from datetime import datetime, timezone, timedelta
+
+# pandas emits a UserWarning when read_sql_query receives a raw sqlite3
+# connection instead of a SQLAlchemy engine.  The code works correctly; suppress
+# the noise so Streamlit Cloud logs stay clean.
+warnings.filterwarnings(
+    "ignore",
+    message="pandas only supports SQLAlchemy connectable",
+    category=UserWarning,
+    module="pandas",
+)
 
 logger = logging.getLogger(__name__)
 
