@@ -4667,3 +4667,10 @@ CHAINLINK_FEEDS = {
     "XAU/USD":  "0x214eD9Da11D2fbe465a6fc601a91E62EbEc1a0D6",  # Gold
     "XAG/USD":  "0x379589227b15F1a12195D3f2d90bBc9F31f95235",  # Silver
 }
+
+# ─── Branding ─────────────────────────────────────────────────────────────────
+# Set env vars to activate: RWA_BRAND_NAME="My App"  RWA_BRAND_LOGO_PATH="logo.png"
+# When unset (default), the app shows a clean placeholder header.
+# 2-line rebrand when ready — no restructuring required.
+BRAND_NAME: str = _os.environ.get("RWA_BRAND_NAME", "")
+BRAND_LOGO_PATH: str = _os.environ.get("RWA_BRAND_LOGO_PATH", "")

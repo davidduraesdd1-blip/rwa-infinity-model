@@ -86,6 +86,7 @@ try:
         XRPL_RLUSD_ISSUER, SENTRY_DSN, feature_enabled, FEATURES,
         get_redemption_window,
         RWA_TAM_USD, RWA_ONCHAIN_USD, RWA_MILESTONES,
+        BRAND_NAME, BRAND_LOGO_PATH,
     )
 except Exception as _cfg_err:
     st.error(f"Configuration error: {_cfg_err}")
@@ -124,21 +125,26 @@ _init()
 # ─── Custom CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* Google Fonts — Inter (UI) + JetBrains Mono (data) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
 /* Base */
 :root {
-  --primary:   #00D4FF;
-  --bg:        #0A0E1A;
+  --primary:   #00d4aa;
+  --bg:        #0d0e14;
   --card-bg:   #111827;
   --border:    #1F2937;
   --text:      #E2E8F0;
   --muted:     #6B7280;
-  --success:   #34D399;
-  --warning:   #FBBF24;
-  --danger:    #EF4444;
+  --success:   #22c55e;
+  --warning:   #f59e0b;
+  --danger:    #ef4444;
+  --font-ui:   'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
 }
 
-/* Main background */
-.stApp { background: var(--bg); }
+/* Main background + fonts */
+.stApp { background: var(--bg); font-family: var(--font-ui); }
 
 /* Hide default Streamlit header & footer */
 #MainMenu, header, footer { visibility: hidden; }
@@ -163,10 +169,11 @@ st.markdown("""
     margin-bottom: 4px;
 }
 .metric-value {
-    font-size: 26px;
+    font-size: clamp(20px, 1.6vw, 26px);
     font-weight: 700;
     color: var(--text);
     line-height: 1.1;
+    font-family: var(--font-mono);
 }
 .metric-delta {
     font-size: 12px;
@@ -289,6 +296,56 @@ def _get_api_health():
 # ─── Sidebar: API health status (#17) ─────────────────────────────────────────
 # Placed here — after _get_api_health() is defined — to avoid NameError on startup.
 with st.sidebar:
+    # ── Brand header (Phase 1) ────────────────────────────────────────────────
+    from pathlib import Path as _SBPath
+    if BRAND_LOGO_PATH and _SBPath(BRAND_LOGO_PATH).exists():
+        st.image(BRAND_LOGO_PATH, width=120)
+    else:
+        _sb_title = BRAND_NAME if BRAND_NAME else "♾️ RWA Infinity"
+        st.markdown(
+            f"<div style='font-size:1.2rem;font-weight:800;"
+            f"background:linear-gradient(90deg,#00d4aa,#60a5fa);"
+            f"-webkit-background-clip:text;-webkit-text-fill-color:transparent;"
+            f"background-clip:text;letter-spacing:-0.3px;margin-bottom:2px;'>{_sb_title}</div>"
+            "<div style='font-size:0.65rem;letter-spacing:1.2px;text-transform:uppercase;"
+            "color:#6B7280;margin-bottom:8px;'>Real World Asset Intelligence</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
+    # ── User Level selector (Phase 1) — 3-tier experience system ────────────
+    st.markdown(
+        '<span style="font-size:11px;color:#6B7280;font-weight:600;'
+        'text-transform:uppercase;letter-spacing:0.8px">Experience Level</span>',
+        unsafe_allow_html=True,
+    )
+    _RWA_LEVEL_OPTIONS = ["beginner", "intermediate", "advanced"]
+    _RWA_LEVEL_LABELS  = {
+        "beginner":     "🟢 Beginner",
+        "intermediate": "🟡 Intermediate",
+        "advanced":     "🔴 Advanced",
+    }
+    _rwa_cur_level = st.session_state.get("user_level", "beginner")
+    _rwa_level_val = st.radio(
+        "User Level",
+        options=_RWA_LEVEL_OPTIONS,
+        format_func=lambda lv: _RWA_LEVEL_LABELS[lv],
+        index=_RWA_LEVEL_OPTIONS.index(_rwa_cur_level),
+        key="rwa_user_level_radio",
+        label_visibility="collapsed",
+        help=(
+            "Beginner: plain-English view, tooltips always visible. "
+            "Intermediate: key numbers + condensed explanations. "
+            "Advanced: full technical detail, all raw numbers."
+        ),
+    )
+    st.session_state["user_level"] = _rwa_level_val
+    # Backward compat: pro_mode = True when Advanced
+    st.session_state["pro_mode"] = (_rwa_level_val == "advanced")
+
+    st.markdown("---")
+
     # ── Personal API Keys (session-only, never saved to disk) ─────────────────
     with st.expander("🔑 API Keys (Session Only)", expanded=False):
         st.caption("Keys stored in session only — cleared on refresh. Never saved to disk.")
@@ -307,6 +364,14 @@ with st.sidebar:
                 audit("API_KEY_APPLIED", service="coinmetrics")
             st.success("Keys applied for this session")
 
+    # ── Glossary (Phase 1) ────────────────────────────────────────────────────
+    try:
+        from glossary import glossary_popover as _rwa_glossary
+        _rwa_glossary(st.session_state.get("user_level", "beginner"))
+    except ImportError:
+        pass
+
+    st.markdown("---")
     st.markdown("#### API Status")
     _api_health = _get_api_health()
     if _api_health:
@@ -390,6 +455,7 @@ _ss("api_key_set",      bool(os.environ.get("ANTHROPIC_API_KEY")))
 _ss("user_anthropic_key", "")  # per-session user-supplied key — never written to os.environ
 _ss("ai_news_brief",    "")
 _ss("pro_mode",         True)   # #65: True=Pro (all metrics), False=Beginner (simplified)
+_ss("user_level",       "beginner")  # Phase 1: 3-level system — beginner/intermediate/advanced
 _ss("demo_mode",        False)  # #67: Demo/Sandbox — no real API calls, synthetic data
 _ss("wallet_address",   "")     # #110: EVM wallet address for Zerion/ERC-3643 lookups
 
@@ -1088,16 +1154,8 @@ for i, (tier, (icon, label, color)) in enumerate(tier_labels.items()):
 selected_tier = st.session_state["selected_tier"]
 tier_cfg      = PORTFOLIO_TIERS[selected_tier]
 
-# ── Mode toggles (#65 Beginner/Pro, #67 Demo) ────────────────────────────────
-_mode_col1, _mode_col2, _mode_spacer = st.columns([2, 2, 6])
-with _mode_col1:
-    _pro = st.toggle(
-        "Pro Mode",
-        value=st.session_state["pro_mode"],
-        key="pro_mode_toggle",
-        help="Pro: shows all quant metrics (VaR, CVaR, Sharpe, IC…). Beginner: simplified view with plain-English explanations only.",
-    )
-    st.session_state["pro_mode"] = _pro
+# ── Mode row — Demo toggle + user level badge ─────────────────────────────────
+_mode_col2, _mode_spacer = st.columns([2, 8])
 with _mode_col2:
     _demo = st.toggle(
         "Demo / Sandbox",
@@ -1109,14 +1167,15 @@ with _mode_col2:
     if _demo:
         st.markdown('<div style="font-size:10px;color:#FBBF24;margin-top:-6px">⚠️ DEMO — synthetic data only</div>', unsafe_allow_html=True)
 
-_pro_mode  = st.session_state["pro_mode"]
+_pro_mode  = st.session_state["pro_mode"]   # True when user_level == "advanced"
 _demo_mode = st.session_state["demo_mode"]
+_user_level = st.session_state.get("user_level", "beginner")
 
-# #65 Beginner Mode banner
-if not _pro_mode:
+# Beginner UX banner — plain-English orientation message
+if _user_level == "beginner":
     st.info(
-        "📊 **Beginner Mode active** — simplified view. "
-        "Enable **Pro Mode** in the toggle above for full quant metrics (VaR, CVaR, Sharpe, Sortino, IC…)."
+        "📊 **Beginner Mode** — this view uses plain-English explanations throughout. "
+        "Switch to **Intermediate** or **Advanced** in the sidebar for more detail."
     )
 
 
