@@ -248,6 +248,23 @@ st.markdown("""
 /* Streamlit override */
 div[data-testid="stHorizontalBlock"] { gap: 12px; }
 .stMetric { background: var(--card-bg); border-radius: 10px; padding: 12px; border: 1px solid var(--border); }
+
+/* Light mode (item 32) */
+body.light-mode .stApp { background: #f1f5f9 !important; color: #1e293b !important; }
+body.light-mode .metric-card { background: #ffffff !important; border-color: #e2e8f0 !important; }
+body.light-mode .metric-label { color: #475569 !important; }
+body.light-mode .metric-value { color: #0f172a !important; }
+body.light-mode .stTabs [data-baseweb="tab-list"] { background: #ffffff !important; border-color: #e2e8f0 !important; }
+body.light-mode .stTabs [data-baseweb="tab"] { color: #64748b !important; }
+body.light-mode .ticker-wrap { background: #ffffff !important; border-color: #e2e8f0 !important; }
+
+/* Mobile responsive (item 41) */
+@media (max-width: 768px) {
+    div[data-testid="stButton"] > button { min-height: 44px !important; }
+    [data-testid="stRadio"] label { min-height: 44px !important; padding: 10px 0 !important; }
+    [data-testid="stColumn"] { min-width: 100% !important; }
+    .metric-value { font-size: clamp(18px, 5vw, 24px) !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -370,6 +387,39 @@ with st.sidebar:
         _rwa_glossary(st.session_state.get("user_level", "beginner"))
     except ImportError:
         pass
+
+    st.markdown("---")
+
+    # ── Theme toggle (item 32 — dark/light mode) ──────────────────────────────
+    _rwa_is_light = st.session_state.get("_rwa_theme") == "light"
+    if st.button(
+        "☀ Light Mode" if not _rwa_is_light else "🌙 Dark Mode",
+        key="_rwa_theme_toggle",
+        help="Switch between dark and light mode",
+        use_container_width=True,
+    ):
+        st.session_state["_rwa_theme"] = "dark" if _rwa_is_light else "light"
+        st.rerun()
+    # Apply light mode CSS class via JS
+    _rwa_theme_js = "add" if not _rwa_is_light else "remove"
+    st.markdown(
+        f"<script>document.body.classList.{_rwa_theme_js}('light-mode')</script>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+
+    # ── Refresh All Data (item 40) ────────────────────────────────────────────
+    if st.button("🔄 Refresh All Data", help="Clear all caches and reload fresh data", use_container_width=True):
+        try:
+            st.cache_data.clear()
+        except Exception:
+            for _fn in [_load_assets, _load_portfolio, _load_arb, _load_news, _load_macro_regime, _load_market_summary]:
+                try:
+                    _fn.clear()
+                except Exception:
+                    pass
+        st.rerun()
 
     st.markdown("---")
     st.markdown("#### API Status")
@@ -978,6 +1028,23 @@ with col_ctrl:
 
 st.markdown('<hr style="border:none;border-top:1px solid #1F2937;margin:8px 0 16px">', unsafe_allow_html=True)
 
+# ── Welcome Banner (item 33 — beginner only, once per session) ────────────────
+if (st.session_state.get("user_level", "beginner") == "beginner"
+        and not st.session_state.get("_rwa_welcome_dismissed")):
+    _wb1, _wb2 = st.columns([11, 1])
+    with _wb1:
+        st.info(
+            "👋 **Welcome to RWA Infinity!** Real World Assets (RWAs) are traditional financial "
+            "instruments — bonds, real estate, treasury bills — tokenized on blockchain. "
+            "This dashboard helps you find the best yielding RWA opportunities and build a "
+            "diversified portfolio. **Pick a risk tier below, then explore the tabs.** "
+            "Switch to Intermediate or Advanced in the sidebar to unlock more detail."
+        )
+    with _wb2:
+        if st.button("✕", key="_rwa_dismiss_welcome", help="Dismiss welcome message"):
+            st.session_state["_rwa_welcome_dismissed"] = True
+            st.rerun()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MARKET TICKER BAR
@@ -1171,11 +1238,25 @@ _pro_mode  = st.session_state["pro_mode"]   # True when user_level == "advanced"
 _demo_mode = st.session_state["demo_mode"]
 _user_level = st.session_state.get("user_level", "beginner")
 
-# Beginner UX banner — plain-English orientation message
+# ── Level UX panels (item 35) — scaled orientation for each level ────────────
 if _user_level == "beginner":
-    st.info(
-        "📊 **Beginner Mode** — this view uses plain-English explanations throughout. "
-        "Switch to **Intermediate** or **Advanced** in the sidebar for more detail."
+    st.markdown(
+        "<div style='background:rgba(0,212,170,0.06);border:1px solid rgba(0,212,170,0.18);"
+        "border-radius:8px;padding:8px 14px;font-size:0.79rem;color:#99f6e4;margin-bottom:8px'>"
+        "📊 <b>Beginner Mode</b> — plain-English explanations throughout. "
+        "Tooltips (ⓘ) appear on all technical terms. "
+        "Switch to <b>Intermediate</b> or <b>Advanced</b> in the sidebar for more detail."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+elif _user_level == "intermediate":
+    st.markdown(
+        "<div style='background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.18);"
+        "border-radius:8px;padding:6px 14px;font-size:0.75rem;color:#fde68a;margin-bottom:6px'>"
+        "🟡 <b>Intermediate Mode</b> — key numbers shown with condensed explanations. "
+        "Switch to <b>Advanced</b> for full technical detail."
+        "</div>",
+        unsafe_allow_html=True,
     )
 
 
@@ -1187,12 +1268,16 @@ if _user_level == "beginner":
 from data_feeds import compute_screener_signals as _compute_screener_signals
 from data_feeds import fetch_binance_ohlcv as _fetch_binance_ohlcv
 
-_SCR_SYMS  = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+# Item 39: MUST_HAVE coins always included in screener (XRP, XLM, XDC, HBAR, SHX, ZBCN)
+# CC/Canton not on Binance — excluded from Binance screener
+_SCR_MUST_HAVE_SYMS = ["XRPUSDT", "XLMUSDT", "XDCUSDT", "HBARUSDT"]  # SHX/ZBCN low liquidity on Binance
+_SCR_BASE = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+_SCR_SYMS = list(dict.fromkeys(_SCR_BASE + _SCR_MUST_HAVE_SYMS))  # dedupe, preserve order
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_screener_signals():
     # OPT-9: pre-fetch BTC daily bars once and pass to each symbol to avoid
-    # 3 redundant BTCUSDT HTTP calls (one per non-BTC symbol).
+    # redundant BTCUSDT HTTP calls (one per non-BTC symbol).
     _btc_bars = _fetch_binance_ohlcv("BTCUSDT", "1d", 35)
     return {sym: _compute_screener_signals(sym, btc_bars=_btc_bars) for sym in _SCR_SYMS}
 
@@ -1728,8 +1813,16 @@ with tab_portfolio:
         try:
             from portfolio import calculate_portfolio_duration
 
-            st.markdown('<div class="section-header">Interest Rate Risk</div>',
+            st.markdown('<div class="section-header">Interest Rate Risk (Duration &amp; DV01)</div>',
                         unsafe_allow_html=True)
+            # Item 37: beginner plain-English explanation
+            if st.session_state.get("user_level", "beginner") == "beginner":
+                st.info(
+                    "📐 **What is Duration?** Duration tells you how sensitive your portfolio is to "
+                    "interest rate changes. A 5-year duration means: if rates rise by 1%, your portfolio "
+                    "value drops roughly 5%. Lower duration = safer when rates are rising. "
+                    "**DV01** = how many dollars you lose per $1M invested if rates rise by just 0.01%."
+                )
             dur = calculate_portfolio_duration(holdings, portfolio_value)
             if dur:
                 d1, d2, d3, d4 = st.columns(4)
@@ -2164,6 +2257,84 @@ with tab_universe:
             height=min(600, 55 + 35 * len(table_df)),
         )
 
+        # ── Collateral Quality Scoring (item 38) ──────────────────────────────
+        st.markdown('<div class="section-header">Collateral Quality Scoring</div>',
+                    unsafe_allow_html=True)
+        _ul38 = st.session_state.get("user_level", "beginner")
+        if _ul38 == "beginner":
+            st.caption(
+                "💡 Collateral quality = how safe and reliable the assets backing each token are. "
+                "Government bonds = highest quality (backed by US government). "
+                "Private credit = medium (corporate loans). Real estate = location-dependent. "
+                "Score 80–100 = excellent, 60–79 = good, below 60 = review carefully."
+            )
+        # Collateral quality: weighted composite of risk, regulatory, audit, and liquidity scores
+        _CQ_CATEGORY_BASE = {
+            "Government Bonds": 95, "Commodities": 85, "Real Estate": 70,
+            "Private Credit": 60, "Equity": 65, "Infrastructure": 72,
+        }
+        _cq_rows = []
+        for _, _cqrow in filtered_df.iterrows():
+            _cat  = _cqrow.get("category", "")
+            _base = _CQ_CATEGORY_BASE.get(_cat, 65)
+            _rsk  = float(_cqrow.get("risk_score") or 5)          # 1=best, 10=worst
+            _reg  = float(_cqrow.get("regulatory_score") or 5)    # 0–10 higher=better
+            _aud  = float(_cqrow.get("audit_score") or 70)        # 0–100 higher=better
+            _liq  = float(_cqrow.get("liquidity_score") or 5)     # 0–10 higher=better
+            # Composite: base category + risk(-4 per point above 1) + regulatory(+1.5 per point)
+            #            + audit offset(-0.1 per point below 80) + liquidity(+1 per point above 5)
+            _cq_score = (
+                _base
+                - (_rsk - 1) * 3.5          # risk penalty
+                + (_reg - 5) * 1.5          # regulatory premium
+                + (_aud - 80) * 0.1         # audit premium/penalty
+                + (_liq - 5) * 0.8          # liquidity premium
+            )
+            _cq_score = max(10, min(100, round(_cq_score, 1)))
+            _cq_grade = (
+                "AAA" if _cq_score >= 90 else
+                "AA"  if _cq_score >= 80 else
+                "A"   if _cq_score >= 70 else
+                "BBB" if _cq_score >= 60 else
+                "BB"
+            )
+            _cq_color = (
+                "#00d4aa" if _cq_score >= 90 else
+                "#22c55e" if _cq_score >= 80 else
+                "#f59e0b" if _cq_score >= 70 else
+                "#ef4444"
+            )
+            _cq_rows.append({
+                "id": _cqrow.get("id", "?"),
+                "name": (_cqrow.get("name") or "")[:35],
+                "category": _cat,
+                "score": _cq_score,
+                "grade": _cq_grade,
+                "color": _cq_color,
+            })
+        if _cq_rows:
+            _cq_sorted = sorted(_cq_rows, key=lambda r: r["score"], reverse=True)
+            # Show top 8 as colored tiles
+            _cq_cols = st.columns(min(4, len(_cq_sorted)))
+            for _ci, _cqr in enumerate(_cq_sorted[:8]):
+                with _cq_cols[_ci % 4]:
+                    st.markdown(
+                        f"<div style='background:rgba(17,24,39,0.9);border:1px solid {_cqr['color']}33;"
+                        f"border-left:4px solid {_cqr['color']};border-radius:8px;padding:10px 12px;"
+                        f"margin-bottom:6px'>"
+                        f"<div style='font-size:10px;color:#6b7280'>{_cqr['id']}</div>"
+                        f"<div style='font-size:14px;font-weight:700;color:{_cqr['color']}'>"
+                        f"{_cqr['grade']} · {_cqr['score']:.0f}</div>"
+                        f"<div style='font-size:10px;color:#9ca3af;margin-top:2px'>"
+                        f"{_cqr['category']}</div></div>",
+                        unsafe_allow_html=True,
+                    )
+            if _ul38 == "advanced" and len(_cq_sorted) > 8:
+                with st.expander(f"Show all {len(_cq_sorted)} collateral scores"):
+                    _cq_df = pd.DataFrame([{k: v for k, v in r.items() if k != "color"}
+                                           for r in _cq_sorted])
+                    st.dataframe(_cq_df, width="stretch", height=300)
+
         # ── NAV Premium / Discount Tracker (#56) ─────────────────────────────
         st.markdown('<div class="section-header">NAV Premium / Discount Tracker</div>',
                     unsafe_allow_html=True)
@@ -2352,7 +2523,9 @@ with tab_arb:
                 "signal-strong"  if signal == "STRONG_ARB"  else
                 "signal-arb"
             )
-            sig_label = signal.replace("_", " ")
+            # Item 36: shape encoding — ▲ extreme/strong arb, ■ regular arb (color-blind safe)
+            sig_shape = "▲" if signal in ("EXTREME_ARB", "STRONG_ARB") else "■"
+            sig_label = f"{sig_shape} {signal.replace('_', ' ')}"
 
             with st.expander(
                 f"[{(row.get('type') or '').upper()}] {row.get('asset_a_name') or row.get('asset_a_id','?')} → "
@@ -3731,13 +3904,21 @@ with tab_reg:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_screener:
-    _SCR_NAMES = {"BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana", "XRPUSDT": "XRP"}
-    _SCR_ICONS = {"BTCUSDT": "₿", "ETHUSDT": "Ξ", "SOLUSDT": "◎", "XRPUSDT": "✕"}
+    # Item 39: extended name/icon maps to cover all MUST_HAVE coins
+    _SCR_NAMES = {
+        "BTCUSDT":  "Bitcoin",  "ETHUSDT": "Ethereum", "SOLUSDT": "Solana",
+        "XRPUSDT":  "XRP",      "XLMUSDT": "Stellar",  "XDCUSDT": "XDC Network",
+        "HBARUSDT": "Hedera",
+    }
+    _SCR_ICONS = {
+        "BTCUSDT": "₿", "ETHUSDT": "Ξ", "SOLUSDT": "◎", "XRPUSDT": "✕",
+        "XLMUSDT": "★", "XDCUSDT": "◆", "HBARUSDT": "ℏ",
+    }
 
     st.markdown("### 🔍 Crypto Screener")
     st.markdown(
         "<p style='color:#6B7280;font-size:13px;margin-top:-8px'>"
-        "Multi-timeframe signals for BTC · ETH · SOL · XRP — "
+        "Multi-timeframe signals for BTC · ETH · SOL · XRP · XLM · XDC · HBAR — "
         "RSI · EMA stack · Volume anomaly · Funding rate · Open interest · MTF confidence"
         "</p>",
         unsafe_allow_html=True,
@@ -3751,11 +3932,18 @@ with tab_screener:
     with st.spinner("Fetching Bybit data…"):
         sig_data = _load_screener_signals()
 
-    # ── Signal cards ─────────────────────────────────────────────────────────
-    cols = st.columns(4)
+    # ── Signal cards — 4 per row, chunked (item 39: 7 coins across 2 rows) ──────
+    # Pre-collect all symbols into rows of 4 then render row by row
+    _scr_per_row = 4
+    _scr_chunks  = [_SCR_SYMS[i:i + _scr_per_row] for i in range(0, len(_SCR_SYMS), _scr_per_row)]
+    _scr_flat_cols: list = []
+    for _chunk in _scr_chunks:
+        _chunk_cols = st.columns(len(_chunk))
+        _scr_flat_cols.extend(_chunk_cols)
+
     for idx, sym in enumerate(_SCR_SYMS):
         s = sig_data.get(sym, {})
-        with cols[idx]:
+        with _scr_flat_cols[idx]:
             signal    = s.get("signal", "HOLD")
             sig_color = {"BUY": "#34D399", "SELL": "#EF4444", "HOLD": "#FBBF24"}.get(signal, "#9CA3AF")
             sig_bg    = {"BUY": "#064E3B", "SELL": "#7F1D1D", "HOLD": "#78350F"}.get(signal, "#1F2937")
@@ -3807,7 +3995,7 @@ with tab_screener:
             border-radius:10px;padding:16px;margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <span style="font-size:18px;font-weight:700;color:#E2E8F0">
-      {_SCR_ICONS[sym]}&nbsp;{_SCR_NAMES[sym]}
+      {_SCR_ICONS.get(sym, "◎")}&nbsp;{_SCR_NAMES.get(sym, sym.replace("USDT",""))}
     </span>
     <span style="background:{sig_bg};color:{sig_color};font-size:11px;font-weight:700;
                  padding:3px 10px;border-radius:6px">{signal}</span>
@@ -3912,7 +4100,7 @@ with tab_screener:
     for sym in _SCR_SYMS:
         s  = sig_data.get(sym, {})
         bd = s.get("mtf_breakdown", {})
-        row = {"Asset": _SCR_NAMES[sym]}
+        row = {"Asset": _SCR_NAMES.get(sym, sym.replace("USDT", ""))}
         for tf in ("1H", "4H", "1D", "1W"):
             v = bd.get(tf)
             row[tf] = f"{v * 100:.1f}%" if v is not None else "—"
