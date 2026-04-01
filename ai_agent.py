@@ -475,7 +475,7 @@ Call tools first to gather intelligence, then respond with ONLY the JSON object.
             messages.append({"role": "user", "content": tool_results})
 
         if not raw_text:
-            logger.warning("[Agent] Claude tool loop exhausted (5 rounds) for %s", agent_name)
+            logger.warning("[Agent] Claude tool loop exhausted (5 rounds) for %s", state["agent_name"])
             return "HOLD", "Empty response from Claude after tool loop", 30.0, []
 
         # Extract JSON from response (safe split — guard against malformed fences)
@@ -1403,8 +1403,7 @@ Return ONLY valid JSON. No markdown, no explanation outside the JSON."""
             raw = raw.split("```")[1].strip()
             if raw.startswith("json"):
                 raw = raw[4:].lstrip()
-        import json as _json
-        parsed = _json.loads(raw)
+        parsed = json.loads(raw)
         parsed["scenario"] = scenario
         parsed["source"] = "claude"
         return parsed

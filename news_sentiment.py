@@ -146,6 +146,8 @@ def _classify_with_claude(headlines: List[str]) -> dict:
             max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )
+        if not msg.content:
+            raise ValueError("Claude returned empty content list")
         raw = msg.content[0].text.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]

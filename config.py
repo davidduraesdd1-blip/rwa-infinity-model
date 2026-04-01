@@ -194,8 +194,7 @@ PRICE_INTERVAL_SECONDS   = 300  # price-only refresh every 5 min
 NEWS_INTERVAL_MINUTES    = 30   # news sentiment refresh
 
 # ─── Database ─────────────────────────────────────────────────────────────────
-import os as _os_db
-DB_FILE = _os_db.path.join(_os_db.path.dirname(_os_db.path.abspath(__file__)), "rwa_model.db")
+DB_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "rwa_model.db")
 
 # ─── Anthropic ────────────────────────────────────────────────────────────────
 CLAUDE_MODEL    = "claude-sonnet-4-6"
@@ -3222,31 +3221,6 @@ RWA_UNIVERSE = [
         "audit_score": 88,
     },
 
-    {
-        "id": "ACRED",
-        "name": "Apollo Diversified Credit ETF",
-        "category": "Private Credit",
-        "protocol": "Apollo Global Management",
-        "chain": "ethereum",
-        "contract": "",
-        "coingecko_id": "",
-        "defillama_id": "",
-        "token_symbol": "ACRED",
-        "expected_yield_pct": 8.5,
-        "maturity": "Open-ended",
-        "risk_tier": 2,
-        "risk_score": 4,
-        "liquidity_score": 5,
-        "regulatory_score": 9,
-        "redemption_window": "Monthly",
-        "regulatory_jurisdiction": "US",
-        "audit_score": 78,
-        "min_investment_usd": 10_000,
-        "inception_date": "2024-01-01",
-        "description": "Apollo Diversified Credit ETF — tokenized access to Apollo's diversified credit strategy. Open-ended with monthly redemptions.",
-        "tags": ["institutional", "private-credit", "apollo", "credit-etf", "ethereum"],
-    },
-
     # ── PAYFI / STABLECOIN YIELD ──────────────────────────────────────────────
     {
         "id": "CLEARPOOL_CPUSD",
@@ -3344,7 +3318,7 @@ RWA_UNIVERSE = [
         "chain": "Ethereum",
         "protocol": "Pendle Finance",
         "token_symbol": "PT-sUSDe",
-        "coingecko_id": "",
+        "coingecko_id": None,
         "defillama_slug": "pendle",
         "expected_yield_pct": 12.8,
         "risk_score": 4,
@@ -3365,7 +3339,7 @@ RWA_UNIVERSE = [
         "chain": "Ethereum",
         "protocol": "Pendle Finance",
         "token_symbol": "PT-eETH",
-        "coingecko_id": "",
+        "coingecko_id": None,
         "defillama_slug": "pendle",
         "expected_yield_pct": 4.5,
         "risk_score": 4,
@@ -3386,7 +3360,7 @@ RWA_UNIVERSE = [
         "chain": "Ethereum",
         "protocol": "Pendle Finance",
         "token_symbol": "YT-sUSDe",
-        "coingecko_id": "",
+        "coingecko_id": None,
         "defillama_slug": "pendle",
         "expected_yield_pct": 85.0,
         "risk_score": 8,

@@ -1859,7 +1859,6 @@ def fetch_live_rss_news() -> List[dict]:
 
     def _fetch():
         all_items: List[dict] = []
-        from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=5) as _ex:
             _futs = {_ex.submit(_fetch_one, src): src for src in _RSS_FEED_SOURCES}
             for _fut in as_completed(_futs):
@@ -1906,6 +1905,8 @@ def get_ai_news_brief(headlines: List[str]) -> str:
             max_tokens=350,
             messages=[{"role": "user", "content": prompt}],
         )
+        if not resp.content:
+            return ""
         return resp.content[0].text.strip()
     except Exception as e:
         logger.debug("[AI News] Brief generation failed: %s", e)
@@ -2464,7 +2465,6 @@ def fetch_macro_timeseries(days: int = 90) -> Dict[str, Any]:
             return key, None
 
         result: Dict[str, Any] = {}
-        from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=6) as _ex:
             _futs = {_ex.submit(_fetch_one, item): item for item in _SYMBOLS.items()}
             for _fut in as_completed(_futs):
@@ -3091,7 +3091,6 @@ _REGIME_BIASES = {
 
 def _gaussian_pdf(x: float, mu: float, sigma: float) -> float:
     """Unnormalized Gaussian log-likelihood for HMM observation scoring."""
-    import math
     if sigma <= 0:
         return 1e-10
     z = (x - mu) / sigma
@@ -3330,7 +3329,6 @@ def compute_screener_signals(symbol: str, btc_bars: Optional[List[dict]] = None)
 
     try:
         # ── OPT-2: Fetch OHLCV across all timeframes in parallel ──────────────
-        from concurrent.futures import ThreadPoolExecutor, as_completed as _ac
         _tf_specs = [
             ("1h",   60),
             ("4h",   60),
@@ -3343,7 +3341,7 @@ def compute_screener_signals(symbol: str, btc_bars: Optional[List[dict]] = None)
                 _ex.submit(fetch_binance_ohlcv, symbol, tf, limit): tf
                 for tf, limit in _tf_specs
             }
-            for _fut in _ac(_futs):
+            for _fut in as_completed(_futs):
                 _tf = _futs[_fut]
                 try:
                     _tf_map[_tf] = _fut.result()
