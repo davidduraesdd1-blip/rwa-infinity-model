@@ -644,18 +644,33 @@ NEWS_SOURCES = [
 ]
 
 # CryptoPanic: add when key is available (broader crypto news coverage)
+# NOTE: API key is passed as a separate query param (not baked into URL)
+# to prevent it appearing in debug log messages that log the raw URL.
 if CRYPTOPANIC_API_KEY:
     NEWS_SOURCES.append({
         "name": "CryptoPanic",
-        "url": f"{CRYPTOPANIC_BASE}/posts/?auth_token={CRYPTOPANIC_API_KEY}&filter=rising&currencies=ONDO,MANTRA,CFG,MPL,GFI,PAXG,XAUT,SNX&kind=news",
+        "url": f"{CRYPTOPANIC_BASE}/posts/",
+        "params": {
+            "auth_token": CRYPTOPANIC_API_KEY,
+            "filter": "rising",
+            "currencies": "ONDO,MANTRA,CFG,MPL,GFI,PAXG,XAUT,SNX",
+            "kind": "news",
+        },
         "format": "cryptopanic",
     })
 
 # NewsAPI: add when key is available (mainstream financial press)
+# NOTE: API key is passed as a separate query param (not baked into URL).
 if NEWSAPI_API_KEY:
     NEWS_SOURCES.append({
         "name": "NewsAPI",
-        "url": f"{NEWSAPI_BASE}/everything?q=tokenized+assets+RWA&language=en&sortBy=publishedAt&apiKey={NEWSAPI_API_KEY}",
+        "url": f"{NEWSAPI_BASE}/everything",
+        "params": {
+            "q": "tokenized assets RWA",
+            "language": "en",
+            "sortBy": "publishedAt",
+            "apiKey": NEWSAPI_API_KEY,
+        },
         "format": "newsapi",
     })
 
@@ -742,7 +757,7 @@ def fetch_rwa_news() -> List[dict]:
         # Try live sources first
         for source in NEWS_SOURCES:
             try:
-                data = _get(source["url"], timeout=8)
+                data = _get(source["url"], params=source.get("params"), timeout=8)
                 items: list = []
                 if data and isinstance(data, list):
                     items = data[:10]
