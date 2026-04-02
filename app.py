@@ -1136,7 +1136,7 @@ with _mac_col1:
 
 with _mac_col2:
     _conf_pct = int(_regime_confidence * 100) if _regime_confidence else 0
-    _score_lbl = f"Score: {_regime_score:+d}" if _regime_score != 0 else "Score: 0"
+    _score_lbl = f"Score: {int(_regime_score):+d}" if _regime_score != 0 else "Score: 0"
     st.markdown(f"""
     <div style="background:{_rc[0]};border:1px solid {_rc[1]}40;border-radius:8px;
                 padding:10px 14px;text-align:center;">
