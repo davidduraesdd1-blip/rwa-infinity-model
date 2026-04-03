@@ -170,7 +170,7 @@ def _classify_with_claude(headlines: List[str]) -> dict:
             "key_theme":         result.get("key_theme", ""),
             "confidence":        float(result.get("confidence", 0.5)),
             "articles_analyzed": len(headlines),
-            "source":            "claude_haiku",
+            "source":            "claude_ai",
             "error":             None,
         }
     except Exception as e:
@@ -195,7 +195,7 @@ def get_rwa_sentiment(headlines: List[str]) -> dict:
           bearish    : count of bearish-classified headlines
           key_theme  : dominant story phrase (from Claude)
           confidence : float [0, 1]
-          source     : 'claude_haiku' | 'rule_based' | 'no_headlines'
+          source     : 'claude_ai' | 'rule_based' | 'no_headlines'
     """
     cache_key = "rwa_sentiment"
     now = time.time()

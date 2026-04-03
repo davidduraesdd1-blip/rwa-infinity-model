@@ -197,7 +197,8 @@ NEWS_INTERVAL_MINUTES    = 30   # news sentiment refresh
 DB_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "rwa_model.db")
 
 # ─── Anthropic ────────────────────────────────────────────────────────────────
-CLAUDE_MODEL    = "claude-sonnet-4-6"
+CLAUDE_MODEL        = "claude-sonnet-4-6"
+CLAUDE_HAIKU_MODEL  = "claude-haiku-4-5"   # lighter/faster model for quick briefs & sentiment
 CLAUDE_TIMEOUT  = 45.0
 AI_CACHE_TTL    = 1800   # 30 min
 

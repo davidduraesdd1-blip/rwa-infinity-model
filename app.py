@@ -504,7 +504,7 @@ _ss("tab_index",        0)
 _ss("api_key_set",      bool(os.environ.get("ANTHROPIC_API_KEY")))
 _ss("user_anthropic_key", "")  # per-session user-supplied key — never written to os.environ
 _ss("ai_news_brief",    "")
-_ss("pro_mode",         True)   # #65: True=Pro (all metrics), False=Beginner (simplified)
+_ss("pro_mode",         False)  # #65: True=Pro (all metrics), False=Beginner (simplified); default matches user_level default
 _ss("user_level",       "beginner")  # Phase 1: 3-level system — beginner/intermediate/advanced
 _ss("demo_mode",        False)  # #67: Demo/Sandbox — no real API calls, synthetic data
 _ss("wallet_address",   "")     # #110: EVM wallet address for Zerion/ERC-3643 lookups
@@ -3830,7 +3830,7 @@ with tab_news:
             score      = row.get("sentiment_score", 0) or 0
             is_live    = bool(row.get("is_live", False))
             sent_color = {"BULLISH": "#34D399", "BEARISH": "#EF4444", "NEUTRAL": "#6B7280"}.get(sentiment, "#6B7280")
-            sent_icon  = {"BULLISH": "▲", "BEARISH": "▼", "NEUTRAL": "●"}.get(sentiment, "●")
+            sent_icon  = {"BULLISH": "▲", "BEARISH": "▼", "NEUTRAL": "■"}.get(sentiment, "■")
             ts         = str(row.get("timestamp", ""))[:16]
             live_badge = '<span style="font-size:9px;background:#00D4FF22;color:#00D4FF;padding:1px 5px;border-radius:3px;margin-left:6px">LIVE</span>' if is_live else ""
             url        = row.get("url", "") or ""
@@ -4318,6 +4318,9 @@ with tab_screener:
             signal    = s.get("signal", "HOLD")
             sig_color = {"BUY": "#34D399", "SELL": "#EF4444", "HOLD": "#FBBF24"}.get(signal, "#9CA3AF")
             sig_bg    = {"BUY": "#064E3B", "SELL": "#7F1D1D", "HOLD": "#78350F"}.get(signal, "#1F2937")
+            # Shape encoding for color-blind safety: ▲ BUY / ▼ SELL / ■ HOLD (NEUTRAL)
+            sig_shape = {"BUY": "▲", "SELL": "▼", "HOLD": "■"}.get(signal, "■")
+            sig_label = f"{sig_shape} {signal}"
 
             price     = s.get("price") or 0.0
             chg       = s.get("change_24h_pct")
@@ -4369,7 +4372,7 @@ with tab_screener:
       {_SCR_ICONS.get(sym, "◎")}&nbsp;{_SCR_NAMES.get(sym, sym.replace("USDT",""))}
     </span>
     <span style="background:{sig_bg};color:{sig_color};font-size:11px;font-weight:700;
-                 padding:3px 10px;border-radius:6px">{signal}</span>
+                 padding:3px 10px;border-radius:6px">{sig_label}</span>
   </div>
   <div style="font-size:22px;font-weight:700;color:#E2E8F0">${price:,.2f}</div>
   <div style="font-size:13px;color:{chg_color};margin-bottom:12px">{chg_str} (24 h)</div>
@@ -5572,7 +5575,7 @@ with tab_onchain:
         st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-3643 compliance checks.")
 
     # ERC-3643 Eligibility Stub — #105 (Pro Mode)
-    if st.session_state.get("pro_mode", True):
+    if st.session_state.get("pro_mode", False):
         with st.expander("🛡️ ERC-3643 Token Eligibility Check (Pro)", expanded=False):
             st.caption(
                 "ERC-3643 (T-REX) is the institutional-grade token standard for regulated securities. "
@@ -5931,7 +5934,7 @@ st.markdown("""
 <div style="margin-top:40px;padding:16px;border-top:1px solid #1F2937;text-align:center">
     <span style="font-size:11px;color:#374151">
         ♾️ RWA INFINITY MODEL v1.0 &nbsp;·&nbsp;
-        Powered by Claude claude-sonnet-4-6 &nbsp;·&nbsp;
+        Powered by Claude (claude-sonnet-4-6) &nbsp;·&nbsp;
         Data: DeFiLlama · CoinGecko &nbsp;·&nbsp;
         Protocols: Ondo · BlackRock · Pendle · Morpho · Ethena · EigenLayer · Lido · Jito · Lombard · Aave Horizon · Plume · Apollo · Clearpool · Falcon · Agora &nbsp;·&nbsp;
         ⚠️ For informational purposes only — not financial advice &nbsp;·&nbsp;

@@ -167,6 +167,26 @@ GLOSSARY: dict[str, dict[str, str]] = {
         "intermediate": "Key price levels identified by historical pivots, high-volume nodes (VPVR), round numbers, and Fibonacci retracements. Break of resistance = new support.",
         "advanced":     "Support/resistance clusters from: VPVR nodes, Fibonacci 0.618/0.786 retracements, previous swing highs/lows, and on-chain cost basis distributions (UTXO realised price).",
     },
+    "Duration": {
+        "beginner":     "Duration measures how sensitive a bond's price is to interest rate changes. A duration of 5 means the bond loses about 5% in value if interest rates rise by 1%. Shorter duration = safer when rates rise.",
+        "intermediate": "Modified duration: percentage price change per 1% rate move. Macaulay duration: weighted average time to receive cash flows. Tokenized T-bills have duration ≈ 0.25 (3-month maturity).",
+        "advanced":     "Modified duration = −(1/P) × dP/dy. For a flat yield curve, equals Macaulay duration / (1 + y/n). DV01 (dollar value of 01) = duration × portfolio_value × 0.0001. Key rate durations decompose sensitivity by tenor bucket.",
+    },
+    "DV01": {
+        "beginner":     "DV01 tells you how many dollars you gain or lose if interest rates move by 0.01% (1 basis point). For example, DV01 of $500 means a 0.01% rate rise costs $500 in portfolio value.",
+        "intermediate": "Dollar Value of 01 (basis point value). DV01 = Modified Duration × Portfolio Value × 0.0001. Used to size hedges and measure rate risk on fixed-income RWA portfolios.",
+        "advanced":     "DV01 = (ΔP / Δy) × 0.0001 = −Modified Duration × V × 0.0001. Summing DV01 across holdings gives total portfolio rate sensitivity. Hedge with interest rate swaps or Treasury futures at matching DV01.",
+    },
+    "LTV (Loan-to-Value)": {
+        "beginner":     "LTV is the percentage of your collateral value that you can borrow. 80% LTV means if you deposit $100 of collateral, you can borrow up to $80. Lower LTV = safer borrowing.",
+        "intermediate": "LTV = loan amount / collateral value. DeFi protocols set maximum LTV (e.g. 75%) and liquidation LTV (e.g. 82.5%). Breach of liquidation LTV triggers forced sale of collateral.",
+        "advanced":     "LTV thresholds vary by asset quality and oracle reliability. RWA collateral (tokenized treasuries) typically supports higher LTV (up to 95%) vs volatile crypto (50-75%) due to lower price volatility and better price discovery.",
+    },
+    "Tokenization": {
+        "beginner":     "Tokenization means turning a real-world asset (like a bond, property, or gold) into a digital token on a blockchain. It makes these assets easier to trade, divide into small pieces, and use in DeFi.",
+        "intermediate": "Tokenization wraps an off-chain asset in an on-chain smart contract. Key benefits: fractional ownership, 24/7 settlement, composability with DeFi protocols (collateral, LP, yield stacking).",
+        "advanced":     "Tokenization standards: ERC-20 (fungible), ERC-3643 (regulated/permissioned), ERC-4626 (yield-bearing vaults), ERC-7540 (async redemptions). Legal wrapper options: SPV, trust, fund structure, or direct on-chain representation. Risks: legal enforceability, oracle dependency, custodian risk.",
+    },
 }
 
 
@@ -198,7 +218,7 @@ def glossary_popover(user_level: str = "beginner") -> None:
     """
     label_depth = {"beginner": "Plain English", "intermediate": "Key Metrics", "advanced": "Technical Detail"}
     depth_name = label_depth.get(user_level, "Plain English")
-    with st.popover(f"📖 Glossary — 30 terms ({depth_name})"):
+    with st.popover(f"📖 Glossary — {len(GLOSSARY)} terms ({depth_name})"):
         st.markdown("### Crypto & DeFi Glossary")
         st.caption(f"Showing explanations at **{user_level}** level. Change your level in the sidebar to see deeper explanations.")
         for term, depths in GLOSSARY.items():

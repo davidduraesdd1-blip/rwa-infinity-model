@@ -32,7 +32,7 @@ from typing import Any, Optional, TypedDict
 
 import database as _db
 from config import (
-    AI_AGENTS, PORTFOLIO_TIERS, CLAUDE_MODEL, CLAUDE_TIMEOUT, AI_CACHE_TTL,
+    AI_AGENTS, PORTFOLIO_TIERS, CLAUDE_MODEL, CLAUDE_HAIKU_MODEL, CLAUDE_TIMEOUT, AI_CACHE_TTL,
     CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET, CDP_NETWORK_ID,
     X402_T54_FACILITATOR,
 )
@@ -1672,7 +1672,7 @@ def generate_ai_briefing(portfolio_data: dict, market_data: dict, regime: dict) 
     try:
         client = _anthropic.Anthropic(api_key=api_key, timeout=15.0)
         msg = client.messages.create(
-            model="claude-haiku-4-5",
+            model=CLAUDE_HAIKU_MODEL,
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -1727,7 +1727,7 @@ def get_30sec_briefing(tier: int, metrics: dict, holdings: list[dict]) -> str:
     try:
         client = _anthropic.Anthropic(api_key=api_key, timeout=12.0)
         msg = client.messages.create(
-            model="claude-haiku-4-5",
+            model=CLAUDE_HAIKU_MODEL,
             max_tokens=180,
             messages=[{"role": "user", "content": prompt}],
         )
