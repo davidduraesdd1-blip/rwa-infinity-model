@@ -1268,18 +1268,51 @@ elif _user_level == "intermediate":
 from data_feeds import compute_screener_signals as _compute_screener_signals
 from data_feeds import fetch_binance_ohlcv as _fetch_binance_ohlcv
 
-# Item 39: MUST_HAVE coins always included in screener (XRP, XLM, XDC, HBAR, SHX, ZBCN)
-# CC/Canton not on Binance — excluded from Binance screener
-_SCR_MUST_HAVE_SYMS = ["XRPUSDT", "XLMUSDT", "XDCUSDT", "HBARUSDT"]  # SHX/ZBCN low liquidity on Binance
-_SCR_BASE = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-_SCR_SYMS = list(dict.fromkeys(_SCR_BASE + _SCR_MUST_HAVE_SYMS))  # dedupe, preserve order
+# Item 39: Full 37-coin screener universe per CLAUDE.md
+# Must-have coins always included; top-30 fetched dynamically from CoinGecko
+_SCR_MUST_HAVE_SYMS = ["XRPUSDT", "XLMUSDT", "XDCUSDT", "HBARUSDT"]  # SHX/ZBCN: low Binance liquidity; CC: not on Binance
+
+_SCR_TOP30_FALLBACK = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT",
+    "TRXUSDT", "LINKUSDT", "DOTUSDT", "MATICUSDT", "LTCUSDT", "NEARUSDT", "UNIUSDT",
+    "ATOMUSDT", "FILUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "SUIUSDT",
+    "TONUSDT", "SEIUSDT", "TIAUSDT", "STXUSDT", "FETUSDT", "IMXUSDT", "WLDUSDT",
+    "AAVEUSDT", "MKRUSDT",
+]
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_top30_screener_syms() -> list:
+    """Fetch top 30 non-stablecoin coins from CoinGecko, mapped to Binance USDT pairs."""
+    _STABLES = {"USDT","USDC","DAI","BUSD","TUSD","FDUSD","USDD","FRAX","GUSD","USDP","PYUSD"}
+    _MUST    = {"XRP","XLM","XDC","HBAR","SHX","ZBCN"}
+    try:
+        resp = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={"vs_currency":"usd","order":"market_cap_desc","per_page":60,"page":1},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return _SCR_TOP30_FALLBACK
+        top30, seen = [], set()
+        for coin in resp.json():
+            sym = (coin.get("symbol") or "").upper()
+            if sym in _STABLES or sym in _MUST or sym in seen:
+                continue
+            seen.add(sym)
+            top30.append(sym + "USDT")
+            if len(top30) >= 30:
+                break
+        return top30 or _SCR_TOP30_FALLBACK
+    except Exception:
+        return _SCR_TOP30_FALLBACK
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_screener_signals():
-    # OPT-9: pre-fetch BTC daily bars once and pass to each symbol to avoid
-    # redundant BTCUSDT HTTP calls (one per non-BTC symbol).
+    # OPT-9: pre-fetch BTC bars once to avoid redundant HTTP calls per symbol
+    _top30 = _fetch_top30_screener_syms()
+    _syms  = list(dict.fromkeys(_SCR_MUST_HAVE_SYMS + _top30))
     _btc_bars = _fetch_binance_ohlcv("BTCUSDT", "1d", 35)
-    return {sym: _compute_screener_signals(sym, btc_bars=_btc_bars) for sym in _SCR_SYMS}
+    return {sym: _compute_screener_signals(sym, btc_bars=_btc_bars) for sym in _syms}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1299,20 +1332,42 @@ st.session_state["portfolio_value_key"] = portfolio_value
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro, tab_onchain = st.tabs([
+# ── #39 Anomaly Detection Banners (persistent — visible on all tabs) ─────────────
+try:
+    _anomalies = _df.detect_anomalies()
+    _critical  = [a for a in _anomalies if a.get("severity") == "CRITICAL"]
+    _warnings  = [a for a in _anomalies if a.get("severity") == "WARNING"]
+    for _anom in _critical:
+        st.error(
+            f"CRITICAL TVL DROP — {_anom['asset_name']}: "
+            f"{_anom['pct_change']:+.1f}% "
+            f"(${abs(_anom.get('abs_drop_usd', 0)) / 1e6:.1f}M drop) "
+            f"vs 24h baseline"
+        )
+    for _anom in _warnings:
+        st.warning(
+            f"TVL Warning — {_anom['asset_name']}: "
+            f"{_anom['pct_change']:+.1f}% "
+            f"(${abs(_anom.get('abs_drop_usd', 0)) / 1e6:.1f}M drop) "
+            f"vs 24h baseline"
+        )
+except Exception as _anom_err:
+    logger.debug("[UI] Anomaly detection skipped: %s", _anom_err)
+
+
+tab_portfolio, tab_universe, tab_yield, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_research = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
-    "⚡ Arbitrage",
-    "💱 Carry Trade",
+    "🌾 Yield Strategies",
     "📈 Compare Tiers",
     "🤖 AI Agent",
     "📰 News Feed",
     "📋 Trade Log",
     "🏛️ Regulatory",
     "🔍 Screener",
-    "🌍 Macro",
-    "⛓️ RWA On-Chain",
+    "🔬 Research",
 ])
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1321,27 +1376,6 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
 
 with tab_portfolio:
 
-    # ── #39 Anomaly Detection Banners (shown at TOP before all content) ───────
-    try:
-        _anomalies = _df.detect_anomalies()
-        _critical  = [a for a in _anomalies if a.get("severity") == "CRITICAL"]
-        _warnings  = [a for a in _anomalies if a.get("severity") == "WARNING"]
-        for _anom in _critical:
-            st.error(
-                f"CRITICAL TVL DROP — {_anom['asset_name']}: "
-                f"{_anom['pct_change']:+.1f}% "
-                f"(${abs(_anom.get('abs_drop_usd', 0)) / 1e6:.1f}M drop) "
-                f"vs 24h baseline"
-            )
-        for _anom in _warnings:
-            st.warning(
-                f"TVL Warning — {_anom['asset_name']}: "
-                f"{_anom['pct_change']:+.1f}% "
-                f"(${abs(_anom.get('abs_drop_usd', 0)) / 1e6:.1f}M drop) "
-                f"vs 24h baseline"
-            )
-    except Exception as _anom_err:
-        logger.debug("[UI] Anomaly detection skipped: %s", _anom_err)
 
     portfolio = _load_portfolio(selected_tier, portfolio_value)
     if _demo_mode:
@@ -2150,6 +2184,155 @@ with tab_portfolio:
         st.caption("PDF export requires reportlab — `pip install reportlab`")
 
 
+
+    # ─── Wallet Intelligence & Cross-Chain Activity ──────────────────
+    # ─── Wallet Address Input (#110) + ERC-3643 + Zerion ─────────────────────
+    st.markdown("---")
+    st.markdown("#### 👛 Wallet Intelligence")
+    _wallet_input = st.text_input(
+        "EVM Wallet Address",
+        value=st.session_state.get("wallet_address", ""),
+        placeholder="0x…",
+        key="wallet_address_input",
+        help="Enter an EVM-compatible wallet address (0x…) for ERC-3643 compliance checks and Zerion portfolio import.",
+        max_chars=42,
+    )
+    # Sanitize: wallet addresses are hex strings (0x + 40 hex chars) — strip anything else
+    _wallet_addr = _re_input.sub(r"[^0-9a-fA-Fx]", "", _wallet_input.strip())[:42]
+    if _wallet_addr:
+        st.session_state["wallet_address"] = _wallet_addr
+
+    # ERC-3643 Compliance Check (#105)
+    st.markdown("##### 🛡️ ERC-3643 / T-REX On-Chain Compliance")
+    st.caption("Etherscan eth_call · isVerified(address) on BUIDL/OUSG — institutional compliance registry")
+
+    _ERC3643_ADDRS = {
+        "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
+        "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
+    }
+    if _wallet_addr and (feature_enabled("onchainid") or feature_enabled("etherscan")):
+        _compl = _compliance_check(_wallet_addr)
+        _co_cols = st.columns(len(_compl))
+        for _coi, (_sym, _cd) in enumerate(_compl.items()):
+            _verified = _cd.get("is_verified")
+            _co_lbl   = "VERIFIED" if _verified is True else ("NOT VERIFIED" if _verified is False else "—")
+            _co_clr   = "#10b981" if _verified else ("#ef4444" if _verified is False else "#6b7280")
+            with _co_cols[_coi]:
+                st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
+  <div style="font-size:11px;color:#6b7280;margin-bottom:4px">{_sym}</div>
+  <div style="font-size:18px;font-weight:700;color:{_co_clr}">{_co_lbl}</div>
+  <div style="font-size:10px;color:#9ca3af">ERC-3643 isVerified</div>
+</div>
+""", unsafe_allow_html=True)
+    elif not _wallet_addr:
+        st.caption("Enter a wallet address above to check ERC-3643 compliance status.")
+    else:
+        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-3643 compliance checks.")
+
+    # ERC-3643 Eligibility Stub — #105 (Pro Mode)
+    if st.session_state.get("pro_mode", False):
+        with st.expander("🛡️ ERC-3643 Token Eligibility Check (Pro)", expanded=False):
+            st.caption(
+                "ERC-3643 (T-REX) is the institutional-grade token standard for regulated securities. "
+                "Permissioned RWA tokens (BUIDL, OUSG, tokenized equity) use an Identity Registry contract "
+                "to enforce KYC/AML compliance on-chain. Each transfer checks isVerified() against the "
+                "investor's on-chain identity before allowing the transaction."
+            )
+            _el_token = st.text_input(
+                "Token Contract Address",
+                placeholder="0x… (e.g. BUIDL: 0x7712c34205737192402172409a8F7ccef8aA2AEc)",
+                key="erc3643_token_addr",
+                max_chars=42,
+            )
+            _el_token_clean = _re_input.sub(r"[^0-9a-fA-Fx]", "", (_el_token or "").strip())[:42]
+            _el_wallet_clean = _wallet_addr  # reuse wallet from above
+
+            if st.button("Check Eligibility", key="btn_erc3643_check"):
+                if _el_token_clean and _el_wallet_clean:
+                    _el_result = _df.check_erc3643_eligibility(_el_wallet_clean, _el_token_clean)
+                    _el_v = _el_result.get("is_verified")
+                    _el_clr = "#10b981" if _el_v is True else ("#ef4444" if _el_v is False else "#6b7280")
+                    _el_lbl = "VERIFIED" if _el_v is True else ("NOT VERIFIED" if _el_v is False else "UNKNOWN")
+                    st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;margin-top:8px">
+  <div style="font-size:13px;color:#6b7280">ERC-3643 isVerified() result</div>
+  <div style="font-size:24px;font-weight:700;color:{_el_clr};margin:8px 0">{_el_lbl}</div>
+  <div style="font-size:11px;color:#9ca3af">Standard: {_el_result.get("standard", "ERC-3643 (T-REX)")}</div>
+  <div style="font-size:11px;color:#9ca3af">Source: {_el_result.get("source", "stub")}</div>
+  <div style="font-size:11px;color:#4b5563;margin-top:8px">{_el_result.get("note", "")}</div>
+</div>""", unsafe_allow_html=True)
+                elif not _el_wallet_clean:
+                    st.warning("Enter a wallet address in the EVM Wallet Address field above.")
+                else:
+                    st.warning("Enter a token contract address.")
+            else:
+                st.caption("Enter a wallet address above and a token address, then click Check Eligibility.")
+
+    # Zerion Portfolio Import (#111)
+    st.markdown("##### 🟣 Zerion On-Chain Portfolio")
+    st.caption("Zerion API v1 · wallet positions across all EVM chains · Cached 3 min")
+
+    if _wallet_addr and feature_enabled("zerion"):
+        _zp = _zerion_portfolio(_wallet_addr)
+        if _zp.get("source") in ("unavailable", "auth_error", "invalid_address"):
+            st.caption(f"Zerion unavailable — {_zp.get('message', _zp.get('source', ''))}")
+        else:
+            _za, _zb, _zc = st.columns(3)
+            _z_total  = _zp.get("total_usd", 0)
+            _z_chains = _zp.get("chain_distribution", {})
+            _z_npos   = len(_zp.get("positions", []))
+            with _za:
+                st.metric("Total Value", f"${_z_total:,.2f}" if _z_total else "—")
+            with _zb:
+                st.metric("Positions", str(_z_npos))
+            with _zc:
+                st.metric("Chains", str(len(_z_chains)))
+
+            _z_pos = _zp.get("positions", [])
+            if _z_pos:
+                _z_rows = []
+                for _zr in _z_pos[:20]:
+                    _z_rows.append({
+                        "Asset":  _zr.get("symbol", "—"),
+                        "Chain":  _zr.get("chain", "—"),
+                        "Value":  f"${_zr.get('value', 0):,.2f}",
+                        "Amount": f"{_zr.get('qty', 0):.4f}",
+                    })
+                st.dataframe(pd.DataFrame(_z_rows), width="stretch", hide_index=True)
+    elif not _wallet_addr:
+        st.caption("Enter a wallet address above to load Zerion portfolio data.")
+    else:
+        st.caption("Set RWA_ZERION_API_KEY in .env to enable Zerion portfolio import.")
+
+    # ─── Wormhole Cross-Chain VAA Activity (#113) ─────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🌉 Wormhole Cross-Chain Bridge Activity")
+    st.caption("Wormhole Scan public API · Verified Action Approvals (VAAs) · RWA bridge flow tracker")
+
+    _wh_chain_opts = {"Ethereum (2)": 2, "Solana (1)": 1, "BSC (4)": 4}
+    _wh_sel = st.selectbox("Source Chain", list(_wh_chain_opts.keys()),
+                           key="wh_chain_sel", index=0)
+    _wh_chain_id = _wh_chain_opts[_wh_sel]
+    _wh_data = _wh_vaas(_wh_chain_id)
+
+    if _wh_data:
+        _wh_rows = []
+        for _wv in _wh_data:
+            _ts_raw = _wv.get("timestamp", "")
+            _ts_str = _ts_raw[:19].replace("T", " ") if _ts_raw else "—"
+            _wh_rows.append({
+                "Sequence":   _wv.get("sequence", "—"),
+                "Emitter":    (_wv.get("emitter_address") or "")[:16] + "…",
+                "Timestamp":  _ts_str,
+                "Payload":    _wv.get("payload_type", 0),
+                "Guardian":   _wv.get("guardian_set", 0),
+                "Tx Hash":    (_wv.get("tx_hash") or "")[:16] + ("…" if _wv.get("tx_hash") else ""),
+            })
+        st.dataframe(pd.DataFrame(_wh_rows), width="stretch", hide_index=True)
+        st.caption(f"{len(_wh_data)} VAAs · Chain ID {_wh_chain_id} · Wormhole Scan public API")
+    else:
+        st.caption("No recent VAA data found for this chain.")
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2: ASSET UNIVERSE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2640,477 +2823,488 @@ with tab_universe:
 # TAB 3: ARBITRAGE
 # ══════════════════════════════════════════════════════════════════════════════
 
-with tab_arb:
-    arb_df, arb_summary = _load_arb()
 
-    # Summary KPIs
-    a1, a2, a3, a4, a5 = st.columns(5)
-    with a1:
-        _metric_card("Total Opportunities", str(arb_summary.get("total", 0)),
-                     color="#00D4FF",
-                     tooltip="Total active arbitrage signals detected across all 8 scanner types: yield spread, price vs NAV, cross-chain, stablecoin yield, DeFi pool, carry trade, tokenized stocks, and institutional credit spread")
-    with a2:
-        _metric_card("Strong Arb", str(arb_summary.get("strong", 0)),
-                     color="#34D399",
-                     tooltip=f"Opportunities with net spread above {ARB_STRONG_THRESHOLD_PCT}% after estimated transaction costs — high-conviction signals worth investigating")
-    with a3:
-        _metric_card("Extreme Arb", str(arb_summary.get("extreme", 0)),
-                     color="#EF4444",
-                     tooltip="Highest-conviction signals with very large spreads — may indicate significant mispricing, low liquidity, or a time-sensitive opportunity")
-    with a4:
-        _metric_card("Best Spread", _fmt_pct(arb_summary.get("best_spread_pct", 0)),
-                     color=tier_cfg["color"],
-                     tooltip="The largest net spread (after estimated costs) found across all current opportunities")
-    with a5:
-        _metric_card("Avg Spread", _fmt_pct(arb_summary.get("avg_spread_pct", 0)),
-                     tooltip="Average net spread across all active arbitrage opportunities — a measure of overall market efficiency")
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3: YIELD STRATEGIES (Arbitrage + Carry Trade)
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # By type breakdown
-    by_type = arb_summary.get("by_type", {})
-    if by_type:
-        type_cols = st.columns(len(by_type))
-        for i, (t, cnt) in enumerate(by_type.items()):
-            with type_cols[i]:
-                st.markdown(f"""
-                <div class="metric-card" style="text-align:center">
-                    <div class="metric-label">{t.replace('_', ' ').title()}</div>
-                    <div class="metric-value" style="font-size:20px">{cnt}</div>
-                </div>""", unsafe_allow_html=True)
+with tab_yield:
+    _ys_mode = st.radio(
+        "Strategy",
+        ["⚡ Arbitrage", "💱 Carry Trade"],
+        horizontal=True,
+        key="ys_mode_radio",
+        label_visibility="collapsed",
+    )
+    st.caption("⚡ Arbitrage: exploit price differences across protocols. 💱 Carry Trade: profit from yield differentials between chains.")
 
-    st.markdown('<div class="section-header">Arbitrage Opportunities</div>',
-                unsafe_allow_html=True)
+    if _ys_mode == "⚡ Arbitrage":
+        arb_df, arb_summary = _load_arb()
 
-    if st.button("🔄 Rescan Arbitrage", key="btn_arb_rescan",
-                 help="Runs all 8 arbitrage scanners: yield spread, price vs NAV, cross-chain, stablecoin yield, DeFi pool, carry trade, tokenized stocks, and institutional credit spread"):
-        st.cache_data.clear()
-        st.rerun()
+        # Summary KPIs
+        a1, a2, a3, a4, a5 = st.columns(5)
+        with a1:
+            _metric_card("Total Opportunities", str(arb_summary.get("total", 0)),
+                         color="#00D4FF",
+                         tooltip="Total active arbitrage signals detected across all 8 scanner types: yield spread, price vs NAV, cross-chain, stablecoin yield, DeFi pool, carry trade, tokenized stocks, and institutional credit spread")
+        with a2:
+            _metric_card("Strong Arb", str(arb_summary.get("strong", 0)),
+                         color="#34D399",
+                         tooltip=f"Opportunities with net spread above {ARB_STRONG_THRESHOLD_PCT}% after estimated transaction costs — high-conviction signals worth investigating")
+        with a3:
+            _metric_card("Extreme Arb", str(arb_summary.get("extreme", 0)),
+                         color="#EF4444",
+                         tooltip="Highest-conviction signals with very large spreads — may indicate significant mispricing, low liquidity, or a time-sensitive opportunity")
+        with a4:
+            _metric_card("Best Spread", _fmt_pct(arb_summary.get("best_spread_pct", 0)),
+                         color=tier_cfg["color"],
+                         tooltip="The largest net spread (after estimated costs) found across all current opportunities")
+        with a5:
+            _metric_card("Avg Spread", _fmt_pct(arb_summary.get("avg_spread_pct", 0)),
+                         tooltip="Average net spread across all active arbitrage opportunities — a measure of overall market efficiency")
 
-    if not arb_df.empty:
-        # Filter by type
-        arb_types = ["All"] + sorted(arb_df["type"].dropna().unique().tolist())
-        sel_arb_type = st.selectbox("Filter by Type", arb_types, key="arb_type_filter")
-        if sel_arb_type != "All":
-            arb_df = arb_df[arb_df["type"] == sel_arb_type]
+        # By type breakdown
+        by_type = arb_summary.get("by_type", {})
+        if by_type:
+            type_cols = st.columns(len(by_type))
+            for i, (t, cnt) in enumerate(by_type.items()):
+                with type_cols[i]:
+                    st.markdown(f"""
+                    <div class="metric-card" style="text-align:center">
+                        <div class="metric-label">{t.replace('_', ' ').title()}</div>
+                        <div class="metric-value" style="font-size:20px">{cnt}</div>
+                    </div>""", unsafe_allow_html=True)
 
-        # Display opportunities as cards
-        for _, row in arb_df.head(20).iterrows():
-            signal = row.get("signal") or "ARB"
-            net_spread = row.get("net_spread_pct") or 0
-            sig_class = (
-                "signal-extreme" if signal == "EXTREME_ARB" else
-                "signal-strong"  if signal == "STRONG_ARB"  else
-                "signal-arb"
+        st.markdown('<div class="section-header">Arbitrage Opportunities</div>',
+                    unsafe_allow_html=True)
+
+        if st.button("🔄 Rescan Arbitrage", key="btn_arb_rescan",
+                     help="Runs all 8 arbitrage scanners: yield spread, price vs NAV, cross-chain, stablecoin yield, DeFi pool, carry trade, tokenized stocks, and institutional credit spread"):
+            st.cache_data.clear()
+            st.rerun()
+
+        if not arb_df.empty:
+            # Filter by type
+            arb_types = ["All"] + sorted(arb_df["type"].dropna().unique().tolist())
+            sel_arb_type = st.selectbox("Filter by Type", arb_types, key="arb_type_filter")
+            if sel_arb_type != "All":
+                arb_df = arb_df[arb_df["type"] == sel_arb_type]
+
+            # Display opportunities as cards
+            for _, row in arb_df.head(20).iterrows():
+                signal = row.get("signal") or "ARB"
+                net_spread = row.get("net_spread_pct") or 0
+                sig_class = (
+                    "signal-extreme" if signal == "EXTREME_ARB" else
+                    "signal-strong"  if signal == "STRONG_ARB"  else
+                    "signal-arb"
+                )
+                # Item 36: shape encoding — ▲ extreme/strong arb, ■ regular arb (color-blind safe)
+                sig_shape = "▲" if signal in ("EXTREME_ARB", "STRONG_ARB") else "■"
+                sig_label = f"{sig_shape} {signal.replace('_', ' ')}"
+
+                with st.expander(
+                    f"[{(row.get('type') or '').upper()}] {row.get('asset_a_name') or row.get('asset_a_id','?')} → "
+                    f"Net Spread: {net_spread:.2f}%",
+                    expanded=(net_spread >= ARB_STRONG_THRESHOLD_PCT)
+                ):
+                    st.markdown(f'<span class="{sig_class}">{sig_label}</span>', unsafe_allow_html=True)
+                    spread_color = "#34D399" if net_spread > 0 else "#EF4444"
+                    st.markdown(f"""
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0">
+                        <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                            <div style="font-size:18px;color:#9CA3AF">Net Spread</div>
+                            <div style="font-size:26px;font-weight:700;color:{spread_color}">{net_spread:.3f}%</div>
+                        </div>
+                        <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                            <div style="font-size:18px;color:#9CA3AF">Yield A</div>
+                            <div style="font-size:26px;font-weight:700">{row.get('yield_a_pct', 0):.3f}%</div>
+                        </div>
+                        <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                            <div style="font-size:18px;color:#9CA3AF">Yield B</div>
+                            <div style="font-size:26px;font-weight:700">{row.get('yield_b_pct', 0):.3f}%</div>
+                        </div>
+                        <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                            <div style="font-size:18px;color:#9CA3AF">Gross Spread</div>
+                            <div style="font-size:26px;font-weight:700">{row.get('spread_pct', 0):.3f}%</div>
+                        </div>
+                        <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
+                            <div style="font-size:18px;color:#9CA3AF">Est. APY</div>
+                            <div style="font-size:26px;font-weight:700;color:{spread_color}">{row.get('estimated_apy', 0):.2f}%</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if row.get("action"):
+                        st.markdown(
+                            f'<div style="background:#0D1F2D;border-left:3px solid #00D4FF;padding:10px 18px;'
+                            f'font-size:20px;border-radius:0 4px 4px 0;margin:6px 0">'
+                            f'<span style="color:#00D4FF;font-weight:700">Action:</span> {row["action"]}</div>',
+                            unsafe_allow_html=True
+                        )
+                    if row.get("notes"):
+                        st.markdown(f'<div style="font-size:18px;color:#6B7280;margin-top:4px">{row["notes"]}</div>', unsafe_allow_html=True)
+        else:
+            st.info("No arbitrage opportunities found. Click Rescan to update.")
+
+        # Spread chart — UPGRADE 21: use cached chart builder
+        if not arb_df.empty and len(arb_df) > 3:
+            _arb_slice = arb_df.head(15)[["asset_a_id", "net_spread_pct", "type"]].to_dict("records")
+            fig_arb = _build_arb_bar(_arb_slice)
+            st.plotly_chart(fig_arb, width="stretch")
+
+        # ── XRPL DEX Arbitrage Scanner (Item 15) ─────────────────────────────────
+        st.markdown('<div class="section-header">XRPL DEX Arbitrage Scanner</div>',
+                    unsafe_allow_html=True)
+
+        if st.button("⟳ Scan XRPL DEX", key="btn_xrpl_dex_arb"):
+            _load_xrpl_dex_arb.clear()
+
+        with st.spinner("Scanning XRPL DEX for arbitrage…"):
+            dex_arb = _load_xrpl_dex_arb()
+
+        xrpl_opps = dex_arb.get("opportunities", [])
+        if xrpl_opps:
+            xa1, xa2, xa3 = st.columns(3)
+            with xa1:
+                _metric_card("XRPL DEX Opps", str(dex_arb.get("count", 0)), color="#A78BFA")
+            with xa2:
+                best_net = max((o["net_spread_pct"] for o in xrpl_opps), default=0)
+                _metric_card("Best Net Spread", _fmt_pct(best_net), color="#34D399")
+            with xa3:
+                best_apy = max((o.get("estimated_apy", 0) for o in xrpl_opps), default=0)
+                _metric_card("Best Est. APY", _fmt_pct(best_apy), color=tier_cfg["color"])
+
+            for opp in xrpl_opps:
+                net = opp.get("net_spread_pct", 0)
+                with st.expander(
+                    f"[{opp.get('type', 'UNK').upper()}] {opp.get('description', '—')} — Net: {net:.3f}%",
+                    expanded=(net >= 0.1),
+                ):
+                    oc1, oc2, oc3, oc4 = st.columns(4)
+                    with oc1:
+                        st.metric("Gross Spread", _fmt_pct(opp.get("gross_spread_pct", 0)))
+                    with oc2:
+                        st.metric("Net Spread", _fmt_pct(net))
+                    with oc3:
+                        st.metric("Est. APY", _fmt_pct(opp.get("estimated_apy", 0)))
+                    with oc4:
+                        st.metric("Direction", opp.get("direction", "—"))
+                    if opp.get("action"):
+                        st.markdown(
+                            f'<div style="background:#0D1F2D;border-left:3px solid #A78BFA;'
+                            f'padding:10px 18px;border-radius:0 4px 4px 0;margin:6px 0">'
+                            f'<span style="color:#A78BFA;font-weight:700">Action:</span> '
+                            f'{opp["action"]}</div>',
+                            unsafe_allow_html=True,
+                        )
+        else:
+            st.info("No XRPL DEX arbitrage opportunities detected. Try refreshing or check xrpl-py installation.")
+
+        # ── PDF Export ────────────────────────────────────────────────────────────
+        if _pdf._REPORTLAB and not arb_df.empty:
+            pdf_arb_bytes = _pdf.generate_arb_pdf(arb_df.to_dict("records"))
+            st.download_button(
+                label="📄 Download Arbitrage PDF",
+                data=pdf_arb_bytes,
+                file_name=f"rwa_arbitrage_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf",
+                mime="application/pdf",
+                key="btn_arb_pdf",
+                help="Download a formatted PDF report of all current arbitrage opportunities.",
             )
-            # Item 36: shape encoding — ▲ extreme/strong arb, ■ regular arb (color-blind safe)
-            sig_shape = "▲" if signal in ("EXTREME_ARB", "STRONG_ARB") else "■"
-            sig_label = f"{sig_shape} {signal.replace('_', ' ')}"
 
-            with st.expander(
-                f"[{(row.get('type') or '').upper()}] {row.get('asset_a_name') or row.get('asset_a_id','?')} → "
-                f"Net Spread: {net_spread:.2f}%",
-                expanded=(net_spread >= ARB_STRONG_THRESHOLD_PCT)
-            ):
-                st.markdown(f'<span class="{sig_class}">{sig_label}</span>', unsafe_allow_html=True)
-                spread_color = "#34D399" if net_spread > 0 else "#EF4444"
-                st.markdown(f"""
-                <div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0">
-                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
-                        <div style="font-size:18px;color:#9CA3AF">Net Spread</div>
-                        <div style="font-size:26px;font-weight:700;color:{spread_color}">{net_spread:.3f}%</div>
-                    </div>
-                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
-                        <div style="font-size:18px;color:#9CA3AF">Yield A</div>
-                        <div style="font-size:26px;font-weight:700">{row.get('yield_a_pct', 0):.3f}%</div>
-                    </div>
-                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
-                        <div style="font-size:18px;color:#9CA3AF">Yield B</div>
-                        <div style="font-size:26px;font-weight:700">{row.get('yield_b_pct', 0):.3f}%</div>
-                    </div>
-                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
-                        <div style="font-size:18px;color:#9CA3AF">Gross Spread</div>
-                        <div style="font-size:26px;font-weight:700">{row.get('spread_pct', 0):.3f}%</div>
-                    </div>
-                    <div style="background:#1F2937;padding:10px 20px;border-radius:7px;min-width:160px">
-                        <div style="font-size:18px;color:#9CA3AF">Est. APY</div>
-                        <div style="font-size:26px;font-weight:700;color:{spread_color}">{row.get('estimated_apy', 0):.2f}%</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                if row.get("action"):
-                    st.markdown(
-                        f'<div style="background:#0D1F2D;border-left:3px solid #00D4FF;padding:10px 18px;'
-                        f'font-size:20px;border-radius:0 4px 4px 0;margin:6px 0">'
-                        f'<span style="color:#00D4FF;font-weight:700">Action:</span> {row["action"]}</div>',
-                        unsafe_allow_html=True
-                    )
-                if row.get("notes"):
-                    st.markdown(f'<div style="font-size:18px;color:#6B7280;margin-top:4px">{row["notes"]}</div>', unsafe_allow_html=True)
+
     else:
-        st.info("No arbitrage opportunities found. Click Rescan to update.")
-
-    # Spread chart — UPGRADE 21: use cached chart builder
-    if not arb_df.empty and len(arb_df) > 3:
-        _arb_slice = arb_df.head(15)[["asset_a_id", "net_spread_pct", "type"]].to_dict("records")
-        fig_arb = _build_arb_bar(_arb_slice)
-        st.plotly_chart(fig_arb, width="stretch")
-
-    # ── XRPL DEX Arbitrage Scanner (Item 15) ─────────────────────────────────
-    st.markdown('<div class="section-header">XRPL DEX Arbitrage Scanner</div>',
-                unsafe_allow_html=True)
-
-    if st.button("⟳ Scan XRPL DEX", key="btn_xrpl_dex_arb"):
-        _load_xrpl_dex_arb.clear()
-
-    with st.spinner("Scanning XRPL DEX for arbitrage…"):
-        dex_arb = _load_xrpl_dex_arb()
-
-    xrpl_opps = dex_arb.get("opportunities", [])
-    if xrpl_opps:
-        xa1, xa2, xa3 = st.columns(3)
-        with xa1:
-            _metric_card("XRPL DEX Opps", str(dex_arb.get("count", 0)), color="#A78BFA")
-        with xa2:
-            best_net = max((o["net_spread_pct"] for o in xrpl_opps), default=0)
-            _metric_card("Best Net Spread", _fmt_pct(best_net), color="#34D399")
-        with xa3:
-            best_apy = max((o.get("estimated_apy", 0) for o in xrpl_opps), default=0)
-            _metric_card("Best Est. APY", _fmt_pct(best_apy), color=tier_cfg["color"])
-
-        for opp in xrpl_opps:
-            net = opp.get("net_spread_pct", 0)
-            with st.expander(
-                f"[{opp.get('type', 'UNK').upper()}] {opp.get('description', '—')} — Net: {net:.3f}%",
-                expanded=(net >= 0.1),
-            ):
-                oc1, oc2, oc3, oc4 = st.columns(4)
-                with oc1:
-                    st.metric("Gross Spread", _fmt_pct(opp.get("gross_spread_pct", 0)))
-                with oc2:
-                    st.metric("Net Spread", _fmt_pct(net))
-                with oc3:
-                    st.metric("Est. APY", _fmt_pct(opp.get("estimated_apy", 0)))
-                with oc4:
-                    st.metric("Direction", opp.get("direction", "—"))
-                if opp.get("action"):
-                    st.markdown(
-                        f'<div style="background:#0D1F2D;border-left:3px solid #A78BFA;'
-                        f'padding:10px 18px;border-radius:0 4px 4px 0;margin:6px 0">'
-                        f'<span style="color:#A78BFA;font-weight:700">Action:</span> '
-                        f'{opp["action"]}</div>',
-                        unsafe_allow_html=True,
-                    )
-    else:
-        st.info("No XRPL DEX arbitrage opportunities detected. Try refreshing or check xrpl-py installation.")
-
-    # ── PDF Export ────────────────────────────────────────────────────────────
-    if _pdf._REPORTLAB and not arb_df.empty:
-        pdf_arb_bytes = _pdf.generate_arb_pdf(arb_df.to_dict("records"))
-        st.download_button(
-            label="📄 Download Arbitrage PDF",
-            data=pdf_arb_bytes,
-            file_name=f"rwa_arbitrage_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf",
-            mime="application/pdf",
-            key="btn_arb_pdf",
-            help="Download a formatted PDF report of all current arbitrage opportunities.",
+        st.markdown('<div class="section-header">Carry Trade Optimizer</div>', unsafe_allow_html=True)
+        st.markdown(
+            "<p style='color:#9CA3AF;font-size:13px;margin-bottom:16px'>"
+            "Borrow stablecoins cheaply from DeFi lending protocols and invest in higher-yielding RWA assets. "
+            "Net spread = RWA yield − borrow rate − estimated gas/ops cost (0.30%)."
+            "</p>",
+            unsafe_allow_html=True,
         )
 
+        try:
+            from data_feeds import fetch_lending_borrow_rates, get_normalized_universe
+            from config import get_exit_velocity_score
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4: CARRY TRADE OPTIMIZER
-# ══════════════════════════════════════════════════════════════════════════════
+            borrow_rates = fetch_lending_borrow_rates()
+            rwa_universe = get_normalized_universe()
 
-with tab_carry:
-    st.markdown('<div class="section-header">Carry Trade Optimizer</div>', unsafe_allow_html=True)
-    st.markdown(
-        "<p style='color:#9CA3AF;font-size:13px;margin-bottom:16px'>"
-        "Borrow stablecoins cheaply from DeFi lending protocols and invest in higher-yielding RWA assets. "
-        "Net spread = RWA yield − borrow rate − estimated gas/ops cost (0.30%)."
-        "</p>",
-        unsafe_allow_html=True,
-    )
-
-    try:
-        from data_feeds import fetch_lending_borrow_rates, get_normalized_universe
-        from config import get_exit_velocity_score
-
-        borrow_rates = fetch_lending_borrow_rates()
-        rwa_universe = get_normalized_universe()
-
-        # ── Borrow rate summary ───────────────────────────────────────────────
-        st.markdown('<div class="section-header">Available Borrow Sources</div>', unsafe_allow_html=True)
-        if borrow_rates:
-            b_cols = st.columns(min(len(borrow_rates), 4))
-            for i, br in enumerate(borrow_rates[:4]):
-                with b_cols[i]:
-                    _metric_card(
-                        f"{br['protocol']} ({br['chain']})",
-                        f"{br['borrow_apy']:.2f}%",
-                        color="#EF4444",
-                    )
-
-        # ── Build carry trade opportunity table ───────────────────────────────
-        OPS_COST = 0.30   # gas + execution overhead estimate
-        MIN_SPREAD = 0.0  # show all (including negative for awareness)
-
-        best_borrow = min(borrow_rates, key=lambda x: x["borrow_apy"]) if borrow_rates else {"protocol": "Morpho", "borrow_apy": 4.80, "symbol": "USDC", "chain": "Base"}
-        best_borrow_apy = best_borrow["borrow_apy"]
-
-        # Build opportunities: top RWA assets × all borrow sources
-        opportunities = []
-        for asset in rwa_universe:
-            rwa_yield = float(asset.get("net_apy_pct") or asset.get("expected_yield_pct") or 0)
-            if rwa_yield <= 0:
-                continue
-            asset_id  = asset.get("id", "")
-            category  = asset.get("category", "")
-            ev        = get_exit_velocity_score(asset_id, category)
-
-            for br in borrow_rates:
-                gross_spread = rwa_yield - br["borrow_apy"]
-                net_spread   = gross_spread - OPS_COST
-                opportunities.append({
-                    "RWA Asset":     asset_id,
-                    "Category":      category,
-                    "RWA Yield %":   rwa_yield,
-                    "Borrow From":   br["protocol"],
-                    "Borrow Chain":  br["chain"],
-                    "Borrow APY %":  br["borrow_apy"],
-                    "Gross Spread %": round(gross_spread, 2),
-                    "Net Spread %":  round(net_spread, 2),
-                    "Exit Speed":    ev["label"],
-                    "Exit Score":    ev["score"],
-                    "Risk":          "LOW" if category in ("Government Bonds",) else
-                                     "MEDIUM" if category in ("Commodities", "Tokenized Equities") else "HIGH",
-                })
-
-        if opportunities:
-            carry_df = pd.DataFrame(opportunities)
-            carry_df = carry_df.sort_values("Net Spread %", ascending=False).reset_index(drop=True)
-
-            # ── Top opportunities KPI ─────────────────────────────────────────
-            st.markdown('<div class="section-header">Best Carry Trade Opportunities</div>', unsafe_allow_html=True)
-            top5 = carry_df[carry_df["Net Spread %"] > 0].head(5)
-            if not top5.empty:
-                kpi_cols = st.columns(min(len(top5), 5))
-                for i, (_, row) in enumerate(top5.iterrows()):
-                    with kpi_cols[i]:
+            # ── Borrow rate summary ───────────────────────────────────────────────
+            st.markdown('<div class="section-header">Available Borrow Sources</div>', unsafe_allow_html=True)
+            if borrow_rates:
+                b_cols = st.columns(min(len(borrow_rates), 4))
+                for i, br in enumerate(borrow_rates[:4]):
+                    with b_cols[i]:
                         _metric_card(
-                            f"{row['RWA Asset']} vs {row['Borrow From'][:10]}",
-                            f"+{row['Net Spread %']:.2f}%",
-                            color="#34D399",
+                            f"{br['protocol']} ({br['chain']})",
+                            f"{br['borrow_apy']:.2f}%",
+                            color="#EF4444",
                         )
 
-            # ── Carry trade bar chart ─────────────────────────────────────────
-            top15 = carry_df[carry_df["Borrow From"] == best_borrow["protocol"]].head(15)
-            if not top15.empty:
-                fig_carry = go.Figure()
-                colors = ["#34D399" if v > 0 else "#EF4444" for v in top15["Net Spread %"]]
-                fig_carry.add_trace(go.Bar(
-                    x=top15["RWA Asset"],
-                    y=top15["Net Spread %"],
-                    marker_color=colors,
-                    text=[f"{v:+.2f}%" for v in top15["Net Spread %"]],
-                    textposition="outside",
-                    name="Net Spread",
-                ))
-                fig_carry.add_hline(y=0, line_color="#6B7280", line_dash="dash")
-                fig_carry.update_layout(
-                    title=f"Net Carry Spread vs {best_borrow['protocol']} ({best_borrow_apy:.2f}% borrow)",
-                    paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
-                    font_color="#E2E8F0",
-                    xaxis=dict(tickangle=-35, gridcolor="#1F2937"),
-                    yaxis=dict(title="Net Spread %", gridcolor="#1F2937"),
-                    margin=dict(l=50, r=20, t=50, b=100),
-                    height=380,
+            # ── Build carry trade opportunity table ───────────────────────────────
+            OPS_COST = 0.30   # gas + execution overhead estimate
+            MIN_SPREAD = 0.0  # show all (including negative for awareness)
+
+            best_borrow = min(borrow_rates, key=lambda x: x["borrow_apy"]) if borrow_rates else {"protocol": "Morpho", "borrow_apy": 4.80, "symbol": "USDC", "chain": "Base"}
+            best_borrow_apy = best_borrow["borrow_apy"]
+
+            # Build opportunities: top RWA assets × all borrow sources
+            opportunities = []
+            for asset in rwa_universe:
+                rwa_yield = float(asset.get("net_apy_pct") or asset.get("expected_yield_pct") or 0)
+                if rwa_yield <= 0:
+                    continue
+                asset_id  = asset.get("id", "")
+                category  = asset.get("category", "")
+                ev        = get_exit_velocity_score(asset_id, category)
+
+                for br in borrow_rates:
+                    gross_spread = rwa_yield - br["borrow_apy"]
+                    net_spread   = gross_spread - OPS_COST
+                    opportunities.append({
+                        "RWA Asset":     asset_id,
+                        "Category":      category,
+                        "RWA Yield %":   rwa_yield,
+                        "Borrow From":   br["protocol"],
+                        "Borrow Chain":  br["chain"],
+                        "Borrow APY %":  br["borrow_apy"],
+                        "Gross Spread %": round(gross_spread, 2),
+                        "Net Spread %":  round(net_spread, 2),
+                        "Exit Speed":    ev["label"],
+                        "Exit Score":    ev["score"],
+                        "Risk":          "LOW" if category in ("Government Bonds",) else
+                                         "MEDIUM" if category in ("Commodities", "Tokenized Equities") else "HIGH",
+                    })
+
+            if opportunities:
+                carry_df = pd.DataFrame(opportunities)
+                carry_df = carry_df.sort_values("Net Spread %", ascending=False).reset_index(drop=True)
+
+                # ── Top opportunities KPI ─────────────────────────────────────────
+                st.markdown('<div class="section-header">Best Carry Trade Opportunities</div>', unsafe_allow_html=True)
+                top5 = carry_df[carry_df["Net Spread %"] > 0].head(5)
+                if not top5.empty:
+                    kpi_cols = st.columns(min(len(top5), 5))
+                    for i, (_, row) in enumerate(top5.iterrows()):
+                        with kpi_cols[i]:
+                            _metric_card(
+                                f"{row['RWA Asset']} vs {row['Borrow From'][:10]}",
+                                f"+{row['Net Spread %']:.2f}%",
+                                color="#34D399",
+                            )
+
+                # ── Carry trade bar chart ─────────────────────────────────────────
+                top15 = carry_df[carry_df["Borrow From"] == best_borrow["protocol"]].head(15)
+                if not top15.empty:
+                    fig_carry = go.Figure()
+                    colors = ["#34D399" if v > 0 else "#EF4444" for v in top15["Net Spread %"]]
+                    fig_carry.add_trace(go.Bar(
+                        x=top15["RWA Asset"],
+                        y=top15["Net Spread %"],
+                        marker_color=colors,
+                        text=[f"{v:+.2f}%" for v in top15["Net Spread %"]],
+                        textposition="outside",
+                        name="Net Spread",
+                    ))
+                    fig_carry.add_hline(y=0, line_color="#6B7280", line_dash="dash")
+                    fig_carry.update_layout(
+                        title=f"Net Carry Spread vs {best_borrow['protocol']} ({best_borrow_apy:.2f}% borrow)",
+                        paper_bgcolor="#111827", plot_bgcolor="#0A0E1A",
+                        font_color="#E2E8F0",
+                        xaxis=dict(tickangle=-35, gridcolor="#1F2937"),
+                        yaxis=dict(title="Net Spread %", gridcolor="#1F2937"),
+                        margin=dict(l=50, r=20, t=50, b=100),
+                        height=380,
+                    )
+                    st.plotly_chart(fig_carry, width="stretch")
+
+                # ── Full opportunity table ────────────────────────────────────────
+                st.markdown('<div class="section-header">All Carry Trade Pairs</div>', unsafe_allow_html=True)
+                ct1, ct2, ct3 = st.columns(3)
+                with ct1:
+                    min_net = st.number_input("Min Net Spread %", -5.0, 20.0, 0.0, 0.25, key="ct_min_spread",
+                                              help="Filter to pairs where net spread (RWA yield − borrow APY − 0.30% ops cost) exceeds this amount. Set to 0 to see only profitable trades")
+                with ct2:
+                    ct_borrow = st.selectbox(
+                        "Borrow Source",
+                        ["All"] + sorted(carry_df["Borrow From"].unique().tolist()),
+                        key="ct_borrow_filter",
+                        help="Filter by the DeFi lending protocol you would borrow stablecoins from. Different protocols offer different rates depending on market conditions"
+                    )
+                with ct3:
+                    ct_risk = st.selectbox("Risk Level", ["All", "LOW", "MEDIUM", "HIGH"], key="ct_risk",
+                                           help="LOW = Government Bonds only (T-bills, treasuries); MEDIUM = Commodities and Tokenized Equities; HIGH = Private Credit, Real Estate, and other illiquid assets")
+
+                show_carry = carry_df[carry_df["Net Spread %"] >= min_net]
+                if ct_borrow != "All":
+                    show_carry = show_carry[show_carry["Borrow From"] == ct_borrow]
+                if ct_risk != "All":
+                    show_carry = show_carry[show_carry["Risk"] == ct_risk]
+
+                def _spread_color(val):
+                    try:
+                        v = float(val)
+                        return "color: #34D399" if v > 0.5 else ("color: #FBBF24" if v > 0 else "color: #EF4444")
+                    except Exception:
+                        return ""
+
+                st.dataframe(
+                    show_carry[["RWA Asset", "Category", "RWA Yield %", "Borrow From", "Borrow Chain",
+                                 "Borrow APY %", "Gross Spread %", "Net Spread %", "Exit Speed", "Risk"]]
+                    .head(50)
+                    .style
+                    .format({"RWA Yield %": "{:.2f}%", "Borrow APY %": "{:.2f}%",
+                             "Gross Spread %": "{:+.2f}%", "Net Spread %": "{:+.2f}%"})
+                    .map(_spread_color, subset=["Net Spread %"])
+                    .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
+                    width="stretch",
+                    height=min(500, 55 + 35 * len(show_carry.head(50))),
                 )
-                st.plotly_chart(fig_carry, width="stretch")
 
-            # ── Full opportunity table ────────────────────────────────────────
-            st.markdown('<div class="section-header">All Carry Trade Pairs</div>', unsafe_allow_html=True)
-            ct1, ct2, ct3 = st.columns(3)
-            with ct1:
-                min_net = st.number_input("Min Net Spread %", -5.0, 20.0, 0.0, 0.25, key="ct_min_spread",
-                                          help="Filter to pairs where net spread (RWA yield − borrow APY − 0.30% ops cost) exceeds this amount. Set to 0 to see only profitable trades")
-            with ct2:
-                ct_borrow = st.selectbox(
-                    "Borrow Source",
-                    ["All"] + sorted(carry_df["Borrow From"].unique().tolist()),
-                    key="ct_borrow_filter",
-                    help="Filter by the DeFi lending protocol you would borrow stablecoins from. Different protocols offer different rates depending on market conditions"
+                # ── Carry trade calculator ────────────────────────────────────────
+                st.markdown('<div class="section-header">Carry Trade Calculator</div>', unsafe_allow_html=True)
+                calc1, calc2, calc3 = st.columns(3)
+                with calc1:
+                    calc_principal = st.number_input("Principal (USD)", 10_000, 10_000_000, 100_000, 10_000, key="ct_principal",
+                                                     help="The total capital you would deploy — borrow this amount from DeFi and invest the full amount in the RWA asset")
+                with calc2:
+                    calc_rwa_yield = st.number_input("RWA Net APY %", 0.0, 30.0, 5.5, 0.1, key="ct_rwa_yield",
+                                                     help="The net yield on the RWA asset after management fees. Use the Net APY % column from the Asset Universe table for the most accurate figure")
+                with calc3:
+                    calc_borrow   = st.number_input("Borrow APY %", 0.0, 15.0, best_borrow_apy, 0.1, key="ct_borrow",
+                                                    help="The variable borrow rate from your DeFi lending protocol. Check the Available Borrow Sources section above for live rates — these float with market conditions")
+
+                net_annual = (calc_rwa_yield - calc_borrow - OPS_COST) / 100 * calc_principal
+                net_monthly = net_annual / 12
+                net_weekly  = net_annual / 52
+                cx1, cx2, cx3, cx4 = st.columns(4)
+                with cx1: _metric_card("Net Spread", f"{calc_rwa_yield - calc_borrow - OPS_COST:.2f}%",
+                                        color="#34D399" if net_annual > 0 else "#EF4444",
+                                        tooltip="RWA Net APY minus borrow APY minus 0.30% estimated gas and operational costs. This is your actual yield advantage.")
+                with cx2: _metric_card("Annual P&L", _fmt_usd(net_annual),
+                                        color="#34D399" if net_annual > 0 else "#EF4444",
+                                        tooltip="Estimated annual profit on this carry trade at current rates. Does not account for liquidation risk or rate changes.")
+                with cx3: _metric_card("Monthly P&L", _fmt_usd(net_monthly),
+                                        color="#34D399" if net_monthly > 0 else "#EF4444",
+                                        tooltip="Annual P&L divided by 12. Borrow rates are variable — actual monthly income will fluctuate.")
+                with cx4: _metric_card("Weekly P&L",  _fmt_usd(net_weekly),
+                                        color="#34D399" if net_weekly > 0 else "#EF4444",
+                                        tooltip="Annual P&L divided by 52. Useful for estimating weekly cash flow from the carry position.")
+
+                st.markdown(
+                    "<p style='color:#6B7280;font-size:11px;margin-top:8px'>"
+                    "⚠️ Carry trades involve smart contract risk, liquidation risk (if using leverage), "
+                    "and rate risk (borrow APY floats). Always verify current rates before executing. "
+                    "Net spread assumes 0.30% annual ops cost. Not financial advice."
+                    "</p>",
+                    unsafe_allow_html=True,
                 )
-            with ct3:
-                ct_risk = st.selectbox("Risk Level", ["All", "LOW", "MEDIUM", "HIGH"], key="ct_risk",
-                                       help="LOW = Government Bonds only (T-bills, treasuries); MEDIUM = Commodities and Tokenized Equities; HIGH = Private Credit, Real Estate, and other illiquid assets")
 
-            show_carry = carry_df[carry_df["Net Spread %"] >= min_net]
-            if ct_borrow != "All":
-                show_carry = show_carry[show_carry["Borrow From"] == ct_borrow]
-            if ct_risk != "All":
-                show_carry = show_carry[show_carry["Risk"] == ct_risk]
+        except Exception as e:
+            st.error(f"Carry Trade Optimizer error: {e}")
+            logger.warning("[UI] Carry Trade tab failed: %s", e)
 
-            def _spread_color(val):
-                try:
-                    v = float(val)
-                    return "color: #34D399" if v > 0.5 else ("color: #FBBF24" if v > 0 else "color: #EF4444")
-                except Exception:
-                    return ""
+        # ── R2: Treasury-Adjusted Spread ─────────────────────────────────────────
+        try:
+            if not assets_df.empty:
+                from data_feeds import fetch_treasury_yield_curve as _fetch_tsy
+                _tsy_data = _fetch_tsy()
+                _tsy_3m   = _tsy_data.get("yields", {}).get("3m")
+                _tsy_1y   = _tsy_data.get("yields", {}).get("1y")
+                _tsy_2y   = _tsy_data.get("yields", {}).get("2y")
+                _ref_yield = _tsy_3m or _tsy_1y or 4.25  # fallback 3m T-bill
+                st.markdown("---")
+                st.markdown('<div class="section-header">Treasury-Adjusted Spread</div>', unsafe_allow_html=True)
+                st.caption(f"Yield spread above US 3M T-Bill ({_ref_yield:.2f}%) — the risk-free benchmark. Positive spread = risk premium earned above treasuries.")
+                _spread_rows = []
+                for _, _row in assets_df.sort_values("current_yield_pct", ascending=False).head(15).iterrows():
+                    _y = float(_row.get("current_yield_pct") or _row.get("expected_yield_pct") or 0)
+                    _spread = _y - _ref_yield
+                    _spread_bps = _spread * 100  # basis points
+                    _spread_rows.append({
+                        "Asset": str(_row.get("name", _row.get("id", "?")))[:28],
+                        "Yield": f"{_y:.2f}%",
+                        "Spread (bps)": f"{_spread_bps:+.0f}",
+                        "Category": str(_row.get("category", ""))[:20],
+                        "_spread": _spread,
+                    })
+                if _spread_rows:
+                    _sp_fig = go.Figure(go.Bar(
+                        y=[r["Asset"] for r in _spread_rows],
+                        x=[r["_spread"] for r in _spread_rows],
+                        orientation="h",
+                        marker_color=["#22c55e" if r["_spread"] > 0 else "#ef4444" for r in _spread_rows],
+                        text=[f"{r['_spread']:+.2f}% ({float(r['Spread (bps)'].replace('+','')):.0f} bps)" for r in _spread_rows],
+                        textposition="outside",
+                    ))
+                    _sp_fig.add_vline(x=0, line_dash="dash", line_color="#6b7280", line_width=1)
+                    _sp_fig.update_layout(
+                        height=max(250, 36 * len(_spread_rows) + 60),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0", size=11),
+                        margin=dict(l=0, r=130, t=20, b=0),
+                        xaxis=dict(title=f"Spread vs 3M T-Bill ({_ref_yield:.2f}%)", gridcolor="rgba(255,255,255,0.05)"),
+                        yaxis=dict(autorange="reversed"),
+                    )
+                    st.plotly_chart(_sp_fig, width="stretch")
+                    _col_sp1, _col_sp2 = st.columns(2)
+                    with _col_sp1:
+                        st.caption(f"🏛️ US 3M T-Bill (risk-free): {_ref_yield:.2f}%")
+                        if _tsy_1y: st.caption(f"🏛️ US 1Y Treasury: {_tsy_1y:.2f}%")
+                        if _tsy_2y: st.caption(f"🏛️ US 2Y Treasury: {_tsy_2y:.2f}%")
+                    _user_level_r2 = st.session_state.get("user_level", "beginner")
+                    if _user_level_r2 == "beginner":
+                        st.info(f"💡 **What does this mean for me?** US Treasury bills are the safest investment in the world. They currently pay {_ref_yield:.2f}%. The bars above show how much MORE each RWA asset pays above that safe baseline — called the 'spread'. Bigger green bar = more reward for taking extra risk.")
+        except Exception as _r2_err:
+            logger.debug("[R2] T-spread panel skipped: %s", _r2_err)
 
-            st.dataframe(
-                show_carry[["RWA Asset", "Category", "RWA Yield %", "Borrow From", "Borrow Chain",
-                             "Borrow APY %", "Gross Spread %", "Net Spread %", "Exit Speed", "Risk"]]
-                .head(50)
-                .style
-                .format({"RWA Yield %": "{:.2f}%", "Borrow APY %": "{:.2f}%",
-                         "Gross Spread %": "{:+.2f}%", "Net Spread %": "{:+.2f}%"})
-                .map(_spread_color, subset=["Net Spread %"])
-                .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
-                width="stretch",
-                height=min(500, 55 + 35 * len(show_carry.head(50))),
-            )
-
-            # ── Carry trade calculator ────────────────────────────────────────
-            st.markdown('<div class="section-header">Carry Trade Calculator</div>', unsafe_allow_html=True)
-            calc1, calc2, calc3 = st.columns(3)
-            with calc1:
-                calc_principal = st.number_input("Principal (USD)", 10_000, 10_000_000, 100_000, 10_000, key="ct_principal",
-                                                 help="The total capital you would deploy — borrow this amount from DeFi and invest the full amount in the RWA asset")
-            with calc2:
-                calc_rwa_yield = st.number_input("RWA Net APY %", 0.0, 30.0, 5.5, 0.1, key="ct_rwa_yield",
-                                                 help="The net yield on the RWA asset after management fees. Use the Net APY % column from the Asset Universe table for the most accurate figure")
-            with calc3:
-                calc_borrow   = st.number_input("Borrow APY %", 0.0, 15.0, best_borrow_apy, 0.1, key="ct_borrow",
-                                                help="The variable borrow rate from your DeFi lending protocol. Check the Available Borrow Sources section above for live rates — these float with market conditions")
-
-            net_annual = (calc_rwa_yield - calc_borrow - OPS_COST) / 100 * calc_principal
-            net_monthly = net_annual / 12
-            net_weekly  = net_annual / 52
-            cx1, cx2, cx3, cx4 = st.columns(4)
-            with cx1: _metric_card("Net Spread", f"{calc_rwa_yield - calc_borrow - OPS_COST:.2f}%",
-                                    color="#34D399" if net_annual > 0 else "#EF4444",
-                                    tooltip="RWA Net APY minus borrow APY minus 0.30% estimated gas and operational costs. This is your actual yield advantage.")
-            with cx2: _metric_card("Annual P&L", _fmt_usd(net_annual),
-                                    color="#34D399" if net_annual > 0 else "#EF4444",
-                                    tooltip="Estimated annual profit on this carry trade at current rates. Does not account for liquidation risk or rate changes.")
-            with cx3: _metric_card("Monthly P&L", _fmt_usd(net_monthly),
-                                    color="#34D399" if net_monthly > 0 else "#EF4444",
-                                    tooltip="Annual P&L divided by 12. Borrow rates are variable — actual monthly income will fluctuate.")
-            with cx4: _metric_card("Weekly P&L",  _fmt_usd(net_weekly),
-                                    color="#34D399" if net_weekly > 0 else "#EF4444",
-                                    tooltip="Annual P&L divided by 52. Useful for estimating weekly cash flow from the carry position.")
-
-            st.markdown(
-                "<p style='color:#6B7280;font-size:11px;margin-top:8px'>"
-                "⚠️ Carry trades involve smart contract risk, liquidation risk (if using leverage), "
-                "and rate risk (borrow APY floats). Always verify current rates before executing. "
-                "Net spread assumes 0.30% annual ops cost. Not financial advice."
-                "</p>",
-                unsafe_allow_html=True,
-            )
-
-    except Exception as e:
-        st.error(f"Carry Trade Optimizer error: {e}")
-        logger.warning("[UI] Carry Trade tab failed: %s", e)
-
-    # ── R2: Treasury-Adjusted Spread ─────────────────────────────────────────
-    try:
-        if not assets_df.empty:
-            from data_feeds import fetch_treasury_yield_curve as _fetch_tsy
-            _tsy_data = _fetch_tsy()
-            _tsy_3m   = _tsy_data.get("yields", {}).get("3m")
-            _tsy_1y   = _tsy_data.get("yields", {}).get("1y")
-            _tsy_2y   = _tsy_data.get("yields", {}).get("2y")
-            _ref_yield = _tsy_3m or _tsy_1y or 4.25  # fallback 3m T-bill
+        # ── R9: Stacked Yield Calculator ─────────────────────────────────────────
+        try:
             st.markdown("---")
-            st.markdown('<div class="section-header">Treasury-Adjusted Spread</div>', unsafe_allow_html=True)
-            st.caption(f"Yield spread above US 3M T-Bill ({_ref_yield:.2f}%) — the risk-free benchmark. Positive spread = risk premium earned above treasuries.")
-            _spread_rows = []
-            for _, _row in assets_df.sort_values("current_yield_pct", ascending=False).head(15).iterrows():
-                _y = float(_row.get("current_yield_pct") or _row.get("expected_yield_pct") or 0)
-                _spread = _y - _ref_yield
-                _spread_bps = _spread * 100  # basis points
-                _spread_rows.append({
-                    "Asset": str(_row.get("name", _row.get("id", "?")))[:28],
-                    "Yield": f"{_y:.2f}%",
-                    "Spread (bps)": f"{_spread_bps:+.0f}",
-                    "Category": str(_row.get("category", ""))[:20],
-                    "_spread": _spread,
-                })
-            if _spread_rows:
-                _sp_fig = go.Figure(go.Bar(
-                    y=[r["Asset"] for r in _spread_rows],
-                    x=[r["_spread"] for r in _spread_rows],
-                    orientation="h",
-                    marker_color=["#22c55e" if r["_spread"] > 0 else "#ef4444" for r in _spread_rows],
-                    text=[f"{r['_spread']:+.2f}% ({float(r['Spread (bps)'].replace('+','')):.0f} bps)" for r in _spread_rows],
-                    textposition="outside",
-                ))
-                _sp_fig.add_vline(x=0, line_dash="dash", line_color="#6b7280", line_width=1)
-                _sp_fig.update_layout(
-                    height=max(250, 36 * len(_spread_rows) + 60),
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0", size=11),
-                    margin=dict(l=0, r=130, t=20, b=0),
-                    xaxis=dict(title=f"Spread vs 3M T-Bill ({_ref_yield:.2f}%)", gridcolor="rgba(255,255,255,0.05)"),
-                    yaxis=dict(autorange="reversed"),
-                )
-                st.plotly_chart(_sp_fig, width="stretch")
-                _col_sp1, _col_sp2 = st.columns(2)
-                with _col_sp1:
-                    st.caption(f"🏛️ US 3M T-Bill (risk-free): {_ref_yield:.2f}%")
-                    if _tsy_1y: st.caption(f"🏛️ US 1Y Treasury: {_tsy_1y:.2f}%")
-                    if _tsy_2y: st.caption(f"🏛️ US 2Y Treasury: {_tsy_2y:.2f}%")
-                _user_level_r2 = st.session_state.get("user_level", "beginner")
-                if _user_level_r2 == "beginner":
-                    st.info(f"💡 **What does this mean for me?** US Treasury bills are the safest investment in the world. They currently pay {_ref_yield:.2f}%. The bars above show how much MORE each RWA asset pays above that safe baseline — called the 'spread'. Bigger green bar = more reward for taking extra risk.")
-    except Exception as _r2_err:
-        logger.debug("[R2] T-spread panel skipped: %s", _r2_err)
-
-    # ── R9: Stacked Yield Calculator ─────────────────────────────────────────
-    try:
-        st.markdown("---")
-        st.markdown('<div class="section-header">Stacked Yield Calculator</div>', unsafe_allow_html=True)
-        st.caption("Layer multiple yield sources to calculate total composite return on a single capital deployment")
-        _sy_c1, _sy_c2 = st.columns(2)
-        with _sy_c1:
-            _sy_principal = st.number_input("Principal (USD)", 1_000, 10_000_000, 100_000, 10_000, key="sy_principal",
-                                            help="The capital amount you are deploying")
-            _sy_base  = st.slider("Base RWA Yield (%)", 0.0, 20.0, 4.5, 0.1, key="sy_base",
-                                  help="The base yield from the RWA asset itself (e.g. OUSG = 4.37%)")
-            _sy_defi  = st.slider("DeFi Boost — collateral / LP (%)", 0.0, 15.0, 2.0, 0.1, key="sy_defi",
-                                  help="Extra yield from using the RWA token as collateral in Aave/Morpho, or providing liquidity")
-            _sy_stake = st.slider("Staking / Restaking Premium (%)", 0.0, 10.0, 1.5, 0.1, key="sy_stake",
-                                  help="Additional yield from staking the token or restaking via EigenLayer/Lombard")
-            _sy_points = st.slider("Points / Airdrop Estimate (%)", 0.0, 10.0, 0.5, 0.1, key="sy_points",
-                                   help="Estimated annualized value of protocol points or anticipated airdrops (speculative)")
-        with _sy_c2:
-            _sy_total = _sy_base + _sy_defi + _sy_stake + _sy_points
-            _sy_annual = _sy_principal * _sy_total / 100
-            _sy_monthly = _sy_annual / 12
-            _sy_daily   = _sy_annual / 365
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #00d4aa33;border-top:3px solid #00d4aa;
-            border-radius:10px;padding:20px;margin-top:8px">
-  <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px">Total Stacked Yield</div>
-  <div style="font-size:42px;font-weight:700;color:#00d4aa;margin:8px 0">{_sy_total:.2f}%</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-    <div><div style="font-size:11px;color:#6b7280">Annual</div>
-         <div style="font-size:20px;font-weight:700;color:#22c55e">${_sy_annual:,.0f}</div></div>
-    <div><div style="font-size:11px;color:#6b7280">Monthly</div>
-         <div style="font-size:20px;font-weight:700;color:#22c55e">${_sy_monthly:,.0f}</div></div>
-    <div><div style="font-size:11px;color:#6b7280">Daily</div>
-         <div style="font-size:16px;font-weight:600;color:#9ca3af">${_sy_daily:,.2f}</div></div>
-    <div><div style="font-size:11px;color:#6b7280">Principal</div>
-         <div style="font-size:16px;font-weight:600;color:#9ca3af">${_sy_principal:,.0f}</div></div>
-  </div>
-  <div style="margin-top:16px;border-top:1px solid #1f2937;padding-top:12px;font-size:11px;color:#4b5563">
-    Base {_sy_base:.1f}% + DeFi {_sy_defi:.1f}% + Staking {_sy_stake:.1f}% + Points {_sy_points:.1f}%
-  </div>
-</div>""", unsafe_allow_html=True)
-        _user_level_r9 = st.session_state.get("user_level", "beginner")
-        if _user_level_r9 == "beginner":
-            st.info("💡 **What does this mean for me?** In DeFi, you can often earn multiple types of yield on the same money at the same time. For example: earn 4% on a T-bill token, then use that token as collateral to earn another 2% in lending, plus staking rewards on top. This calculator lets you add up all those layers.")
-    except Exception as _r9_err:
-        logger.debug("[R9] Stacked yield calculator skipped: %s", _r9_err)
+            st.markdown('<div class="section-header">Stacked Yield Calculator</div>', unsafe_allow_html=True)
+            st.caption("Layer multiple yield sources to calculate total composite return on a single capital deployment")
+            _sy_c1, _sy_c2 = st.columns(2)
+            with _sy_c1:
+                _sy_principal = st.number_input("Principal (USD)", 1_000, 10_000_000, 100_000, 10_000, key="sy_principal",
+                                                help="The capital amount you are deploying")
+                _sy_base  = st.slider("Base RWA Yield (%)", 0.0, 20.0, 4.5, 0.1, key="sy_base",
+                                      help="The base yield from the RWA asset itself (e.g. OUSG = 4.37%)")
+                _sy_defi  = st.slider("DeFi Boost — collateral / LP (%)", 0.0, 15.0, 2.0, 0.1, key="sy_defi",
+                                      help="Extra yield from using the RWA token as collateral in Aave/Morpho, or providing liquidity")
+                _sy_stake = st.slider("Staking / Restaking Premium (%)", 0.0, 10.0, 1.5, 0.1, key="sy_stake",
+                                      help="Additional yield from staking the token or restaking via EigenLayer/Lombard")
+                _sy_points = st.slider("Points / Airdrop Estimate (%)", 0.0, 10.0, 0.5, 0.1, key="sy_points",
+                                       help="Estimated annualized value of protocol points or anticipated airdrops (speculative)")
+            with _sy_c2:
+                _sy_total = _sy_base + _sy_defi + _sy_stake + _sy_points
+                _sy_annual = _sy_principal * _sy_total / 100
+                _sy_monthly = _sy_annual / 12
+                _sy_daily   = _sy_annual / 365
+                st.markdown(f"""
+        <div style="background:#111827;border:1px solid #00d4aa33;border-top:3px solid #00d4aa;
+                border-radius:10px;padding:20px;margin-top:8px">
+          <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px">Total Stacked Yield</div>
+          <div style="font-size:42px;font-weight:700;color:#00d4aa;margin:8px 0">{_sy_total:.2f}%</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div><div style="font-size:11px;color:#6b7280">Annual</div>
+             <div style="font-size:20px;font-weight:700;color:#22c55e">${_sy_annual:,.0f}</div></div>
+        <div><div style="font-size:11px;color:#6b7280">Monthly</div>
+             <div style="font-size:20px;font-weight:700;color:#22c55e">${_sy_monthly:,.0f}</div></div>
+        <div><div style="font-size:11px;color:#6b7280">Daily</div>
+             <div style="font-size:16px;font-weight:600;color:#9ca3af">${_sy_daily:,.2f}</div></div>
+        <div><div style="font-size:11px;color:#6b7280">Principal</div>
+             <div style="font-size:16px;font-weight:600;color:#9ca3af">${_sy_principal:,.0f}</div></div>
+          </div>
+          <div style="margin-top:16px;border-top:1px solid #1f2937;padding-top:12px;font-size:11px;color:#4b5563">
+        Base {_sy_base:.1f}% + DeFi {_sy_defi:.1f}% + Staking {_sy_stake:.1f}% + Points {_sy_points:.1f}%
+          </div>
+        </div>""", unsafe_allow_html=True)
+            _user_level_r9 = st.session_state.get("user_level", "beginner")
+            if _user_level_r9 == "beginner":
+                st.info("💡 **What does this mean for me?** In DeFi, you can often earn multiple types of yield on the same money at the same time. For example: earn 4% on a T-bill token, then use that token as collateral to earn another 2% in lending, plus staking rewards on top. This calculator lets you add up all those layers.")
+        except Exception as _r9_err:
+            logger.debug("[R9] Stacked yield calculator skipped: %s", _r9_err)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4501,1332 +4695,1184 @@ with tab_screener:
 
 
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 11: MACRO INTELLIGENCE
+# TAB 10: RESEARCH (Macro Intelligence + RWA On-Chain Activity)
 # ══════════════════════════════════════════════════════════════════════════════
 
-with tab_macro:
-    st.markdown('<div class="section-header">Macro Intelligence Dashboard</div>', unsafe_allow_html=True)
-    st.caption("FRED + yfinance macro data · Rolling correlations with BTC · M2 84-day lead indicator")
+with tab_research:
+    with st.expander("🌍 Macro Intelligence", expanded=True):
+        st.markdown('<div class="section-header">Macro Intelligence Dashboard</div>', unsafe_allow_html=True)
+        st.caption("FRED + yfinance macro data · Rolling correlations with BTC · M2 84-day lead indicator")
 
-    # ── Load data ──────────────────────────────────────────────────────────────
-    fred_data, yf_data = _load_macro_snapshot()
+        # ── Load data ──────────────────────────────────────────────────────────────
+        fred_data, yf_data = _load_macro_snapshot()
 
-    # ── Macro Snapshot Metrics ─────────────────────────────────────────────────
-    st.markdown("#### Current Macro Snapshot")
-    mc1, mc2, mc3, mc4, mc5, mc6, mc7, mc8 = st.columns(8)
-    mc1.metric("10Y Yield", f"{fred_data.get('ten_yr_yield', 4.35):.2f}%")
-    mc2.metric("DXY", f"{fred_data.get('dxy', 104.0):.1f}")
-    mc3.metric("VIX", f"{yf_data.get('vix', 18.0):.1f}")
-    mc4.metric("Gold", f"${yf_data.get('gold_spot', 2900.0):,.0f}")
-    mc5.metric("WTI Oil", f"${fred_data.get('wti_crude', 67.5):.1f}")
-    mc6.metric("SPX", f"{yf_data.get('spx', 5800.0):,.0f}")
-    mc7.metric("M2 ($B)", f"${fred_data.get('m2_supply_bn', 21500.0):,.0f}B")
-    mc8.metric("ISM Mfg", f"{fred_data.get('ism_manufacturing', 52.0):.1f}")
+        # ── Macro Snapshot Metrics ─────────────────────────────────────────────────
+        st.markdown("#### Current Macro Snapshot")
+        mc1, mc2, mc3, mc4, mc5, mc6, mc7, mc8 = st.columns(8)
+        mc1.metric("10Y Yield", f"{fred_data.get('ten_yr_yield', 4.35):.2f}%")
+        mc2.metric("DXY", f"{fred_data.get('dxy', 104.0):.1f}")
+        mc3.metric("VIX", f"{yf_data.get('vix', 18.0):.1f}")
+        mc4.metric("Gold", f"${yf_data.get('gold_spot', 2900.0):,.0f}")
+        mc5.metric("WTI Oil", f"${fred_data.get('wti_crude', 67.5):.1f}")
+        mc6.metric("SPX", f"{yf_data.get('spx', 5800.0):,.0f}")
+        mc7.metric("M2 ($B)", f"${fred_data.get('m2_supply_bn', 21500.0):,.0f}B")
+        mc8.metric("ISM Mfg", f"{fred_data.get('ism_manufacturing', 52.0):.1f}")
 
-    src_label = fred_data.get("source", "fallback")
-    yf_src    = yf_data.get("source", "fallback")
-    st.caption(f"FRED source: **{src_label}** · yfinance source: **{yf_src}** · Cached 30 min")
+        src_label = fred_data.get("source", "fallback")
+        yf_src    = yf_data.get("source", "fallback")
+        st.caption(f"FRED source: **{src_label}** · yfinance source: **{yf_src}** · Cached 30 min")
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ── FRED Extended Series (#29) ─────────────────────────────────────────────
-    st.markdown("#### Credit Spreads · Inflation Breakevens · SOFR · Jobless Claims")
-    st.caption("FRED extended series — key risk signals for RWA credit quality and macro stress")
+        # ── FRED Extended Series (#29) ─────────────────────────────────────────────
+        st.markdown("#### Credit Spreads · Inflation Breakevens · SOFR · Jobless Claims")
+        st.caption("FRED extended series — key risk signals for RWA credit quality and macro stress")
 
-    _fred_ext = _load_fred_extended()
+        _fred_ext = _load_fred_extended()
 
-    _fe1, _fe2, _fe3, _fe4, _fe5, _fe6, _fe7, _fe8 = st.columns(8)
-    _t10_be  = _fred_ext.get("t10_breakeven", 2.3)
-    _t5_be   = _fred_ext.get("t5_breakeven",  2.5)
-    _sofr    = _fred_ext.get("sofr",           5.3)
-    _rrp     = _fred_ext.get("rrp_bn",         300.0)
-    _jclaims = _fred_ext.get("jobless_claims", 220.0)
-    _hy_sp   = _fred_ext.get("hy_spread_bp",   340.0)
-    _ig_sp   = _fred_ext.get("ig_spread_bp",   100.0)
-    _fed_ass = _fred_ext.get("fed_assets_mn",  6_800_000.0)
+        _fe1, _fe2, _fe3, _fe4, _fe5, _fe6, _fe7, _fe8 = st.columns(8)
+        _t10_be  = _fred_ext.get("t10_breakeven", 2.3)
+        _t5_be   = _fred_ext.get("t5_breakeven",  2.5)
+        _sofr    = _fred_ext.get("sofr",           5.3)
+        _rrp     = _fred_ext.get("rrp_bn",         300.0)
+        _jclaims = _fred_ext.get("jobless_claims", 220.0)
+        _hy_sp   = _fred_ext.get("hy_spread_bp",   340.0)
+        _ig_sp   = _fred_ext.get("ig_spread_bp",   100.0)
+        _fed_ass = _fred_ext.get("fed_assets_mn",  6_800_000.0)
 
-    _fe1.metric("10Y Breakeven", f"{_t10_be:.2f}%",
-                help="10-year inflation breakeven (T10YIE). Market's 10-year inflation expectation.")
-    _fe2.metric("5Y Breakeven",  f"{_t5_be:.2f}%",
-                help="5-year inflation breakeven (T5YIE). Near-term inflation expectation.")
-    _fe3.metric("SOFR",          f"{_sofr:.2f}%",
-                help="Secured Overnight Financing Rate — the benchmark short-term US dollar rate.")
-    _fe4.metric("ON RRP ($B)",   f"${_rrp:.0f}B",
-                help="Fed Overnight Reverse Repo facility — measures excess liquidity parked at the Fed.")
-    _fe5.metric("Jobless Claims", f"{_jclaims:.0f}K",
-                help="Initial jobless claims (ICSA). Rising = labor market weakening.")
-    _fe6.metric("HY Spread (bp)", f"{_hy_sp:.0f}",
-                help="US High Yield OAS spread (BAMLH0A0HYM2). Rising = credit stress, risk-off.")
-    _fe7.metric("IG Spread (bp)", f"{_ig_sp:.0f}",
-                help="US Investment Grade OAS spread (BAMLC0A0CM). Rising = credit tightening.")
-    _fed_ass_bn = _fed_ass / 1000.0   # convert millions → billions
-    _fe8.metric("Fed Assets ($B)", f"${_fed_ass_bn:,.0f}B",
-                help="Fed total balance sheet assets (WTREGEN). Rising = QE / liquidity injection.")
+        _fe1.metric("10Y Breakeven", f"{_t10_be:.2f}%",
+                    help="10-year inflation breakeven (T10YIE). Market's 10-year inflation expectation.")
+        _fe2.metric("5Y Breakeven",  f"{_t5_be:.2f}%",
+                    help="5-year inflation breakeven (T5YIE). Near-term inflation expectation.")
+        _fe3.metric("SOFR",          f"{_sofr:.2f}%",
+                    help="Secured Overnight Financing Rate — the benchmark short-term US dollar rate.")
+        _fe4.metric("ON RRP ($B)",   f"${_rrp:.0f}B",
+                    help="Fed Overnight Reverse Repo facility — measures excess liquidity parked at the Fed.")
+        _fe5.metric("Jobless Claims", f"{_jclaims:.0f}K",
+                    help="Initial jobless claims (ICSA). Rising = labor market weakening.")
+        _fe6.metric("HY Spread (bp)", f"{_hy_sp:.0f}",
+                    help="US High Yield OAS spread (BAMLH0A0HYM2). Rising = credit stress, risk-off.")
+        _fe7.metric("IG Spread (bp)", f"{_ig_sp:.0f}",
+                    help="US Investment Grade OAS spread (BAMLC0A0CM). Rising = credit tightening.")
+        _fed_ass_bn = _fed_ass / 1000.0   # convert millions → billions
+        _fe8.metric("Fed Assets ($B)", f"${_fed_ass_bn:,.0f}B",
+                    help="Fed total balance sheet assets (WTREGEN). Rising = QE / liquidity injection.")
 
-    _credit_regime = _fred_ext.get("credit_regime", "NEUTRAL")
-    _cr_color = {"RISK_ON": "#34D399", "CAUTION": "#FBBF24", "RISK_OFF": "#EF4444", "NEUTRAL": "#9CA3AF"}.get(_credit_regime, "#9CA3AF")
-    st.markdown(
-        f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_cr_color}40;"
-        f"border-radius:6px;padding:8px 14px;font-size:12px;color:{_cr_color};margin-top:4px'>"
-        f"<b>Credit Regime:</b> {_credit_regime} "
-        f"&nbsp;·&nbsp; Source: <b>{_fred_ext.get('source','fallback')}</b>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("---")
-
-    # ── Fear & Greed — 30-Day Sparkline (#27) ─────────────────────────────────
-    st.markdown("#### Fear & Greed Index — 30-Day History")
-    st.caption("Crypto Fear & Greed Index (alternative.me) — daily value over the past 30 days. "
-               "0 = Extreme Fear (buy signal), 100 = Extreme Greed (sell signal).")
-
-    _fg_full = _load_fg_history()
-    _fg_history = _fg_full.get("history", [])
-    _fg_current = _fg_full.get("current", {})
-
-    if _fg_history:
-        # Reverse so oldest → newest (API returns newest first)
-        _fg_rev = list(reversed(_fg_history))
-        _fg_vals  = [h.get("value", 50) for h in _fg_rev]
-        _fg_dates = [h.get("date", "") for h in _fg_rev]
-
-        import plotly.graph_objects as go
-
-        # Colour each bar by F&G zone
-        def _fg_bar_color(v):
-            if v <= 20:  return "#8B5CF6"   # Extreme Fear — purple
-            if v <= 40:  return "#F97316"   # Fear — orange
-            if v <= 60:  return "#9CA3AF"   # Neutral — grey
-            if v <= 80:  return "#FBBF24"   # Greed — yellow
-            return "#34D399"                 # Extreme Greed — green
-
-        _bar_colors = [_fg_bar_color(v) for v in _fg_vals]
-
-        fig_fg = go.Figure(go.Bar(
-            x=_fg_dates,
-            y=_fg_vals,
-            marker_color=_bar_colors,
-            hovertemplate="<b>%{x}</b><br>F&G: %{y}<extra></extra>",
-        ))
-        fig_fg.add_hline(y=25, line_dash="dot", line_color="rgba(239,68,68,0.5)",
-                         annotation_text="Extreme Fear ≤25", annotation_font_size=10)
-        fig_fg.add_hline(y=75, line_dash="dot", line_color="rgba(52,211,153,0.5)",
-                         annotation_text="Extreme Greed ≥75", annotation_font_size=10)
-        fig_fg.update_layout(
-            height=220,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#e2e8f0"),
-            margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(range=[0, 100], gridcolor="rgba(255,255,255,0.07)", ticksuffix=""),
-            xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickangle=-45, tickfont=dict(size=9)),
-            showlegend=False,
+        _credit_regime = _fred_ext.get("credit_regime", "NEUTRAL")
+        _cr_color = {"RISK_ON": "#34D399", "CAUTION": "#FBBF24", "RISK_OFF": "#EF4444", "NEUTRAL": "#9CA3AF"}.get(_credit_regime, "#9CA3AF")
+        st.markdown(
+            f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_cr_color}40;"
+            f"border-radius:6px;padding:8px 14px;font-size:12px;color:{_cr_color};margin-top:4px'>"
+            f"<b>Credit Regime:</b> {_credit_regime} "
+            f"&nbsp;·&nbsp; Source: <b>{_fred_ext.get('source','fallback')}</b>"
+            f"</div>",
+            unsafe_allow_html=True,
         )
-        st.plotly_chart(fig_fg, width="stretch")
-        _fg_now_val = _fg_current.get("value", _fg_val)
-        _fg_now_lbl = _fg_current.get("label", _fg_lbl)
-        st.caption(
-            f"Current: **{_fg_now_val}/100** ({_fg_now_lbl}) · "
-            f"Signal: **{_fg_full.get('signal','NEUTRAL')}** · "
-            f"Source: {_fg_full.get('source','fallback')}"
-        )
-    else:
-        # Fallback: show single value card when no history
-        st.metric("Fear & Greed", f"{_fg_val}/100", delta=_fg_lbl)
-        st.caption("30-day history unavailable — requires alternative.me API connection.")
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ── Rolling Correlation Section ────────────────────────────────────────────
-    st.markdown("#### BTC Rolling Correlations vs Macro Factors")
-    st.caption("Pearson correlation of daily returns over selected window. +1 = move together, -1 = inverse.")
+        # ── Fear & Greed — 30-Day Sparkline (#27) ─────────────────────────────────
+        st.markdown("#### Fear & Greed Index — 30-Day History")
+        st.caption("Crypto Fear & Greed Index (alternative.me) — daily value over the past 30 days. "
+                   "0 = Extreme Fear (buy signal), 100 = Extreme Greed (sell signal).")
 
-    corr_days = st.select_slider(
-        "Lookback window",
-        options=[14, 30, 60, 90],
-        value=30,
-        key="macro_corr_days",
-    )
+        _fg_full = _load_fg_history()
+        _fg_history = _fg_full.get("history", [])
+        _fg_current = _fg_full.get("current", {})
 
-    ts_data = _load_macro_ts(corr_days + 20)  # fetch extra days for rolling window
+        if _fg_history:
+            # Reverse so oldest → newest (API returns newest first)
+            _fg_rev = list(reversed(_fg_history))
+            _fg_vals  = [h.get("value", 50) for h in _fg_rev]
+            _fg_dates = [h.get("date", "") for h in _fg_rev]
 
-    if ts_data and "BTC" in ts_data:
-        import pandas as pd
-        import plotly.graph_objects as go
+            import plotly.graph_objects as go
 
-        # Build DataFrame from timeseries dicts
-        frames: dict = {}
-        for key in ["BTC", "VIX", "Gold", "SPX", "DXY", "Oil"]:
-            series = ts_data.get(key)
-            if series and isinstance(series, dict):
-                frames[key] = pd.Series(series).rename(key)
+            # Colour each bar by F&G zone
+            def _fg_bar_color(v):
+                if v <= 20:  return "#8B5CF6"   # Extreme Fear — purple
+                if v <= 40:  return "#F97316"   # Fear — orange
+                if v <= 60:  return "#9CA3AF"   # Neutral — grey
+                if v <= 80:  return "#FBBF24"   # Greed — yellow
+                return "#34D399"                 # Extreme Greed — green
 
-        if len(frames) >= 2:
-            df_ts = pd.DataFrame(frames).sort_index()
-            df_ts.index = pd.to_datetime(df_ts.index)
-            df_ret = df_ts.pct_change().dropna()
+            _bar_colors = [_fg_bar_color(v) for v in _fg_vals]
 
-            # Rolling correlation of each factor vs BTC
-            factors = [c for c in df_ret.columns if c != "BTC"]
-            corr_results: dict = {}
-            for fac in factors:
-                if fac in df_ret.columns and "BTC" in df_ret.columns:
-                    rolling_corr = df_ret["BTC"].rolling(corr_days).corr(df_ret[fac]).dropna()
-                    if not rolling_corr.empty:
-                        corr_results[fac] = rolling_corr
-
-            if corr_results:
-                fig_corr = go.Figure()
-                colors = {"VIX": "#ef4444", "Gold": "#f59e0b", "SPX": "#10b981",
-                          "DXY": "#6366f1", "Oil": "#f97316"}
-                for fac, series in corr_results.items():
-                    fig_corr.add_trace(go.Scatter(
-                        x=series.index, y=series.values,
-                        mode="lines", name=fac,
-                        line=dict(color=colors.get(fac, "#888"), width=2),
-                    ))
-                fig_corr.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)")
-                fig_corr.add_hline(y=0.5,  line_dash="dot", line_color="rgba(16,185,129,0.4)",
-                                   annotation_text="Strong positive")
-                fig_corr.add_hline(y=-0.5, line_dash="dot", line_color="rgba(239,68,68,0.4)",
-                                   annotation_text="Strong negative")
-                fig_corr.update_layout(
-                    height=320,
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0"),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    margin=dict(l=0, r=0, t=30, b=0),
-                    yaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
-                    xaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
-                )
-                st.plotly_chart(fig_corr, width="stretch")
-
-                # Current snapshot bar chart
-                st.markdown(f"**Current {corr_days}-day correlations with BTC**")
-                current_corrs = {
-                    fac: float(series.iloc[-1])
-                    for fac, series in corr_results.items()
-                    if len(series) > 0
-                }
-                corr_df = pd.DataFrame(
-                    list(current_corrs.items()), columns=["Factor", "Correlation"]
-                ).sort_values("Correlation", ascending=True)
-                bar_colors = ["#ef4444" if v < 0 else "#10b981" for v in corr_df["Correlation"]]
-                fig_bar = go.Figure(go.Bar(
-                    x=corr_df["Correlation"], y=corr_df["Factor"],
-                    orientation="h",
-                    marker_color=bar_colors,
-                    text=[f"{v:.3f}" for v in corr_df["Correlation"]],
-                    textposition="outside",
-                ))
-                fig_bar.update_layout(
-                    height=220,
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0"),
-                    margin=dict(l=0, r=0, t=10, b=0),
-                    xaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
-                    yaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
-                )
-                st.plotly_chart(fig_bar, width="stretch")
-            else:
-                st.info("Not enough data for rolling correlations. Try a smaller window.")
-        else:
-            st.info("Loading macro timeseries data... (requires yfinance installed)")
-    else:
-        st.info("Macro timeseries unavailable. Install yfinance: `pip install yfinance`")
-
-    st.markdown("---")
-
-    # ── M2 84-Day Lead Indicator ───────────────────────────────────────────────
-    st.markdown("#### M2 Money Supply — 84-Day Lead Indicator")
-    st.caption("M2 shifted forward 84 days overlaid on BTC price. Rising M2 historically precedes BTC rallies by ~3 months.")
-
-    ts_long = _load_macro_ts(365)
-    if ts_long and "BTC" in ts_long:
-        import pandas as pd
-        import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
-
-        btc_series = ts_long.get("BTC", {})
-        if btc_series:
-            btc_df = pd.Series(btc_series).rename("BTC")
-            btc_df.index = pd.to_datetime(btc_df.index)
-
-            # M2 from FRED (monthly series) — use current value as flat line if no history
-            m2_now = fred_data.get("m2_supply_bn", 21500.0)
-
-            fig_m2 = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_m2.add_trace(
-                go.Scatter(x=btc_df.index, y=btc_df.values,
-                           name="BTC Price", line=dict(color="#f59e0b", width=2)),
-                secondary_y=False,
-            )
-            # M2 annotation (full monthly timeseries would need FRED historical API)
-            # add_hline() does not support secondary_y — use add_trace on secondary axis instead
-            fig_m2.add_trace(
-                go.Scatter(
-                    x=[btc_df.index[0], btc_df.index[-1]],
-                    y=[m2_now, m2_now],
-                    mode="lines",
-                    name=f"M2 now: ${m2_now:,.0f}B",
-                    line=dict(dash="dot", color="rgba(99,102,241,0.6)", width=1.5),
-                    showlegend=True,
-                ),
-                secondary_y=True,
-            )
-            fig_m2.update_layout(
-                height=280,
+            fig_fg = go.Figure(go.Bar(
+                x=_fg_dates,
+                y=_fg_vals,
+                marker_color=_bar_colors,
+                hovertemplate="<b>%{x}</b><br>F&G: %{y}<extra></extra>",
+            ))
+            fig_fg.add_hline(y=25, line_dash="dot", line_color="rgba(239,68,68,0.5)",
+                             annotation_text="Extreme Fear ≤25", annotation_font_size=10)
+            fig_fg.add_hline(y=75, line_dash="dot", line_color="rgba(52,211,153,0.5)",
+                             annotation_text="Extreme Greed ≥75", annotation_font_size=10)
+            fig_fg.update_layout(
+                height=220,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#e2e8f0"),
-                margin=dict(l=0, r=0, t=20, b=0),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                xaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
-                yaxis=dict(title="BTC Price (USD)", gridcolor="rgba(255,255,255,0.07)"),
-                yaxis2=dict(title="M2 ($B)", gridcolor="rgba(255,255,255,0.03)"),
+                margin=dict(l=0, r=0, t=10, b=0),
+                yaxis=dict(range=[0, 100], gridcolor="rgba(255,255,255,0.07)", ticksuffix=""),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickangle=-45, tickfont=dict(size=9)),
+                showlegend=False,
             )
-            st.plotly_chart(fig_m2, width="stretch")
-            st.caption("Note: M2 84-day shift requires FRED historical API key for full series. Set RWA_FRED_API_KEY in .env to enable.")
+            st.plotly_chart(fig_fg, width="stretch")
+            _fg_now_val = _fg_current.get("value", _fg_val)
+            _fg_now_lbl = _fg_current.get("label", _fg_lbl)
+            st.caption(
+                f"Current: **{_fg_now_val}/100** ({_fg_now_lbl}) · "
+                f"Signal: **{_fg_full.get('signal','NEUTRAL')}** · "
+                f"Source: {_fg_full.get('source','fallback')}"
+            )
         else:
-            st.info("BTC historical data unavailable.")
-    else:
-        st.info("Loading 1-year macro timeseries... (requires yfinance installed)")
+            # Fallback: show single value card when no history
+            st.metric("Fear & Greed", f"{_fg_val}/100", delta=_fg_lbl)
+            st.caption("30-day history unavailable — requires alternative.me API connection.")
 
-    st.markdown("---")
-
-    # ── Global M2 Composite + 90-Day Lag Signal ────────────────────────────────
-    st.markdown("#### Global M2 Composite — 90-Day Lag BTC Signal")
-    st.caption("US M2 × 4.2 scaling (US ≈ 24% of global M2). Rising M2 typically precedes BTC rallies by ~90 days.")
-
-    _m2 = _load_global_m2()
-    _m2_sig = _m2.get("lag_signal", "NEUTRAL")
-    _m2_sig_colors = {"EXPANDING": "#10b981", "CONTRACTING": "#ef4444", "NEUTRAL": "#6b7280"}
-    _m2_c = _m2_sig_colors.get(_m2_sig, "#6b7280")
-    _m2c1, _m2c2, _m2c3, _m2c4 = st.columns(4)
-    _m2c1.metric("US M2", f"${_m2.get('us_m2_bn', 21500.0):,.0f}B")
-    _m2c2.metric("Global M2 Est.", f"${_m2.get('global_m2_est_bn', 90300.0):,.0f}B")
-    _m2c3.metric("90d Change", f"{_m2.get('m2_90d_change_pct', 0.0):+.2f}%")
-    _m2c4.metric("Lag Signal", _m2_sig)
-    st.markdown(
-        f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_m2_c};"
-        f"border-radius:8px;padding:12px 16px;font-size:13px;color:{_m2_c};margin-top:8px'>"
-        f"<b>BTC Signal:</b> {_m2.get('btc_signal','NEUTRAL')}</div>",
-        unsafe_allow_html=True,
-    )
-    st.caption(f"Source: {_m2.get('source','fallback')} · Updated: {_m2.get('timestamp','')[:19]}")
-
-    st.markdown("---")
-
-    # ── Pi Cycle Top Indicator ────────────────────────────────────────────────
-    st.markdown("#### Pi Cycle Top Indicator")
-    st.caption("111-DMA vs 350-DMA×2 of BTC close. When 111-DMA crosses above 350-DMA×2, BTC is near a cycle top.")
-
-    _pi = _load_pi_cycle()
-    _pi_sig = _pi.get("signal", "N/A")
-    _pi_sig_colors = {
-        "APPROACHING_TOP": "#ef4444", "WARNING": "#f59e0b",
-        "NEUTRAL": "#6b7280", "BOTTOM": "#10b981", "N/A": "#6b7280",
-    }
-    _pi_c = _pi_sig_colors.get(_pi_sig, "#6b7280")
-    _pic1, _pic2, _pic3, _pic4 = st.columns(4)
-    _pic1.metric("111-DMA", f"${_pi.get('ma_111') or 0:,.0f}" if _pi.get("ma_111") is not None else "N/A")
-    _pic2.metric("350-DMA×2", f"${_pi.get('ma_350x2') or 0:,.0f}" if _pi.get("ma_350x2") is not None else "N/A")
-    _pic3.metric("Gap %", f"{_pi.get('gap_pct') or 0:+.1f}%" if _pi.get("gap_pct") is not None else "N/A")
-    _pic4.metric("Signal", _pi_sig)
-    st.markdown(
-        f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_pi_c};"
-        f"border-radius:8px;padding:12px 16px;font-size:13px;color:{_pi_c};margin-top:8px'>"
-        f"{_pi.get('description', 'Pi Cycle data unavailable.')}</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("---")
-
-    # ── Stablecoin Supply (USDT + USDC + RLUSD) ───────────────────────────────
-    st.markdown("#### Stablecoin Supply — Dry Powder Indicator")
-    st.caption("Rising stablecoin supply = capital waiting on the sidelines = bullish setup when deployed.")
-
-    _stb = _load_stable()
-    _stb_c1, _stb_c2, _stb_c3, _stb_c4 = st.columns(4)
-    _stb_c1.metric("USDT", f"${_stb.get('usdt_bn', 140.0):.1f}B")
-    _stb_c2.metric("USDC", f"${_stb.get('usdc_bn', 58.0):.1f}B")
-    _stb_c3.metric("RLUSD", f"${_stb.get('rlusd_bn', 0.0):.2f}B")
-    _stb_c4.metric("Total", f"${_stb.get('total_bn', 198.0):.1f}B")
-    st.caption(f"Source: {_stb.get('source','fallback')} · Updated: {_stb.get('timestamp','')[:19]}")
-
-    st.markdown("---")
-
-    # ── Macro Regime — HMM Probabilistic Classifier (#55) ─────────────────────
-    st.markdown("#### Macro Regime — HMM Probabilistic Classifier")
-    st.caption("Gaussian observation scoring across 4 macro states (VIX, yield spread, DXY, WTI oil). "
-               "Bars show soft probability assignment — not binary classification.")
-
-    _hmm = _load_hmm_regime()
-    regime_data = (_hmm.get("regime") if _hmm else None) or market.get("macro_regime", "NEUTRAL")
-    regime_bias = market.get("macro_bias", "NEUTRAL")
-    regime_desc = (_hmm.get("description") if _hmm else None) or market.get("macro_description", "")
-    regime_colors = {
-        "RISK_ON": "#10b981", "RISK_OFF": "#ef4444",
-        "STAGFLATION": "#f59e0b", "LIQUIDITY_CRUNCH": "#8b5cf6", "NEUTRAL": "#6b7280",
-    }
-    r_color = regime_colors.get(regime_data, "#6b7280")
-
-    # Probability bars
-    _hmm_probs = (_hmm.get("probabilities") if _hmm else None) or {}
-    _hmm_conf  = (_hmm.get("confidence") if _hmm else None) or 0.0
-    _hmm_dom   = (_hmm.get("dominant_signal") if _hmm else None) or "—"
-    _hmm_src   = (_hmm.get("source") if _hmm else "fallback")
-
-    # Show regime label + description
-    st.markdown(f"""
-    <div style="background:rgba(255,255,255,0.04);border:1px solid {r_color};
-    border-radius:8px;padding:16px 20px;margin-bottom:8px">
-        <div style="font-size:18px;font-weight:700;color:{r_color}">{regime_data.replace('_', ' ')}</div>
-        <div style="font-size:13px;color:#9ca3af;margin-top:6px">{regime_desc}</div>
-        <div style="font-size:12px;color:#6b7280;margin-top:4px">
-            Bias: <b style="color:{r_color}">{regime_bias}</b>
-            &nbsp;·&nbsp; Confidence: <b style="color:{r_color}">{int(_hmm_conf*100)}%</b>
-            &nbsp;·&nbsp; Dominant signal: <b style="color:#9ca3af">{_hmm_dom}</b>
-            &nbsp;·&nbsp; Source: <b style="color:#4b5563">{_hmm_src}</b>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 3-bar probability display
-    if _hmm_probs:
-        _prob_defs = [
-            ("RISK_ON",  _hmm_probs.get("RISK_ON",  0.33), "#10b981", "Risk On"),
-            ("NEUTRAL",  _hmm_probs.get("NEUTRAL",  0.34), "#6b7280", "Neutral"),
-            ("RISK_OFF", _hmm_probs.get("RISK_OFF", 0.33), "#ef4444", "Risk Off"),
-        ]
-        st.markdown("**Regime Probability Distribution**")
-        for _pkey, _pval, _pcol, _plabel in _prob_defs:
-            _pw = int(_pval * 100)
-            st.markdown(f"""
-<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
-  <div style="min-width:72px;font-size:11px;color:{_pcol};text-transform:uppercase;letter-spacing:0.04em">{_plabel}</div>
-  <div style="flex:1;background:#1F2937;border-radius:4px;height:16px;overflow:hidden">
-    <div style="background:{_pcol};width:{_pw}%;height:100%;border-radius:4px;
-                display:flex;align-items:center;padding-left:6px">
-      <span style="font-size:10px;color:#fff;font-weight:700">{_pval:.1%}</span>
-    </div>
-  </div>
-</div>""", unsafe_allow_html=True)
-        st.caption("RISK_ON = green · NEUTRAL = grey · RISK_OFF = red")
-
-    st.markdown("---")
-
-    # ── BTC/ETH On-Chain Signals (#54) ─────────────────────────────────────────
-    st.markdown("#### BTC / ETH Perpetual Funding & Open Interest")
-    st.caption("Bybit v5 perpetual markets · Funding rate per 8h · Open interest in USD")
-
-    _ocs = _load_onchain_signals()
-    _btc_fr   = _ocs.get("btc_funding_rate")
-    _eth_fr   = _ocs.get("eth_funding_rate")
-    _btc_fsig = _ocs.get("btc_funding_signal", "NORMAL")
-    _eth_fsig = _ocs.get("eth_funding_signal", "NORMAL")
-    _btc_oi   = _ocs.get("btc_oi_usd")
-    _eth_oi   = _ocs.get("eth_oi_usd")
-    _btc_oi7  = _ocs.get("btc_oi_7d_change_pct")
-    _eth_oi7  = _ocs.get("eth_oi_7d_change_pct")
-    _oc_src   = _ocs.get("source", "unavailable")
-
-    _oc_sig_colors = {
-        "OVERHEATED": "#ef4444", "NORMAL": "#9ca3af", "DISCOUNTED": "#10b981"
-    }
-    _oc_tooltips = {
-        "OVERHEATED":  "High positive funding = longs paying shorts = market overextended. Bearish signal.",
-        "NORMAL":      "Funding rate within normal range. Market balanced between longs and shorts.",
-        "DISCOUNTED":  "Negative funding = shorts paying longs = market underextended. Potential bullish reversal.",
-    }
-
-    def _fmt_fr(v):
-        if v is None: return "—"
-        return f"{v*100:.4f}%"
-
-    def _fmt_oi(v):
-        if v is None: return "—"
-        if v >= 1e9: return f"${v/1e9:.2f}B"
-        return f"${v/1e6:.0f}M"
-
-    def _fmt_oi7(v):
-        if v is None: return "—"
-        return f"{v:+.1f}%"
-
-    _oc1, _oc2, _oc3, _oc4 = st.columns(4)
-    with _oc1:
-        _fc = _oc_sig_colors.get(_btc_fsig, "#9ca3af")
-        st.markdown(f"""
-<div style="background:#111827;border:1px solid {_fc}40;border-radius:8px;padding:12px;
-            border-top:3px solid {_fc}">
-  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">BTC Funding Rate</div>
-  <div style="font-size:20px;font-weight:800;color:{_fc}">{_fmt_fr(_btc_fr)}</div>
-  <div style="font-size:11px;color:{_fc};font-weight:600">{_btc_fsig}</div>
-  <div style="font-size:9px;color:#4b5563;margin-top:3px">{_oc_tooltips.get(_btc_fsig,'')}</div>
-</div>""", unsafe_allow_html=True)
-    with _oc2:
-        _fc = _oc_sig_colors.get(_eth_fsig, "#9ca3af")
-        st.markdown(f"""
-<div style="background:#111827;border:1px solid {_fc}40;border-radius:8px;padding:12px;
-            border-top:3px solid {_fc}">
-  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">ETH Funding Rate</div>
-  <div style="font-size:20px;font-weight:800;color:{_fc}">{_fmt_fr(_eth_fr)}</div>
-  <div style="font-size:11px;color:{_fc};font-weight:600">{_eth_fsig}</div>
-  <div style="font-size:9px;color:#4b5563;margin-top:3px">{_oc_tooltips.get(_eth_fsig,'')}</div>
-</div>""", unsafe_allow_html=True)
-    with _oc3:
-        _oi7_c = "#10b981" if (_btc_oi7 or 0) >= 0 else "#ef4444"
-        st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;
-            border-top:3px solid #6366f1">
-  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">BTC Open Interest</div>
-  <div style="font-size:20px;font-weight:800;color:#6366f1">{_fmt_oi(_btc_oi)}</div>
-  <div style="font-size:11px;color:{_oi7_c}">7d: {_fmt_oi7(_btc_oi7)}</div>
-  <div style="font-size:9px;color:#4b5563;margin-top:3px">Rising OI + rising price = healthy trend</div>
-</div>""", unsafe_allow_html=True)
-    with _oc4:
-        _oi7_c = "#10b981" if (_eth_oi7 or 0) >= 0 else "#ef4444"
-        st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;
-            border-top:3px solid #8b5cf6">
-  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">ETH Open Interest</div>
-  <div style="font-size:20px;font-weight:800;color:#8b5cf6">{_fmt_oi(_eth_oi)}</div>
-  <div style="font-size:11px;color:{_oi7_c}">7d: {_fmt_oi7(_eth_oi7)}</div>
-  <div style="font-size:9px;color:#4b5563;margin-top:3px">Rising OI + rising price = healthy trend</div>
-</div>""", unsafe_allow_html=True)
-    st.caption(f"Source: {_oc_src} · Cached 15 min · Updated: {_ocs.get('timestamp','')[:19]}")
-
-    st.markdown("---")
-
-    # ── Protocol Health — DeFiLlama Fee Revenue (#57) ─────────────────────────
-    st.markdown("#### RWA Protocol Health — Fee Revenue")
-    st.caption("DeFiLlama fees endpoint · 24h and 30d fee collection for top RWA protocols. "
-               "Declining fees = shrinking origination. GREEN = on pace, YELLOW = slowing, RED = declining.")
-
-    _pf = _load_protocol_fees()
-    _pf_ts = _pf.get("timestamp", "")
-
-    # Key RWA protocol slugs to display
-    _PF_DISPLAY = [
-        ("centrifuge",    "Centrifuge"),
-        ("maple",         "Maple Finance"),
-        ("goldfinch",     "Goldfinch"),
-        ("clearpool",     "Clearpool"),
-        ("truefi",        "TrueFi"),
-        ("ondo-finance",  "Ondo Finance"),
-    ]
-    _PF_HEALTH_COLORS = {"GREEN": "#10b981", "YELLOW": "#f59e0b", "RED": "#ef4444"}
-
-    def _fmt_fee(v):
-        if v is None or v == 0: return "—"
-        if v >= 1e6: return f"${v/1e6:.2f}M"
-        if v >= 1e3: return f"${v/1e3:.1f}K"
-        return f"${v:.0f}"
-
-    _pf_entries = [(slug, label, _pf.get(slug)) for slug, label in _PF_DISPLAY if _pf.get(slug)]
-    if _pf_entries:
-        _pf_cols = st.columns(min(len(_pf_entries), 3))
-        for _pfi, (slug, label, pdata) in enumerate(_pf_entries):
-            with _pf_cols[_pfi % 3]:
-                _health     = pdata.get("health", "YELLOW")
-                _h_color    = _PF_HEALTH_COLORS.get(_health, "#9ca3af")
-                _fees24h    = pdata.get("fees_24h", 0)
-                _fees30d    = pdata.get("fees_30d", 0)
-                _annualized = pdata.get("annualized", 0)
-                st.markdown(f"""
-<div style="background:#111827;border:1px solid {_h_color}40;border-radius:8px;
-            padding:12px;margin-bottom:8px;border-top:3px solid {_h_color}">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-    <div style="font-size:12px;font-weight:600;color:#e2e8f0">{label}</div>
-    <div style="font-size:10px;font-weight:700;color:{_h_color};background:{_h_color}20;
-                padding:2px 8px;border-radius:4px">{_health}</div>
-  </div>
-  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Fees 24h</div>
-  <div style="font-size:16px;font-weight:700;color:{_h_color}">{_fmt_fee(_fees24h)}</div>
-  <div style="font-size:10px;color:#4b5563;margin-top:4px">
-    30d: {_fmt_fee(_fees30d)} &nbsp;·&nbsp; Ann: {_fmt_fee(_annualized)}
-  </div>
-</div>""", unsafe_allow_html=True)
-        st.caption(f"Source: DeFiLlama Fees · Cached 1h · Updated: {_pf_ts[:19]}")
-    else:
-        st.info("Protocol fee data loading... Requires DeFiLlama fees API connection (api.llama.fi).")
-
-    # ── R5: RWA Adoption Velocity ─────────────────────────────────────────────
-    try:
         st.markdown("---")
-        st.markdown('<div class="section-header">RWA Adoption Velocity</div>', unsafe_allow_html=True)
-        st.caption("Tokenized asset market growth trajectory — TVL milestones and quarter-over-quarter adoption acceleration. Source: RWA.xyz / DeFiLlama historical estimates.")
-        # Static milestones (best public data available without paid API)
-        _RWA_MILESTONES = [
-            {"quarter": "Q1 2021", "tvl_bn": 0.3,  "label": "Centrifuge + MakerDAO pioneer RWA collateral"},
-            {"quarter": "Q2 2022", "tvl_bn": 0.7,  "label": "Maple Finance + Goldfinch scale private credit"},
-            {"quarter": "Q4 2022", "tvl_bn": 1.5,  "label": "MakerDAO adds US Treasuries as collateral"},
-            {"quarter": "Q2 2023", "tvl_bn": 3.5,  "label": "BlackRock BUIDL launch — institutional watershed"},
-            {"quarter": "Q4 2023", "tvl_bn": 7.5,  "label": "Ondo OUSG crosses $500M TVL; Franklin BENJI $300M"},
-            {"quarter": "Q2 2024", "tvl_bn": 12.0, "label": "Total tokenized treasuries hit $1B milestone"},
-            {"quarter": "Q4 2024", "tvl_bn": 16.5, "label": "BUIDL crosses $500M; Apollo tokenized credit fund"},
-            {"quarter": "Q1 2025", "tvl_bn": 19.0, "label": "Ondo OUSG $2B+; Ethena sUSDe integration"},
-            {"quarter": "Q4 2025", "tvl_bn": 28.0, "label": "Cross-chain RWA expansion; AAVE Horizon announced"},
-            {"quarter": "Q1 2026", "tvl_bn": 35.0, "label": "Total tokenized asset market approaches $40B"},
-        ]
-        _qvl = [m["tvl_bn"] for m in _RWA_MILESTONES]
-        _qbns = [m["quarter"] for m in _RWA_MILESTONES]
-        # QoQ growth calculation
-        _qgrowth = [None] + [(_qvl[i] - _qvl[i-1]) / _qvl[i-1] * 100 for i in range(1, len(_qvl))]
-        _r5_c1, _r5_c2, _r5_c3 = st.columns(3)
-        _r5_c1.metric("Current Est. TVL",   f"${_qvl[-1]:.0f}B",                  help="Estimated total tokenized RWA market TVL (Q1 2026 estimate)")
-        _r5_c2.metric("QoQ Growth",          f"{_qgrowth[-1]:+.1f}%",             help="Quarter-over-quarter TVL growth rate — latest period vs prior quarter")
-        _r5_c3.metric("Growth Since 2021",   f"{((_qvl[-1]/_qvl[0])-1)*100:.0f}%", help="Total market growth from Q1 2021 baseline to today")
-        _r5_fig = go.Figure()
-        _r5_fig.add_trace(go.Scatter(
-            x=_qbns, y=_qvl,
-            mode="lines+markers+text",
-            line=dict(color="#00d4aa", width=2.5),
-            marker=dict(size=8, color="#00d4aa"),
-            text=[f"${v:.1f}B" for v in _qvl],
-            textposition="top center",
-            textfont=dict(size=9),
-            fill="tozeroy",
-            fillcolor="rgba(0,212,170,0.08)",
-            hovertemplate="<b>%{x}</b><br>TVL: $%{y:.1f}B<extra></extra>",
-        ))
-        for _mi, _m in enumerate(_RWA_MILESTONES):
-            if "BUIDL" in _m["label"] or "watershed" in _m["label"] or "billion" in _m["label"].lower():
-                _r5_fig.add_annotation(
-                    x=_m["quarter"], y=_m["tvl_bn"],
-                    text=_m["label"][:35] + "…",
-                    showarrow=True, arrowhead=2, arrowcolor="#f59e0b",
-                    font=dict(size=8, color="#f59e0b"),
-                    bgcolor="rgba(17,24,39,0.9)", bordercolor="#f59e0b",
-                    borderwidth=1, ax=0, ay=-40,
+
+        # ── Rolling Correlation Section ────────────────────────────────────────────
+        st.markdown("#### BTC Rolling Correlations vs Macro Factors")
+        st.caption("Pearson correlation of daily returns over selected window. +1 = move together, -1 = inverse.")
+
+        corr_days = st.select_slider(
+            "Lookback window",
+            options=[14, 30, 60, 90],
+            value=30,
+            key="macro_corr_days",
+        )
+
+        ts_data = _load_macro_ts(corr_days + 20)  # fetch extra days for rolling window
+
+        if ts_data and "BTC" in ts_data:
+            import pandas as pd
+            import plotly.graph_objects as go
+
+            # Build DataFrame from timeseries dicts
+            frames: dict = {}
+            for key in ["BTC", "VIX", "Gold", "SPX", "DXY", "Oil"]:
+                series = ts_data.get(key)
+                if series and isinstance(series, dict):
+                    frames[key] = pd.Series(series).rename(key)
+
+            if len(frames) >= 2:
+                df_ts = pd.DataFrame(frames).sort_index()
+                df_ts.index = pd.to_datetime(df_ts.index)
+                df_ret = df_ts.pct_change().dropna()
+
+                # Rolling correlation of each factor vs BTC
+                factors = [c for c in df_ret.columns if c != "BTC"]
+                corr_results: dict = {}
+                for fac in factors:
+                    if fac in df_ret.columns and "BTC" in df_ret.columns:
+                        rolling_corr = df_ret["BTC"].rolling(corr_days).corr(df_ret[fac]).dropna()
+                        if not rolling_corr.empty:
+                            corr_results[fac] = rolling_corr
+
+                if corr_results:
+                    fig_corr = go.Figure()
+                    colors = {"VIX": "#ef4444", "Gold": "#f59e0b", "SPX": "#10b981",
+                              "DXY": "#6366f1", "Oil": "#f97316"}
+                    for fac, series in corr_results.items():
+                        fig_corr.add_trace(go.Scatter(
+                            x=series.index, y=series.values,
+                            mode="lines", name=fac,
+                            line=dict(color=colors.get(fac, "#888"), width=2),
+                        ))
+                    fig_corr.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)")
+                    fig_corr.add_hline(y=0.5,  line_dash="dot", line_color="rgba(16,185,129,0.4)",
+                                       annotation_text="Strong positive")
+                    fig_corr.add_hline(y=-0.5, line_dash="dot", line_color="rgba(239,68,68,0.4)",
+                                       annotation_text="Strong negative")
+                    fig_corr.update_layout(
+                        height=320,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        margin=dict(l=0, r=0, t=30, b=0),
+                        yaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
+                        xaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+                    )
+                    st.plotly_chart(fig_corr, width="stretch")
+
+                    # Current snapshot bar chart
+                    st.markdown(f"**Current {corr_days}-day correlations with BTC**")
+                    current_corrs = {
+                        fac: float(series.iloc[-1])
+                        for fac, series in corr_results.items()
+                        if len(series) > 0
+                    }
+                    corr_df = pd.DataFrame(
+                        list(current_corrs.items()), columns=["Factor", "Correlation"]
+                    ).sort_values("Correlation", ascending=True)
+                    bar_colors = ["#ef4444" if v < 0 else "#10b981" for v in corr_df["Correlation"]]
+                    fig_bar = go.Figure(go.Bar(
+                        x=corr_df["Correlation"], y=corr_df["Factor"],
+                        orientation="h",
+                        marker_color=bar_colors,
+                        text=[f"{v:.3f}" for v in corr_df["Correlation"]],
+                        textposition="outside",
+                    ))
+                    fig_bar.update_layout(
+                        height=220,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"),
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        xaxis=dict(range=[-1, 1], gridcolor="rgba(255,255,255,0.07)"),
+                        yaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+                    )
+                    st.plotly_chart(fig_bar, width="stretch")
+                else:
+                    st.info("Not enough data for rolling correlations. Try a smaller window.")
+            else:
+                st.info("Loading macro timeseries data... (requires yfinance installed)")
+        else:
+            st.info("Macro timeseries unavailable. Install yfinance: `pip install yfinance`")
+
+        st.markdown("---")
+
+        # ── M2 84-Day Lead Indicator ───────────────────────────────────────────────
+        st.markdown("#### M2 Money Supply — 84-Day Lead Indicator")
+        st.caption("M2 shifted forward 84 days overlaid on BTC price. Rising M2 historically precedes BTC rallies by ~3 months.")
+
+        ts_long = _load_macro_ts(365)
+        if ts_long and "BTC" in ts_long:
+            import pandas as pd
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+
+            btc_series = ts_long.get("BTC", {})
+            if btc_series:
+                btc_df = pd.Series(btc_series).rename("BTC")
+                btc_df.index = pd.to_datetime(btc_df.index)
+
+                # M2 from FRED (monthly series) — use current value as flat line if no history
+                m2_now = fred_data.get("m2_supply_bn", 21500.0)
+
+                fig_m2 = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_m2.add_trace(
+                    go.Scatter(x=btc_df.index, y=btc_df.values,
+                               name="BTC Price", line=dict(color="#f59e0b", width=2)),
+                    secondary_y=False,
                 )
-        _r5_fig.update_layout(
-            height=360, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#e2e8f0", size=11),
-            margin=dict(l=0, r=0, t=20, b=60),
-            xaxis=dict(tickangle=-30, gridcolor="rgba(255,255,255,0.04)"),
-            yaxis=dict(title="TVL ($ Billions)", gridcolor="rgba(255,255,255,0.05)"),
-        )
-        st.plotly_chart(_r5_fig, width="stretch")
-        _user_level_r5 = st.session_state.get("user_level", "beginner")
-        if _user_level_r5 == "beginner":
-            st.info("💡 **What does this mean for me?** This chart shows how fast the real-world asset tokenization market has been growing. In 2021, barely $300 million of real assets were tokenized. By 2026, it's estimated to be $35+ billion and accelerating. Early positioning in high-quality RWA assets puts you ahead of institutional adoption.")
-    except Exception as _r5_err:
-        logger.debug("[R5] Adoption velocity skipped: %s", _r5_err)
-
-    # ── Crypto Derivatives Context (moved from Options Flow tab) ──────────────
-    st.markdown("---")
-    with st.expander("📐 Crypto Derivatives Context — BTC/ETH Options (Deribit)", expanded=False):
-        st.caption("Deribit public API · no key required · Put/Call Ratio · Max Pain · IV Term Structure · Cached 15 min · Useful for macro timing of RWA entries/exits")
-        import plotly.graph_objects as _go_m
-        from plotly.subplots import make_subplots as _msp_m
-        _d_curr = st.selectbox("Currency", ["BTC", "ETH"], key="macro_opt_curr_sel")
-        _d_oc   = _load_deribit_options(_d_curr)
-        if _d_oc.get("error") and not _d_oc.get("oi_by_strike"):
-            st.warning(f"Options data unavailable: {_d_oc.get('error')}. Deribit may be temporarily unreachable.")
+                # M2 annotation (full monthly timeseries would need FRED historical API)
+                # add_hline() does not support secondary_y — use add_trace on secondary axis instead
+                fig_m2.add_trace(
+                    go.Scatter(
+                        x=[btc_df.index[0], btc_df.index[-1]],
+                        y=[m2_now, m2_now],
+                        mode="lines",
+                        name=f"M2 now: ${m2_now:,.0f}B",
+                        line=dict(dash="dot", color="rgba(99,102,241,0.6)", width=1.5),
+                        showlegend=True,
+                    ),
+                    secondary_y=True,
+                )
+                fig_m2.update_layout(
+                    height=280,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"),
+                    margin=dict(l=0, r=0, t=20, b=0),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                    xaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+                    yaxis=dict(title="BTC Price (USD)", gridcolor="rgba(255,255,255,0.07)"),
+                    yaxis2=dict(title="M2 ($B)", gridcolor="rgba(255,255,255,0.03)"),
+                )
+                st.plotly_chart(fig_m2, width="stretch")
+                st.caption("Note: M2 84-day shift requires FRED historical API key for full series. Set RWA_FRED_API_KEY in .env to enable.")
+            else:
+                st.info("BTC historical data unavailable.")
         else:
-            _d_pc   = _d_oc.get("put_call_ratio")
-            _d_mp   = _d_oc.get("max_pain")
-            _d_tput = _d_oc.get("total_put_oi", 0)
-            _d_tcal = _d_oc.get("total_call_oi", 0)
-            _d_osig = _d_oc.get("signal", "N/A")
-            _d_spot = _d_oc.get("spot_price")
-            _d_sc = {
-                "EXTREME_PUTS":  "#ef4444", "BEARISH": "#f59e0b",
-                "NEUTRAL":       "#6b7280", "BULLISH": "#10b981",
-                "EXTREME_CALLS": "#00d4aa",
-            }.get(_d_osig, "#6b7280")
-            _dc1, _dc2, _dc3, _dc4 = st.columns(4)
-            with _dc1:
-                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_d_sc};border-radius:10px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Put/Call Ratio</div>
-  <div style="font-size:28px;font-weight:700;color:{_d_sc}">{f"{_d_pc:.3f}" if _d_pc is not None else "—"}</div>
-  <div style="font-size:12px;color:#9ca3af">{_d_osig.replace("_", " ")}</div>
-</div>""", unsafe_allow_html=True)
-            with _dc2:
-                _d_mp_dist = (f"{abs(_d_mp - _d_spot) / _d_spot * 100:.1f}% {'below' if _d_mp < _d_spot else 'above'} spot"
-                              if _d_mp and _d_spot else "")
-                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Max Pain</div>
-  <div style="font-size:24px;font-weight:700;color:#6366f1">{f"${_d_mp:,.0f}" if _d_mp else "—"}</div>
-  <div style="font-size:11px;color:#6b7280">{_d_mp_dist}</div>
-</div>""", unsafe_allow_html=True)
-            with _dc3:
-                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #ef4444;border-radius:10px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Total Put OI</div>
-  <div style="font-size:24px;font-weight:700;color:#ef4444">{f"{_d_tput:,.0f}" if _d_tput else "—"}</div>
-  <div style="font-size:11px;color:#6b7280">contracts</div>
-</div>""", unsafe_allow_html=True)
-            with _dc4:
-                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Total Call OI</div>
-  <div style="font-size:24px;font-weight:700;color:#10b981">{f"{_d_tcal:,.0f}" if _d_tcal else "—"}</div>
-  <div style="font-size:11px;color:#6b7280">contracts</div>
-</div>""", unsafe_allow_html=True)
-            _d_oi = _d_oc.get("oi_by_strike", [])
-            _d_ts = _d_oc.get("term_structure", [])
-            if _d_oi or _d_ts:
-                _dm_c1, _dm_c2 = st.columns([3, 2])
-                with _dm_c1:
-                    if _d_oi:
-                        _d_fig = _go_m.Figure()
-                        _d_strikes = [str(int(r["strike"])) for r in _d_oi]
-                        _d_fig.add_trace(_go_m.Bar(name="Puts", x=_d_strikes, y=[r["put_oi"] for r in _d_oi], marker_color="rgba(239,68,68,0.75)"))
-                        _d_fig.add_trace(_go_m.Bar(name="Calls", x=_d_strikes, y=[r["call_oi"] for r in _d_oi], marker_color="rgba(16,185,129,0.75)"))
-                        _d_fig.update_layout(barmode="group", height=280, paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0", size=10),
-                            margin=dict(l=0, r=0, t=30, b=0), title="OI by Strike",
-                            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
-                            yaxis=dict(gridcolor="rgba(255,255,255,0.05)"))
-                        st.plotly_chart(_d_fig, width="stretch")
-                with _dm_c2:
-                    _d_ts_valid = [t for t in _d_ts if t.get("atm_iv") and t.get("dte") is not None]
-                    if _d_ts_valid:
-                        _d_figb = _go_m.Figure()
-                        _d_figb.add_trace(_go_m.Scatter(
-                            x=[t["dte"] for t in _d_ts_valid], y=[t["atm_iv"] for t in _d_ts_valid],
-                            mode="lines+markers", name="ATM IV",
-                            line=dict(color="#6366f1", width=2), marker=dict(size=7)))
-                        _d_figb.update_layout(height=280, paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0", size=10),
-                            margin=dict(l=0, r=0, t=30, b=0), title="IV Term Structure",
-                            xaxis=dict(title="DTE", gridcolor="rgba(255,255,255,0.04)"),
-                            yaxis=dict(title="IV (%)", gridcolor="rgba(255,255,255,0.05)"))
-                        st.plotly_chart(_d_figb, width="stretch")
-            _d_ts_str = _d_oc.get("timestamp", "")[:19]
-            st.caption(f"Source: Deribit · {_d_ts_str} UTC · For macro timing context — not a direct RWA signal")
+            st.info("Loading 1-year macro timeseries... (requires yfinance installed)")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ON-CHAIN TAB — RWA PROTOCOL TVL + ADOPTION METRICS
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_onchain:
-    st.markdown("### ⛓️ RWA On-Chain Intelligence")
-    st.caption("DeFiLlama RWA category · Centrifuge · Maple · Tokenized Treasury TVL · Protocol adoption trends · Cached 1h")
-
-    # ── RWA Total TVL ─────────────────────────────────────────────────────────
-    try:
-        _rwa_total = _df.get_total_rwa_tvl()
-        _rwa_protos_raw = _df.fetch_defillama_protocols()
-        _rwa_protos = [
-            p for p in (_rwa_protos_raw or [])
-            if str(p.get("category") or "").lower() in ("rwa", "real world assets", "tokenized-assets")
-               or any(str(c).lower() in ("rwa", "tokenized assets", "real world assets") for c in (p.get("chains") or []))
-        ]
-        # Also pick known RWA protocols by slug
-        _RWA_SLUGS = {"ondo-finance", "centrifuge", "maple-finance", "goldfinch", "clearpool",
-                      "backed-finance", "superstate", "frax", "pendle", "morpho",
-                      "franklin-templeton", "blackrock-buidl"}
-        _rwa_protos_extra = [
-            p for p in (_rwa_protos_raw or [])
-            if any(slug in str(p.get("slug","")).lower() or slug in str(p.get("name","")).lower()
-                   for slug in _RWA_SLUGS)
-            and p not in _rwa_protos
-        ]
-        _rwa_protos = (_rwa_protos + _rwa_protos_extra)[:20]
-
-        _rwa_tvl_total_fmt = (f"${_rwa_total/1e9:.2f}B" if _rwa_total and _rwa_total >= 1e9
-                              else f"${_rwa_total/1e6:.0f}M" if _rwa_total and _rwa_total >= 1e6
-                              else f"${_rwa_total:,.0f}" if _rwa_total else "—")
-
-        _rt1, _rt2, _rt3, _rt4 = st.columns(4)
-        with _rt1:
-            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #00d4aa;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Total RWA TVL</div>
-  <div style="font-size:28px;font-weight:700;color:#00d4aa">{_rwa_tvl_total_fmt}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">DeFiLlama RWA category</div>
-</div>""", unsafe_allow_html=True)
-        with _rt2:
-            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Tracked Protocols</div>
-  <div style="font-size:28px;font-weight:700;color:#6366f1">{len(_rwa_protos)}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">Active RWA issuers</div>
-</div>""", unsafe_allow_html=True)
-        # Centrifuge data
-        _cf_pools = _df.fetch_centrifuge_pools() or []
-        _cf_tvl = sum(float(p.get("tvl_usd") or p.get("tvl") or 0) for p in _cf_pools)
-        _cf_fmt = f"${_cf_tvl/1e6:.0f}M" if _cf_tvl >= 1e6 else f"${_cf_tvl:,.0f}"
-        with _rt3:
-            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #f59e0b;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Centrifuge TVL</div>
-  <div style="font-size:28px;font-weight:700;color:#f59e0b">{_cf_fmt if _cf_tvl else "—"}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">{len(_cf_pools)} active pools</div>
-</div>""", unsafe_allow_html=True)
-        # Maple data
-        _mpl = _df.fetch_maple_stats() or {}
-        _mpl_tvl = _mpl.get("tvl_usd") or _mpl.get("totalValueLocked") or 0
-        _mpl_fmt = f"${float(_mpl_tvl)/1e6:.0f}M" if float(_mpl_tvl or 0) >= 1e6 else f"${float(_mpl_tvl or 0):,.0f}"
-        with _rt4:
-            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Maple Finance TVL</div>
-  <div style="font-size:28px;font-weight:700;color:#10b981">{_mpl_fmt if float(_mpl_tvl or 0) > 0 else "—"}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">Private credit pools</div>
-</div>""", unsafe_allow_html=True)
-
-        # ── RWA Protocol Table ────────────────────────────────────────────────
-        if _rwa_protos:
-            st.markdown("---")
-            st.markdown("#### Top RWA Protocols by TVL")
-            _rwa_rows = []
-            for _rp in sorted(_rwa_protos, key=lambda x: float(x.get("tvl") or 0), reverse=True)[:15]:
-                _rp_tvl = float(_rp.get("tvl") or 0)
-                _rp_chg = _rp.get("change_1d") or _rp.get("change_7d")
-                _rwa_rows.append({
-                    "Protocol":  str(_rp.get("name") or _rp.get("slug") or "—"),
-                    "TVL":       (f"${_rp_tvl/1e9:.2f}B" if _rp_tvl >= 1e9
-                                  else f"${_rp_tvl/1e6:.0f}M" if _rp_tvl >= 1e6
-                                  else f"${_rp_tvl:,.0f}"),
-                    "7d Change": (f"{float(_rp_chg):+.1f}%" if _rp_chg is not None else "—"),
-                    "Category":  str(_rp.get("category") or "RWA"),
-                    "Chains":    ", ".join((str(c) for c in (_rp.get("chains") or [])[:3])) or "—",
-                })
-            if _rwa_rows:
-                import pandas as _pd_oc
-                st.dataframe(_pd_oc.DataFrame(_rwa_rows), hide_index=True, width="stretch")
-
-        # ── Centrifuge Pool Detail ────────────────────────────────────────────
-        if _cf_pools:
-            with st.expander(f"Centrifuge Pools ({len(_cf_pools)} active)"):
-                _cf_rows = []
-                for _cp in sorted(_cf_pools, key=lambda x: float(x.get("tvl_usd") or x.get("tvl") or 0), reverse=True)[:10]:
-                    _cp_tvl = float(_cp.get("tvl_usd") or _cp.get("tvl") or 0)
-                    _cf_rows.append({
-                        "Pool": str(_cp.get("name") or _cp.get("id") or "—"),
-                        "TVL":  f"${_cp_tvl/1e6:.1f}M" if _cp_tvl >= 1e6 else f"${_cp_tvl:,.0f}",
-                        "APY":  f"{float(_cp.get('apy') or _cp.get('yield') or 0):.2f}%",
-                        "Asset Class": str(_cp.get("asset_class") or _cp.get("type") or "Credit"),
-                    })
-                if _cf_rows:
-                    import pandas as _pd_cf
-                    st.dataframe(_pd_cf.DataFrame(_cf_rows), hide_index=True, width="stretch")
-
-        _user_lvl_oc = st.session_state.get("user_level", "beginner")
-        if _user_lvl_oc == "beginner":
-            st.info("💡 **What does this mean for me?** This shows the total amount of real-world assets (treasuries, real estate, private credit) that have been tokenized on blockchain. Growing TVL means more institutions are adopting this technology. Centrifuge and Maple are two of the largest real-world lending protocols — they connect traditional businesses with on-chain capital.")
-
-    except Exception as _oc_rwa_err:
-        st.warning(f"RWA on-chain data unavailable: {_oc_rwa_err}")
-
-    # ── RLUSD / XRPL Live Data (Group 6) ─────────────────────────────────────
-    st.markdown("---")
-    st.markdown("#### 🌊 RLUSD & XRP Ledger")
-    st.caption("XRPL ledger gateway_balances + CoinGecko · Ripple USD · Cached 15 min")
-
-    _rlusd = _load_xrpl_rlusd()
-
-    if _rlusd.get("error") and not _rlusd.get("circulating_supply"):
-        st.caption(f"RLUSD data unavailable: {_rlusd.get('error')}. XRPL cluster may be unreachable.")
-    else:
-        def _fmt_supply(v):
-            if v is None: return "—"
-            if v >= 1e9:  return f"${v/1e9:.2f}B"
-            if v >= 1e6:  return f"${v/1e6:.1f}M"
-            return f"${v:,.0f}"
-
-        _rl_xrpl  = _rlusd.get("xrpl_supply")
-        _rl_circ  = _rlusd.get("circulating_supply")
-        _rl_price = _rlusd.get("price_usd", 1.0)
-        _rl_mcap  = _rlusd.get("market_cap_usd")
-        _rl_src   = _rlusd.get("source", "—")
-
-        _rla, _rlb, _rlc, _rld = st.columns(4)
-        with _rla:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #3b82f6;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">XRPL On-Ledger Supply</div>
-  <div style="font-size:22px;font-weight:700;color:#3b82f6">{_fmt_supply(_rl_xrpl) if _rl_xrpl else "—"}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">RLUSD issued on XRPL ledger</div>
-</div>
-""", unsafe_allow_html=True)
-        with _rlb:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #06b6d4;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Circulating Supply</div>
-  <div style="font-size:22px;font-weight:700;color:#06b6d4">{_fmt_supply(_rl_circ)}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">All chains (CoinGecko)</div>
-</div>
-""", unsafe_allow_html=True)
-        with _rlc:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Market Cap</div>
-  <div style="font-size:22px;font-weight:700;color:#10b981">{_fmt_supply(_rl_mcap)}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">Target: $1.5B+ (Ripple 2026)</div>
-</div>
-""", unsafe_allow_html=True)
-        with _rld:
-            _peg_color = "#10b981" if abs((_rl_price or 1.0) - 1.0) < 0.005 else "#f59e0b"
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_peg_color};border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Price</div>
-  <div style="font-size:28px;font-weight:700;color:{_peg_color}">${_rl_price:.4f}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">{'On peg' if abs((_rl_price or 1.0) - 1.0) < 0.005 else 'Off peg!'}</div>
-</div>
-""", unsafe_allow_html=True)
-
-        _rl_ts = _rlusd.get("timestamp", "")[:19]
-        st.caption(f"Source: {_rl_src} · {_rl_ts} UTC · XRPL issuer: {XRPL_RLUSD_ISSUER[:12]}…")
-
-    # ── XRPL MPT (XLS-33d Multi-Purpose Token) (#106) ────────────────────────
-    st.markdown("---")
-    st.markdown("#### 🔷 XRPL Multi-Purpose Tokens (XLS-33d)")
-    st.caption("XRPL JSON-RPC ledger_data · MPT issuances + RLUSD gateway supply · Cached 5 min")
-
-    _mpt = _load_xrpl_mpt()
-    if _mpt.get("source") == "unavailable":
-        st.caption("MPT data unavailable — XRPL RPC unreachable.")
-    else:
-        _mpt_rlusd = _mpt.get("rlusd_supply")
-        _mpt_total = _mpt.get("mpt_issuance_count", 0)
-        _mpt_a, _mpt_b = st.columns(2)
-        with _mpt_a:
-            _rlusd_fmt = f"${_mpt_rlusd/1e6:.1f}M" if _mpt_rlusd and _mpt_rlusd >= 1e6 else (f"${_mpt_rlusd:,.0f}" if _mpt_rlusd else "—")
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #06b6d4;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Gateway Supply</div>
-  <div style="font-size:26px;font-weight:700;color:#06b6d4">{_rlusd_fmt}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">On-ledger RLUSD via gateway_balances</div>
-</div>
-""", unsafe_allow_html=True)
-        with _mpt_b:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #8b5cf6;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Active MPT Issuances</div>
-  <div style="font-size:26px;font-weight:700;color:#8b5cf6">{_mpt_total:,}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">XLS-33d MPT objects on ledger</div>
-</div>
-""", unsafe_allow_html=True)
-
-    # ── XRPL Basic Data (#97) — XRP price + RLUSD supply via fetch_xrpl_data() ─
-    st.markdown("---")
-    st.markdown("#### 🌐 XRPL Basic Integration (#97)")
-    st.caption("XRP price via CoinGecko · RLUSD supply via XRPL cluster / xrpl-py · Cached 15 min")
-
-    if st.button("⟳ Refresh XRPL Basic", key="btn_xrpl_basic"):
-        _load_xrpl_basic.clear()
-
-    with st.spinner("Fetching XRPL data…"):
-        _xrpl_basic = _load_xrpl_basic()
-
-    _xb_xrp   = _xrpl_basic.get("xrp_price_usd", 0)
-    _xb_rlusd = _xrpl_basic.get("rlusd_supply", 0)
-    _xb_avail = _xrpl_basic.get("xrpl_available", False)
-    _xb_src   = _xrpl_basic.get("source", "—")
-    _xb_ts    = (_xrpl_basic.get("timestamp") or "")[:19]
-
-    _xb_c1, _xb_c2, _xb_c3 = st.columns(3)
-    with _xb_c1:
-        _xrp_clr = "#10b981" if _xb_xrp > 0 else "#6b7280"
-        _xrp_fmt = f"${_xb_xrp:.4f}" if _xb_xrp else "—"
-        st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_xrp_clr};border-radius:10px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">XRP Price (USD)</div>
-  <div style="font-size:24px;font-weight:700;color:{_xrp_clr}">{_xrp_fmt}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">Source: CoinGecko</div>
-</div>
-""", unsafe_allow_html=True)
-    with _xb_c2:
-        _rlusd_s = (f"${_xb_rlusd/1e9:.2f}B" if _xb_rlusd and _xb_rlusd >= 1e9
-                    else f"${_xb_rlusd/1e6:.1f}M" if _xb_rlusd and _xb_rlusd >= 1e6
-                    else f"${_xb_rlusd:,.0f}" if _xb_rlusd else "—")
-        _rlusd_clr = "#3b82f6" if _xb_rlusd and _xb_rlusd > 0 else "#6b7280"
-        st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_rlusd_clr};border-radius:10px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Supply</div>
-  <div style="font-size:24px;font-weight:700;color:{_rlusd_clr}">{_rlusd_s}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">XRPL ledger issuance</div>
-</div>
-""", unsafe_allow_html=True)
-    with _xb_c3:
-        _lib_clr  = "#10b981" if _xb_avail else "#6b7280"
-        _lib_lbl  = "xrpl-py installed" if _xb_avail else "xrpl-py not installed"
-        st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_lib_clr};border-radius:10px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">xrpl-py Status</div>
-  <div style="font-size:16px;font-weight:700;color:{_lib_clr}">{_lib_lbl}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">Source: {_xb_src}</div>
-</div>
-""", unsafe_allow_html=True)
-    st.caption(f"Source: {_xb_src} · {_xb_ts} UTC · pip install xrpl-py>=2.4.0 for direct ledger reads")
-
-    # ─── Chainlink Reference Price Feeds (#108 + #109) ───────────────────────
-    st.markdown("---")
-    st.markdown("#### 🔗 Chainlink Reference Price Feeds")
-    st.caption("Etherscan eth_call proxy · latestAnswer() + decimals() · Cached 1 min")
-
-    if feature_enabled("etherscan"):
-        _cl_data = _cl_prices()
-        if _cl_data:
-            _cl_cols = st.columns(len(_cl_data))
-            for _ci, (_pair, _pv) in enumerate(_cl_data.items()):
-                _pv_fmt = f"${_pv:,.4f}" if _pv else "—"
-                _clr = "#10b981" if _pv else "#6b7280"
-                with _cl_cols[_ci]:
-                    st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
-  <div style="font-size:10px;color:#6b7280;margin-bottom:4px">{_pair}</div>
-  <div style="font-size:18px;font-weight:700;color:{_clr}">{_pv_fmt}</div>
-  <div style="font-size:10px;color:#9ca3af">Chainlink</div>
-</div>
-""", unsafe_allow_html=True)
-        else:
-            st.caption("No Chainlink data — check ETHERSCAN_API_KEY.")
-    else:
-        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable Chainlink price feeds.")
-
-    # ─── ERC-4626 Vault Reader (#103) ────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("#### 🏦 ERC-4626 Tokenized Vault Metrics")
-    st.caption("Etherscan eth_call · pricePerShare() + totalAssets() · BUIDL / OUSG / USDY / wstETH")
-
-    if feature_enabled("erc4626") or feature_enabled("etherscan"):
-        _vaults = _vault_data()
-        _v_cols = st.columns(4)
-        for _vi, (_sym, _vd) in enumerate(_vaults.items()):
-            _err    = _vd.get("error")
-            _pps    = _vd.get("price_per_share")
-            _ta     = _vd.get("total_assets")
-            _pps_s  = f"${_pps:.6f}" if _pps else "—"
-            _ta_s   = (f"${_ta/1e9:.2f}B" if _ta and _ta >= 1e9 else f"${_ta/1e6:.1f}M" if _ta else "—")
-            _vc     = "#10b981" if _pps else "#6b7280"
-            with _v_cols[_vi]:
-                st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_vc};border-radius:10px;padding:14px">
-  <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px">{_sym}</div>
-  <div style="font-size:10px;color:#6b7280">pricePerShare</div>
-  <div style="font-size:16px;font-weight:700;color:{_vc}">{_pps_s}</div>
-  <div style="font-size:10px;color:#6b7280;margin-top:6px">totalAssets</div>
-  <div style="font-size:14px;color:#9ca3af">{_ta_s}</div>
-</div>
-""", unsafe_allow_html=True)
-    else:
-        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-4626 vault reader.")
-
-    # ─── ERC-7540 Redemption Queue (#104) ────────────────────────────────────
-    st.markdown("---")
-    st.markdown("#### ⏳ ERC-7540 Async Redemption Depth")
-    st.caption("Etherscan eth_call · totalPendingRedemptions() · BUIDL / OUSG")
-
-    if feature_enabled("erc4626") or feature_enabled("etherscan"):
-        _redeems = _redeem_data()
-        _rd_cols = st.columns(2)
-        for _ri, (_sym, _rd) in enumerate(_redeems.items()):
-            _pending = _rd.get("pending_redemptions")
-            _p_s     = (f"${_pending/1e6:.1f}M" if _pending and _pending >= 1e6 else
-                        f"${_pending:,.0f}" if _pending else "—")
-            _rc2     = "#f59e0b" if _pending and _pending > 0 else "#10b981"
-            with _rd_cols[_ri]:
-                st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px">{_sym} Pending Redemptions</div>
-  <div style="font-size:22px;font-weight:700;color:{_rc2};margin-top:6px">{_p_s}</div>
-  <div style="font-size:11px;color:#9ca3af;margin-top:4px">Queued for settlement (ERC-7540)</div>
-</div>
-""", unsafe_allow_html=True)
-    else:
-        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-7540 queue depth.")
-
-    # ─── ERC-7540 Redemption Queue — Coverage & Risk Signal (#104 enhanced) ──
-    if _pro_mode and (feature_enabled("erc4626") or feature_enabled("etherscan")):
         st.markdown("---")
-        st.markdown("#### 🔒 ERC-7540 Vault Coverage & Risk Signal (Pro)")
-        st.caption(
-            "totalAssets / totalSupply coverage ratio — below 1.0 = undercollateralized. "
-            "RED signal if coverage < 0.95."
+
+        # ── Global M2 Composite + 90-Day Lag Signal ────────────────────────────────
+        st.markdown("#### Global M2 Composite — 90-Day Lag BTC Signal")
+        st.caption("US M2 × 4.2 scaling (US ≈ 24% of global M2). Rising M2 typically precedes BTC rallies by ~90 days.")
+
+        _m2 = _load_global_m2()
+        _m2_sig = _m2.get("lag_signal", "NEUTRAL")
+        _m2_sig_colors = {"EXPANDING": "#10b981", "CONTRACTING": "#ef4444", "NEUTRAL": "#6b7280"}
+        _m2_c = _m2_sig_colors.get(_m2_sig, "#6b7280")
+        _m2c1, _m2c2, _m2c3, _m2c4 = st.columns(4)
+        _m2c1.metric("US M2", f"${_m2.get('us_m2_bn', 21500.0):,.0f}B")
+        _m2c2.metric("Global M2 Est.", f"${_m2.get('global_m2_est_bn', 90300.0):,.0f}B")
+        _m2c3.metric("90d Change", f"{_m2.get('m2_90d_change_pct', 0.0):+.2f}%")
+        _m2c4.metric("Lag Signal", _m2_sig)
+        st.markdown(
+            f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_m2_c};"
+            f"border-radius:8px;padding:12px 16px;font-size:13px;color:{_m2_c};margin-top:8px'>"
+            f"<b>BTC Signal:</b> {_m2.get('btc_signal','NEUTRAL')}</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Source: {_m2.get('source','fallback')} · Updated: {_m2.get('timestamp','')[:19]}")
+
+        st.markdown("---")
+
+        # ── Pi Cycle Top Indicator ────────────────────────────────────────────────
+        st.markdown("#### Pi Cycle Top Indicator")
+        st.caption("111-DMA vs 350-DMA×2 of BTC close. When 111-DMA crosses above 350-DMA×2, BTC is near a cycle top.")
+
+        _pi = _load_pi_cycle()
+        _pi_sig = _pi.get("signal", "N/A")
+        _pi_sig_colors = {
+            "APPROACHING_TOP": "#ef4444", "WARNING": "#f59e0b",
+            "NEUTRAL": "#6b7280", "BOTTOM": "#10b981", "N/A": "#6b7280",
+        }
+        _pi_c = _pi_sig_colors.get(_pi_sig, "#6b7280")
+        _pic1, _pic2, _pic3, _pic4 = st.columns(4)
+        _pic1.metric("111-DMA", f"${_pi.get('ma_111') or 0:,.0f}" if _pi.get("ma_111") is not None else "N/A")
+        _pic2.metric("350-DMA×2", f"${_pi.get('ma_350x2') or 0:,.0f}" if _pi.get("ma_350x2") is not None else "N/A")
+        _pic3.metric("Gap %", f"{_pi.get('gap_pct') or 0:+.1f}%" if _pi.get("gap_pct") is not None else "N/A")
+        _pic4.metric("Signal", _pi_sig)
+        st.markdown(
+            f"<div style='background:rgba(255,255,255,0.04);border:1px solid {_pi_c};"
+            f"border-radius:8px;padding:12px 16px;font-size:13px;color:{_pi_c};margin-top:8px'>"
+            f"{_pi.get('description', 'Pi Cycle data unavailable.')}</div>",
+            unsafe_allow_html=True,
         )
 
-        _ERC7540_VAULTS = {
-            "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
-            "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
+        st.markdown("---")
+
+        # ── Stablecoin Supply (USDT + USDC + RLUSD) ───────────────────────────────
+        st.markdown("#### Stablecoin Supply — Dry Powder Indicator")
+        st.caption("Rising stablecoin supply = capital waiting on the sidelines = bullish setup when deployed.")
+
+        _stb = _load_stable()
+        _stb_c1, _stb_c2, _stb_c3, _stb_c4 = st.columns(4)
+        _stb_c1.metric("USDT", f"${_stb.get('usdt_bn', 140.0):.1f}B")
+        _stb_c2.metric("USDC", f"${_stb.get('usdc_bn', 58.0):.1f}B")
+        _stb_c3.metric("RLUSD", f"${_stb.get('rlusd_bn', 0.0):.2f}B")
+        _stb_c4.metric("Total", f"${_stb.get('total_bn', 198.0):.1f}B")
+        st.caption(f"Source: {_stb.get('source','fallback')} · Updated: {_stb.get('timestamp','')[:19]}")
+
+        st.markdown("---")
+
+        # ── Macro Regime — HMM Probabilistic Classifier (#55) ─────────────────────
+        st.markdown("#### Macro Regime — HMM Probabilistic Classifier")
+        st.caption("Gaussian observation scoring across 4 macro states (VIX, yield spread, DXY, WTI oil). "
+                   "Bars show soft probability assignment — not binary classification.")
+
+        _hmm = _load_hmm_regime()
+        regime_data = (_hmm.get("regime") if _hmm else None) or market.get("macro_regime", "NEUTRAL")
+        regime_bias = market.get("macro_bias", "NEUTRAL")
+        regime_desc = (_hmm.get("description") if _hmm else None) or market.get("macro_description", "")
+        regime_colors = {
+            "RISK_ON": "#10b981", "RISK_OFF": "#ef4444",
+            "STAGFLATION": "#f59e0b", "LIQUIDITY_CRUNCH": "#8b5cf6", "NEUTRAL": "#6b7280",
+        }
+        r_color = regime_colors.get(regime_data, "#6b7280")
+
+        # Probability bars
+        _hmm_probs = (_hmm.get("probabilities") if _hmm else None) or {}
+        _hmm_conf  = (_hmm.get("confidence") if _hmm else None) or 0.0
+        _hmm_dom   = (_hmm.get("dominant_signal") if _hmm else None) or "—"
+        _hmm_src   = (_hmm.get("source") if _hmm else "fallback")
+
+        # Show regime label + description
+        st.markdown(f"""
+        <div style="background:rgba(255,255,255,0.04);border:1px solid {r_color};
+        border-radius:8px;padding:16px 20px;margin-bottom:8px">
+            <div style="font-size:18px;font-weight:700;color:{r_color}">{regime_data.replace('_', ' ')}</div>
+            <div style="font-size:13px;color:#9ca3af;margin-top:6px">{regime_desc}</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px">
+                Bias: <b style="color:{r_color}">{regime_bias}</b>
+                &nbsp;·&nbsp; Confidence: <b style="color:{r_color}">{int(_hmm_conf*100)}%</b>
+                &nbsp;·&nbsp; Dominant signal: <b style="color:#9ca3af">{_hmm_dom}</b>
+                &nbsp;·&nbsp; Source: <b style="color:#4b5563">{_hmm_src}</b>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # 3-bar probability display
+        if _hmm_probs:
+            _prob_defs = [
+                ("RISK_ON",  _hmm_probs.get("RISK_ON",  0.33), "#10b981", "Risk On"),
+                ("NEUTRAL",  _hmm_probs.get("NEUTRAL",  0.34), "#6b7280", "Neutral"),
+                ("RISK_OFF", _hmm_probs.get("RISK_OFF", 0.33), "#ef4444", "Risk Off"),
+            ]
+            st.markdown("**Regime Probability Distribution**")
+            for _pkey, _pval, _pcol, _plabel in _prob_defs:
+                _pw = int(_pval * 100)
+                st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+          <div style="min-width:72px;font-size:11px;color:{_pcol};text-transform:uppercase;letter-spacing:0.04em">{_plabel}</div>
+          <div style="flex:1;background:#1F2937;border-radius:4px;height:16px;overflow:hidden">
+        <div style="background:{_pcol};width:{_pw}%;height:100%;border-radius:4px;
+                    display:flex;align-items:center;padding-left:6px">
+          <span style="font-size:10px;color:#fff;font-weight:700">{_pval:.1%}</span>
+        </div>
+          </div>
+        </div>""", unsafe_allow_html=True)
+            st.caption("RISK_ON = green · NEUTRAL = grey · RISK_OFF = red")
+
+        st.markdown("---")
+
+        # ── BTC/ETH On-Chain Signals (#54) ─────────────────────────────────────────
+        st.markdown("#### BTC / ETH Perpetual Funding & Open Interest")
+        st.caption("Bybit v5 perpetual markets · Funding rate per 8h · Open interest in USD")
+
+        _ocs = _load_onchain_signals()
+        _btc_fr   = _ocs.get("btc_funding_rate")
+        _eth_fr   = _ocs.get("eth_funding_rate")
+        _btc_fsig = _ocs.get("btc_funding_signal", "NORMAL")
+        _eth_fsig = _ocs.get("eth_funding_signal", "NORMAL")
+        _btc_oi   = _ocs.get("btc_oi_usd")
+        _eth_oi   = _ocs.get("eth_oi_usd")
+        _btc_oi7  = _ocs.get("btc_oi_7d_change_pct")
+        _eth_oi7  = _ocs.get("eth_oi_7d_change_pct")
+        _oc_src   = _ocs.get("source", "unavailable")
+
+        _oc_sig_colors = {
+            "OVERHEATED": "#ef4444", "NORMAL": "#9ca3af", "DISCOUNTED": "#10b981"
+        }
+        _oc_tooltips = {
+            "OVERHEATED":  "High positive funding = longs paying shorts = market overextended. Bearish signal.",
+            "NORMAL":      "Funding rate within normal range. Market balanced between longs and shorts.",
+            "DISCOUNTED":  "Negative funding = shorts paying longs = market underextended. Potential bullish reversal.",
         }
 
-        _rq_cols = st.columns(len(_ERC7540_VAULTS))
-        for _rqi, (_rq_sym, _rq_addr) in enumerate(_ERC7540_VAULTS.items()):
-            _rqd = _load_erc7540_queue(_rq_addr)
-            _cov     = _rqd.get("coverage_ratio", 1.0)
-            _sig     = _rqd.get("risk_signal", "GREEN")
-            _ta7     = _rqd.get("total_assets", 0.0)
-            _ts7     = _rqd.get("total_supply", 0.0)
-            _qdepth  = _rqd.get("queue_depth_usd")
-            _compat  = _rqd.get("erc7540_compatible", False)
-            _sig_clr = {"GREEN": "#10b981", "YELLOW": "#f59e0b", "RED": "#ef4444"}.get(_sig, "#6b7280")
-            _cov_str = f"{_cov:.4f}" if _cov else "—"
-            _qdep_str = (f"${_qdepth/1e6:.1f}M" if _qdepth and _qdepth >= 1e6
-                         else f"${_qdepth:,.0f}" if _qdepth else "N/A")
-            with _rq_cols[_rqi]:
-                st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-left:4px solid {_sig_clr};
-            border-radius:10px;padding:14px">
-  <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px">
-    {_rq_sym}
-    <span style="font-size:10px;font-weight:400;color:{_sig_clr};margin-left:8px">{_sig}</span>
-  </div>
-  <div style="font-size:10px;color:#6b7280">Coverage Ratio</div>
-  <div style="font-size:20px;font-weight:700;color:{_sig_clr}">{_cov_str}</div>
-  <div style="font-size:10px;color:#6b7280;margin-top:6px">Queue Depth</div>
-  <div style="font-size:13px;color:#9ca3af">{_qdep_str}</div>
-  <div style="font-size:10px;color:#6b7280;margin-top:4px">
-    ERC-7540: {"Compatible" if _compat else "Standard ERC-4626"}
-  </div>
-</div>
-""", unsafe_allow_html=True)
+        def _fmt_fr(v):
+            if v is None: return "—"
+            return f"{v*100:.4f}%"
 
-    # ─── Wallet Address Input (#110) + ERC-3643 + Zerion ─────────────────────
-    st.markdown("---")
-    st.markdown("#### 👛 Wallet Intelligence")
-    _wallet_input = st.text_input(
-        "EVM Wallet Address",
-        value=st.session_state.get("wallet_address", ""),
-        placeholder="0x…",
-        key="wallet_address_input",
-        help="Enter an EVM-compatible wallet address (0x…) for ERC-3643 compliance checks and Zerion portfolio import.",
-        max_chars=42,
-    )
-    # Sanitize: wallet addresses are hex strings (0x + 40 hex chars) — strip anything else
-    _wallet_addr = _re_input.sub(r"[^0-9a-fA-Fx]", "", _wallet_input.strip())[:42]
-    if _wallet_addr:
-        st.session_state["wallet_address"] = _wallet_addr
+        def _fmt_oi(v):
+            if v is None: return "—"
+            if v >= 1e9: return f"${v/1e9:.2f}B"
+            return f"${v/1e6:.0f}M"
 
-    # ERC-3643 Compliance Check (#105)
-    st.markdown("##### 🛡️ ERC-3643 / T-REX On-Chain Compliance")
-    st.caption("Etherscan eth_call · isVerified(address) on BUIDL/OUSG — institutional compliance registry")
+        def _fmt_oi7(v):
+            if v is None: return "—"
+            return f"{v:+.1f}%"
 
-    _ERC3643_ADDRS = {
-        "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
-        "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
-    }
-    if _wallet_addr and (feature_enabled("onchainid") or feature_enabled("etherscan")):
-        _compl = _compliance_check(_wallet_addr)
-        _co_cols = st.columns(len(_compl))
-        for _coi, (_sym, _cd) in enumerate(_compl.items()):
-            _verified = _cd.get("is_verified")
-            _co_lbl   = "VERIFIED" if _verified is True else ("NOT VERIFIED" if _verified is False else "—")
-            _co_clr   = "#10b981" if _verified else ("#ef4444" if _verified is False else "#6b7280")
-            with _co_cols[_coi]:
-                st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
-  <div style="font-size:11px;color:#6b7280;margin-bottom:4px">{_sym}</div>
-  <div style="font-size:18px;font-weight:700;color:{_co_clr}">{_co_lbl}</div>
-  <div style="font-size:10px;color:#9ca3af">ERC-3643 isVerified</div>
-</div>
-""", unsafe_allow_html=True)
-    elif not _wallet_addr:
-        st.caption("Enter a wallet address above to check ERC-3643 compliance status.")
-    else:
-        st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-3643 compliance checks.")
+        _oc1, _oc2, _oc3, _oc4 = st.columns(4)
+        with _oc1:
+            _fc = _oc_sig_colors.get(_btc_fsig, "#9ca3af")
+            st.markdown(f"""
+        <div style="background:#111827;border:1px solid {_fc}40;border-radius:8px;padding:12px;
+                border-top:3px solid {_fc}">
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">BTC Funding Rate</div>
+          <div style="font-size:20px;font-weight:800;color:{_fc}">{_fmt_fr(_btc_fr)}</div>
+          <div style="font-size:11px;color:{_fc};font-weight:600">{_btc_fsig}</div>
+          <div style="font-size:9px;color:#4b5563;margin-top:3px">{_oc_tooltips.get(_btc_fsig,'')}</div>
+        </div>""", unsafe_allow_html=True)
+        with _oc2:
+            _fc = _oc_sig_colors.get(_eth_fsig, "#9ca3af")
+            st.markdown(f"""
+        <div style="background:#111827;border:1px solid {_fc}40;border-radius:8px;padding:12px;
+                border-top:3px solid {_fc}">
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">ETH Funding Rate</div>
+          <div style="font-size:20px;font-weight:800;color:{_fc}">{_fmt_fr(_eth_fr)}</div>
+          <div style="font-size:11px;color:{_fc};font-weight:600">{_eth_fsig}</div>
+          <div style="font-size:9px;color:#4b5563;margin-top:3px">{_oc_tooltips.get(_eth_fsig,'')}</div>
+        </div>""", unsafe_allow_html=True)
+        with _oc3:
+            _oi7_c = "#10b981" if (_btc_oi7 or 0) >= 0 else "#ef4444"
+            st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;
+                border-top:3px solid #6366f1">
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">BTC Open Interest</div>
+          <div style="font-size:20px;font-weight:800;color:#6366f1">{_fmt_oi(_btc_oi)}</div>
+          <div style="font-size:11px;color:{_oi7_c}">7d: {_fmt_oi7(_btc_oi7)}</div>
+          <div style="font-size:9px;color:#4b5563;margin-top:3px">Rising OI + rising price = healthy trend</div>
+        </div>""", unsafe_allow_html=True)
+        with _oc4:
+            _oi7_c = "#10b981" if (_eth_oi7 or 0) >= 0 else "#ef4444"
+            st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;
+                border-top:3px solid #8b5cf6">
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.6px">ETH Open Interest</div>
+          <div style="font-size:20px;font-weight:800;color:#8b5cf6">{_fmt_oi(_eth_oi)}</div>
+          <div style="font-size:11px;color:{_oi7_c}">7d: {_fmt_oi7(_eth_oi7)}</div>
+          <div style="font-size:9px;color:#4b5563;margin-top:3px">Rising OI + rising price = healthy trend</div>
+        </div>""", unsafe_allow_html=True)
+        st.caption(f"Source: {_oc_src} · Cached 15 min · Updated: {_ocs.get('timestamp','')[:19]}")
 
-    # ERC-3643 Eligibility Stub — #105 (Pro Mode)
-    if st.session_state.get("pro_mode", False):
-        with st.expander("🛡️ ERC-3643 Token Eligibility Check (Pro)", expanded=False):
-            st.caption(
-                "ERC-3643 (T-REX) is the institutional-grade token standard for regulated securities. "
-                "Permissioned RWA tokens (BUIDL, OUSG, tokenized equity) use an Identity Registry contract "
-                "to enforce KYC/AML compliance on-chain. Each transfer checks isVerified() against the "
-                "investor's on-chain identity before allowing the transaction."
-            )
-            _el_token = st.text_input(
-                "Token Contract Address",
-                placeholder="0x… (e.g. BUIDL: 0x7712c34205737192402172409a8F7ccef8aA2AEc)",
-                key="erc3643_token_addr",
-                max_chars=42,
-            )
-            _el_token_clean = _re_input.sub(r"[^0-9a-fA-Fx]", "", (_el_token or "").strip())[:42]
-            _el_wallet_clean = _wallet_addr  # reuse wallet from above
-
-            if st.button("Check Eligibility", key="btn_erc3643_check"):
-                if _el_token_clean and _el_wallet_clean:
-                    _el_result = _df.check_erc3643_eligibility(_el_wallet_clean, _el_token_clean)
-                    _el_v = _el_result.get("is_verified")
-                    _el_clr = "#10b981" if _el_v is True else ("#ef4444" if _el_v is False else "#6b7280")
-                    _el_lbl = "VERIFIED" if _el_v is True else ("NOT VERIFIED" if _el_v is False else "UNKNOWN")
-                    st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;margin-top:8px">
-  <div style="font-size:13px;color:#6b7280">ERC-3643 isVerified() result</div>
-  <div style="font-size:24px;font-weight:700;color:{_el_clr};margin:8px 0">{_el_lbl}</div>
-  <div style="font-size:11px;color:#9ca3af">Standard: {_el_result.get("standard", "ERC-3643 (T-REX)")}</div>
-  <div style="font-size:11px;color:#9ca3af">Source: {_el_result.get("source", "stub")}</div>
-  <div style="font-size:11px;color:#4b5563;margin-top:8px">{_el_result.get("note", "")}</div>
-</div>""", unsafe_allow_html=True)
-                elif not _el_wallet_clean:
-                    st.warning("Enter a wallet address in the EVM Wallet Address field above.")
-                else:
-                    st.warning("Enter a token contract address.")
-            else:
-                st.caption("Enter a wallet address above and a token address, then click Check Eligibility.")
-
-    # Zerion Portfolio Import (#111)
-    st.markdown("##### 🟣 Zerion On-Chain Portfolio")
-    st.caption("Zerion API v1 · wallet positions across all EVM chains · Cached 3 min")
-
-    if _wallet_addr and feature_enabled("zerion"):
-        _zp = _zerion_portfolio(_wallet_addr)
-        if _zp.get("source") in ("unavailable", "auth_error", "invalid_address"):
-            st.caption(f"Zerion unavailable — {_zp.get('message', _zp.get('source', ''))}")
-        else:
-            _za, _zb, _zc = st.columns(3)
-            _z_total  = _zp.get("total_usd", 0)
-            _z_chains = _zp.get("chain_distribution", {})
-            _z_npos   = len(_zp.get("positions", []))
-            with _za:
-                st.metric("Total Value", f"${_z_total:,.2f}" if _z_total else "—")
-            with _zb:
-                st.metric("Positions", str(_z_npos))
-            with _zc:
-                st.metric("Chains", str(len(_z_chains)))
-
-            _z_pos = _zp.get("positions", [])
-            if _z_pos:
-                _z_rows = []
-                for _zr in _z_pos[:20]:
-                    _z_rows.append({
-                        "Asset":  _zr.get("symbol", "—"),
-                        "Chain":  _zr.get("chain", "—"),
-                        "Value":  f"${_zr.get('value', 0):,.2f}",
-                        "Amount": f"{_zr.get('qty', 0):.4f}",
-                    })
-                st.dataframe(pd.DataFrame(_z_rows), width="stretch", hide_index=True)
-    elif not _wallet_addr:
-        st.caption("Enter a wallet address above to load Zerion portfolio data.")
-    else:
-        st.caption("Set RWA_ZERION_API_KEY in .env to enable Zerion portfolio import.")
-
-    # ─── Wormhole Cross-Chain VAA Activity (#113) ─────────────────────────────
-    st.markdown("---")
-    st.markdown("#### 🌉 Wormhole Cross-Chain Bridge Activity")
-    st.caption("Wormhole Scan public API · Verified Action Approvals (VAAs) · RWA bridge flow tracker")
-
-    _wh_chain_opts = {"Ethereum (2)": 2, "Solana (1)": 1, "BSC (4)": 4}
-    _wh_sel = st.selectbox("Source Chain", list(_wh_chain_opts.keys()),
-                           key="wh_chain_sel", index=0)
-    _wh_chain_id = _wh_chain_opts[_wh_sel]
-    _wh_data = _wh_vaas(_wh_chain_id)
-
-    if _wh_data:
-        _wh_rows = []
-        for _wv in _wh_data:
-            _ts_raw = _wv.get("timestamp", "")
-            _ts_str = _ts_raw[:19].replace("T", " ") if _ts_raw else "—"
-            _wh_rows.append({
-                "Sequence":   _wv.get("sequence", "—"),
-                "Emitter":    (_wv.get("emitter_address") or "")[:16] + "…",
-                "Timestamp":  _ts_str,
-                "Payload":    _wv.get("payload_type", 0),
-                "Guardian":   _wv.get("guardian_set", 0),
-                "Tx Hash":    (_wv.get("tx_hash") or "")[:16] + ("…" if _wv.get("tx_hash") else ""),
-            })
-        st.dataframe(pd.DataFrame(_wh_rows), width="stretch", hide_index=True)
-        st.caption(f"{len(_wh_data)} VAAs · Chain ID {_wh_chain_id} · Wormhole Scan public API")
-    else:
-        st.caption("No recent VAA data found for this chain.")
-
-    # ── R8: DeFi Collateral Utility Panel ────────────────────────────────────
-    try:
         st.markdown("---")
-        st.markdown('<div class="section-header">DeFi Collateral Utility</div>', unsafe_allow_html=True)
-        st.caption("Tokenized RWA assets deployed as collateral in DeFi protocols — unlocking additional liquidity on top of base yield. Data: DeFiLlama + on-chain research.")
-        _DEFI_COLLATERAL = [
-            {
-                "asset": "BUIDL", "protocol": "Aave Horizon / Ondo",
-                "collateral_tvl_m": 180, "supported": True,
-                "utility": "Used as collateral to borrow USDC — earn T-bill yield + DeFi borrow capacity. Aave Horizon institutional pool.",
-                "ltv": 85, "chains": "Ethereum",
-            },
-            {
-                "asset": "OUSG", "protocol": "Morpho Blue",
-                "collateral_tvl_m": 220, "supported": True,
-                "utility": "Listed as collateral on Morpho Blue. Users borrow USDC against OUSG at up to 86% LTV.",
-                "ltv": 86, "chains": "Ethereum / Solana",
-            },
-            {
-                "asset": "USDY", "protocol": "Pendle Finance",
-                "collateral_tvl_m": 95, "supported": True,
-                "utility": "USDY yield-tokenized on Pendle. Split into Principal Token + Yield Token — trade future yield.",
-                "ltv": 0, "chains": "Ethereum / Mantle / Solana",
-            },
-            {
-                "asset": "USDM", "protocol": "Curve + Aave",
-                "collateral_tvl_m": 55, "supported": True,
-                "utility": "USDM in Curve liquidity pools. Used as collateral in Aave v3 on Polygon. Rebasing yield passes to LP.",
-                "ltv": 75, "chains": "Ethereum / Polygon",
-            },
-            {
-                "asset": "sDAI (DAI via Maker)", "protocol": "MakerDAO Spark",
-                "collateral_tvl_m": 1800, "supported": True,
-                "utility": "DAI collateralized by US Treasuries via Maker RWA vaults. sDAI earns DSR (DAI Savings Rate).",
-                "ltv": 80, "chains": "Ethereum",
-            },
-            {
-                "asset": "stETH / sUSDe", "protocol": "Ethena x RWA",
-                "collateral_tvl_m": 450, "supported": True,
-                "utility": "sUSDe backed partially by tokenized Tbills as reserves. Used as DeFi collateral in Aave, Morpho.",
-                "ltv": 77, "chains": "Ethereum",
-            },
+
+        # ── Protocol Health — DeFiLlama Fee Revenue (#57) ─────────────────────────
+        st.markdown("#### RWA Protocol Health — Fee Revenue")
+        st.caption("DeFiLlama fees endpoint · 24h and 30d fee collection for top RWA protocols. "
+                   "Declining fees = shrinking origination. GREEN = on pace, YELLOW = slowing, RED = declining.")
+
+        _pf = _load_protocol_fees()
+        _pf_ts = _pf.get("timestamp", "")
+
+        # Key RWA protocol slugs to display
+        _PF_DISPLAY = [
+            ("centrifuge",    "Centrifuge"),
+            ("maple",         "Maple Finance"),
+            ("goldfinch",     "Goldfinch"),
+            ("clearpool",     "Clearpool"),
+            ("truefi",        "TrueFi"),
+            ("ondo-finance",  "Ondo Finance"),
         ]
-        _r8_cols = st.columns(3)
-        for _r8i, _r8a in enumerate(_DEFI_COLLATERAL):
-            _r8c = "#00d4aa" if _r8a["supported"] else "#6b7280"
-            _r8_ltv_str = f"LTV: {_r8a['ltv']}%" if _r8a["ltv"] > 0 else "Yield-only (no LTV)"
-            with _r8_cols[_r8i % 3]:
-                _r8_tvl = _r8a["collateral_tvl_m"]
-                _r8_tvl_str = f"${_r8_tvl:,.0f}M" if _r8_tvl < 1000 else f"${_r8_tvl/1000:.1f}B"
+        _PF_HEALTH_COLORS = {"GREEN": "#10b981", "YELLOW": "#f59e0b", "RED": "#ef4444"}
+
+        def _fmt_fee(v):
+            if v is None or v == 0: return "—"
+            if v >= 1e6: return f"${v/1e6:.2f}M"
+            if v >= 1e3: return f"${v/1e3:.1f}K"
+            return f"${v:.0f}"
+
+        _pf_entries = [(slug, label, _pf.get(slug)) for slug, label in _PF_DISPLAY if _pf.get(slug)]
+        if _pf_entries:
+            _pf_cols = st.columns(min(len(_pf_entries), 3))
+            for _pfi, (slug, label, pdata) in enumerate(_pf_entries):
+                with _pf_cols[_pfi % 3]:
+                    _health     = pdata.get("health", "YELLOW")
+                    _h_color    = _PF_HEALTH_COLORS.get(_health, "#9ca3af")
+                    _fees24h    = pdata.get("fees_24h", 0)
+                    _fees30d    = pdata.get("fees_30d", 0)
+                    _annualized = pdata.get("annualized", 0)
+                    st.markdown(f"""
+        <div style="background:#111827;border:1px solid {_h_color}40;border-radius:8px;
+                padding:12px;margin-bottom:8px;border-top:3px solid {_h_color}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:600;color:#e2e8f0">{label}</div>
+        <div style="font-size:10px;font-weight:700;color:{_h_color};background:{_h_color}20;
+                    padding:2px 8px;border-radius:4px">{_health}</div>
+          </div>
+          <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px">Fees 24h</div>
+          <div style="font-size:16px;font-weight:700;color:{_h_color}">{_fmt_fee(_fees24h)}</div>
+          <div style="font-size:10px;color:#4b5563;margin-top:4px">
+        30d: {_fmt_fee(_fees30d)} &nbsp;·&nbsp; Ann: {_fmt_fee(_annualized)}
+          </div>
+        </div>""", unsafe_allow_html=True)
+            st.caption(f"Source: DeFiLlama Fees · Cached 1h · Updated: {_pf_ts[:19]}")
+        else:
+            st.info("Protocol fee data loading... Requires DeFiLlama fees API connection (api.llama.fi).")
+
+        # ── R5: RWA Adoption Velocity ─────────────────────────────────────────────
+        try:
+            st.markdown("---")
+            st.markdown('<div class="section-header">RWA Adoption Velocity</div>', unsafe_allow_html=True)
+            st.caption("Tokenized asset market growth trajectory — TVL milestones and quarter-over-quarter adoption acceleration. Source: RWA.xyz / DeFiLlama historical estimates.")
+            # Static milestones (best public data available without paid API)
+            _RWA_MILESTONES = [
+                {"quarter": "Q1 2021", "tvl_bn": 0.3,  "label": "Centrifuge + MakerDAO pioneer RWA collateral"},
+                {"quarter": "Q2 2022", "tvl_bn": 0.7,  "label": "Maple Finance + Goldfinch scale private credit"},
+                {"quarter": "Q4 2022", "tvl_bn": 1.5,  "label": "MakerDAO adds US Treasuries as collateral"},
+                {"quarter": "Q2 2023", "tvl_bn": 3.5,  "label": "BlackRock BUIDL launch — institutional watershed"},
+                {"quarter": "Q4 2023", "tvl_bn": 7.5,  "label": "Ondo OUSG crosses $500M TVL; Franklin BENJI $300M"},
+                {"quarter": "Q2 2024", "tvl_bn": 12.0, "label": "Total tokenized treasuries hit $1B milestone"},
+                {"quarter": "Q4 2024", "tvl_bn": 16.5, "label": "BUIDL crosses $500M; Apollo tokenized credit fund"},
+                {"quarter": "Q1 2025", "tvl_bn": 19.0, "label": "Ondo OUSG $2B+; Ethena sUSDe integration"},
+                {"quarter": "Q4 2025", "tvl_bn": 28.0, "label": "Cross-chain RWA expansion; AAVE Horizon announced"},
+                {"quarter": "Q1 2026", "tvl_bn": 35.0, "label": "Total tokenized asset market approaches $40B"},
+            ]
+            _qvl = [m["tvl_bn"] for m in _RWA_MILESTONES]
+            _qbns = [m["quarter"] for m in _RWA_MILESTONES]
+            # QoQ growth calculation
+            _qgrowth = [None] + [(_qvl[i] - _qvl[i-1]) / _qvl[i-1] * 100 for i in range(1, len(_qvl))]
+            _r5_c1, _r5_c2, _r5_c3 = st.columns(3)
+            _r5_c1.metric("Current Est. TVL",   f"${_qvl[-1]:.0f}B",                  help="Estimated total tokenized RWA market TVL (Q1 2026 estimate)")
+            _r5_c2.metric("QoQ Growth",          f"{_qgrowth[-1]:+.1f}%",             help="Quarter-over-quarter TVL growth rate — latest period vs prior quarter")
+            _r5_c3.metric("Growth Since 2021",   f"{((_qvl[-1]/_qvl[0])-1)*100:.0f}%", help="Total market growth from Q1 2021 baseline to today")
+            _r5_fig = go.Figure()
+            _r5_fig.add_trace(go.Scatter(
+                x=_qbns, y=_qvl,
+                mode="lines+markers+text",
+                line=dict(color="#00d4aa", width=2.5),
+                marker=dict(size=8, color="#00d4aa"),
+                text=[f"${v:.1f}B" for v in _qvl],
+                textposition="top center",
+                textfont=dict(size=9),
+                fill="tozeroy",
+                fillcolor="rgba(0,212,170,0.08)",
+                hovertemplate="<b>%{x}</b><br>TVL: $%{y:.1f}B<extra></extra>",
+            ))
+            for _mi, _m in enumerate(_RWA_MILESTONES):
+                if "BUIDL" in _m["label"] or "watershed" in _m["label"] or "billion" in _m["label"].lower():
+                    _r5_fig.add_annotation(
+                        x=_m["quarter"], y=_m["tvl_bn"],
+                        text=_m["label"][:35] + "…",
+                        showarrow=True, arrowhead=2, arrowcolor="#f59e0b",
+                        font=dict(size=8, color="#f59e0b"),
+                        bgcolor="rgba(17,24,39,0.9)", bordercolor="#f59e0b",
+                        borderwidth=1, ax=0, ay=-40,
+                    )
+            _r5_fig.update_layout(
+                height=360, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0", size=11),
+                margin=dict(l=0, r=0, t=20, b=60),
+                xaxis=dict(tickangle=-30, gridcolor="rgba(255,255,255,0.04)"),
+                yaxis=dict(title="TVL ($ Billions)", gridcolor="rgba(255,255,255,0.05)"),
+            )
+            st.plotly_chart(_r5_fig, width="stretch")
+            _user_level_r5 = st.session_state.get("user_level", "beginner")
+            if _user_level_r5 == "beginner":
+                st.info("💡 **What does this mean for me?** This chart shows how fast the real-world asset tokenization market has been growing. In 2021, barely $300 million of real assets were tokenized. By 2026, it's estimated to be $35+ billion and accelerating. Early positioning in high-quality RWA assets puts you ahead of institutional adoption.")
+        except Exception as _r5_err:
+            logger.debug("[R5] Adoption velocity skipped: %s", _r5_err)
+
+        # ── Crypto Derivatives Context (moved from Options Flow tab) ──────────────
+        st.markdown("---")
+        with st.expander("📐 Crypto Derivatives Context — BTC/ETH Options (Deribit)", expanded=False):
+            st.caption("Deribit public API · no key required · Put/Call Ratio · Max Pain · IV Term Structure · Cached 15 min · Useful for macro timing of RWA entries/exits")
+            import plotly.graph_objects as _go_m
+            from plotly.subplots import make_subplots as _msp_m
+            _d_curr = st.selectbox("Currency", ["BTC", "ETH"], key="macro_opt_curr_sel")
+            _d_oc   = _load_deribit_options(_d_curr)
+            if _d_oc.get("error") and not _d_oc.get("oi_by_strike"):
+                st.warning(f"Options data unavailable: {_d_oc.get('error')}. Deribit may be temporarily unreachable.")
+            else:
+                _d_pc   = _d_oc.get("put_call_ratio")
+                _d_mp   = _d_oc.get("max_pain")
+                _d_tput = _d_oc.get("total_put_oi", 0)
+                _d_tcal = _d_oc.get("total_call_oi", 0)
+                _d_osig = _d_oc.get("signal", "N/A")
+                _d_spot = _d_oc.get("spot_price")
+                _d_sc = {
+                    "EXTREME_PUTS":  "#ef4444", "BEARISH": "#f59e0b",
+                    "NEUTRAL":       "#6b7280", "BULLISH": "#10b981",
+                    "EXTREME_CALLS": "#00d4aa",
+                }.get(_d_osig, "#6b7280")
+                _dc1, _dc2, _dc3, _dc4 = st.columns(4)
+                with _dc1:
+                    st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_d_sc};border-radius:10px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Put/Call Ratio</div>
+          <div style="font-size:28px;font-weight:700;color:{_d_sc}">{f"{_d_pc:.3f}" if _d_pc is not None else "—"}</div>
+          <div style="font-size:12px;color:#9ca3af">{_d_osig.replace("_", " ")}</div>
+        </div>""", unsafe_allow_html=True)
+                with _dc2:
+                    _d_mp_dist = (f"{abs(_d_mp - _d_spot) / _d_spot * 100:.1f}% {'below' if _d_mp < _d_spot else 'above'} spot"
+                                  if _d_mp and _d_spot else "")
+                    st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Max Pain</div>
+          <div style="font-size:24px;font-weight:700;color:#6366f1">{f"${_d_mp:,.0f}" if _d_mp else "—"}</div>
+          <div style="font-size:11px;color:#6b7280">{_d_mp_dist}</div>
+        </div>""", unsafe_allow_html=True)
+                with _dc3:
+                    st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #ef4444;border-radius:10px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Total Put OI</div>
+          <div style="font-size:24px;font-weight:700;color:#ef4444">{f"{_d_tput:,.0f}" if _d_tput else "—"}</div>
+          <div style="font-size:11px;color:#6b7280">contracts</div>
+        </div>""", unsafe_allow_html=True)
+                with _dc4:
+                    st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Total Call OI</div>
+          <div style="font-size:24px;font-weight:700;color:#10b981">{f"{_d_tcal:,.0f}" if _d_tcal else "—"}</div>
+          <div style="font-size:11px;color:#6b7280">contracts</div>
+        </div>""", unsafe_allow_html=True)
+                _d_oi = _d_oc.get("oi_by_strike", [])
+                _d_ts = _d_oc.get("term_structure", [])
+                if _d_oi or _d_ts:
+                    _dm_c1, _dm_c2 = st.columns([3, 2])
+                    with _dm_c1:
+                        if _d_oi:
+                            _d_fig = _go_m.Figure()
+                            _d_strikes = [str(int(r["strike"])) for r in _d_oi]
+                            _d_fig.add_trace(_go_m.Bar(name="Puts", x=_d_strikes, y=[r["put_oi"] for r in _d_oi], marker_color="rgba(239,68,68,0.75)"))
+                            _d_fig.add_trace(_go_m.Bar(name="Calls", x=_d_strikes, y=[r["call_oi"] for r in _d_oi], marker_color="rgba(16,185,129,0.75)"))
+                            _d_fig.update_layout(barmode="group", height=280, paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0", size=10),
+                                margin=dict(l=0, r=0, t=30, b=0), title="OI by Strike",
+                                xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+                                yaxis=dict(gridcolor="rgba(255,255,255,0.05)"))
+                            st.plotly_chart(_d_fig, width="stretch")
+                    with _dm_c2:
+                        _d_ts_valid = [t for t in _d_ts if t.get("atm_iv") and t.get("dte") is not None]
+                        if _d_ts_valid:
+                            _d_figb = _go_m.Figure()
+                            _d_figb.add_trace(_go_m.Scatter(
+                                x=[t["dte"] for t in _d_ts_valid], y=[t["atm_iv"] for t in _d_ts_valid],
+                                mode="lines+markers", name="ATM IV",
+                                line=dict(color="#6366f1", width=2), marker=dict(size=7)))
+                            _d_figb.update_layout(height=280, paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0", size=10),
+                                margin=dict(l=0, r=0, t=30, b=0), title="IV Term Structure",
+                                xaxis=dict(title="DTE", gridcolor="rgba(255,255,255,0.04)"),
+                                yaxis=dict(title="IV (%)", gridcolor="rgba(255,255,255,0.05)"))
+                            st.plotly_chart(_d_figb, width="stretch")
+                _d_ts_str = _d_oc.get("timestamp", "")[:19]
+                st.caption(f"Source: Deribit · {_d_ts_str} UTC · For macro timing context — not a direct RWA signal")
+
+
+    with st.expander("⛓️ RWA On-Chain Activity", expanded=True):
+        st.markdown("### ⛓️ RWA On-Chain Intelligence")
+        st.caption("DeFiLlama RWA category · Centrifuge · Maple · Tokenized Treasury TVL · Protocol adoption trends · Cached 1h")
+
+        # ── RWA Total TVL ─────────────────────────────────────────────────────────
+        try:
+            _rwa_total = _df.get_total_rwa_tvl()
+            _rwa_protos_raw = _df.fetch_defillama_protocols()
+            _rwa_protos = [
+                p for p in (_rwa_protos_raw or [])
+                if str(p.get("category") or "").lower() in ("rwa", "real world assets", "tokenized-assets")
+                   or any(str(c).lower() in ("rwa", "tokenized assets", "real world assets") for c in (p.get("chains") or []))
+            ]
+            # Also pick known RWA protocols by slug
+            _RWA_SLUGS = {"ondo-finance", "centrifuge", "maple-finance", "goldfinch", "clearpool",
+                          "backed-finance", "superstate", "frax", "pendle", "morpho",
+                          "franklin-templeton", "blackrock-buidl"}
+            _rwa_protos_extra = [
+                p for p in (_rwa_protos_raw or [])
+                if any(slug in str(p.get("slug","")).lower() or slug in str(p.get("name","")).lower()
+                       for slug in _RWA_SLUGS)
+                and p not in _rwa_protos
+            ]
+            _rwa_protos = (_rwa_protos + _rwa_protos_extra)[:20]
+
+            _rwa_tvl_total_fmt = (f"${_rwa_total/1e9:.2f}B" if _rwa_total and _rwa_total >= 1e9
+                                  else f"${_rwa_total/1e6:.0f}M" if _rwa_total and _rwa_total >= 1e6
+                                  else f"${_rwa_total:,.0f}" if _rwa_total else "—")
+
+            _rt1, _rt2, _rt3, _rt4 = st.columns(4)
+            with _rt1:
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #00d4aa;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Total RWA TVL</div>
+          <div style="font-size:28px;font-weight:700;color:#00d4aa">{_rwa_tvl_total_fmt}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">DeFiLlama RWA category</div>
+        </div>""", unsafe_allow_html=True)
+            with _rt2:
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Tracked Protocols</div>
+          <div style="font-size:28px;font-weight:700;color:#6366f1">{len(_rwa_protos)}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">Active RWA issuers</div>
+        </div>""", unsafe_allow_html=True)
+            # Centrifuge data
+            _cf_pools = _df.fetch_centrifuge_pools() or []
+            _cf_tvl = sum(float(p.get("tvl_usd") or p.get("tvl") or 0) for p in _cf_pools)
+            _cf_fmt = f"${_cf_tvl/1e6:.0f}M" if _cf_tvl >= 1e6 else f"${_cf_tvl:,.0f}"
+            with _rt3:
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #f59e0b;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Centrifuge TVL</div>
+          <div style="font-size:28px;font-weight:700;color:#f59e0b">{_cf_fmt if _cf_tvl else "—"}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">{len(_cf_pools)} active pools</div>
+        </div>""", unsafe_allow_html=True)
+            # Maple data
+            _mpl = _df.fetch_maple_stats() or {}
+            _mpl_tvl = _mpl.get("tvl_usd") or _mpl.get("totalValueLocked") or 0
+            _mpl_fmt = f"${float(_mpl_tvl)/1e6:.0f}M" if float(_mpl_tvl or 0) >= 1e6 else f"${float(_mpl_tvl or 0):,.0f}"
+            with _rt4:
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Maple Finance TVL</div>
+          <div style="font-size:28px;font-weight:700;color:#10b981">{_mpl_fmt if float(_mpl_tvl or 0) > 0 else "—"}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">Private credit pools</div>
+        </div>""", unsafe_allow_html=True)
+
+            # ── RWA Protocol Table ────────────────────────────────────────────────
+            if _rwa_protos:
+                st.markdown("---")
+                st.markdown("#### Top RWA Protocols by TVL")
+                _rwa_rows = []
+                for _rp in sorted(_rwa_protos, key=lambda x: float(x.get("tvl") or 0), reverse=True)[:15]:
+                    _rp_tvl = float(_rp.get("tvl") or 0)
+                    _rp_chg = _rp.get("change_1d") or _rp.get("change_7d")
+                    _rwa_rows.append({
+                        "Protocol":  str(_rp.get("name") or _rp.get("slug") or "—"),
+                        "TVL":       (f"${_rp_tvl/1e9:.2f}B" if _rp_tvl >= 1e9
+                                      else f"${_rp_tvl/1e6:.0f}M" if _rp_tvl >= 1e6
+                                      else f"${_rp_tvl:,.0f}"),
+                        "7d Change": (f"{float(_rp_chg):+.1f}%" if _rp_chg is not None else "—"),
+                        "Category":  str(_rp.get("category") or "RWA"),
+                        "Chains":    ", ".join((str(c) for c in (_rp.get("chains") or [])[:3])) or "—",
+                    })
+                if _rwa_rows:
+                    import pandas as _pd_oc
+                    st.dataframe(_pd_oc.DataFrame(_rwa_rows), hide_index=True, width="stretch")
+
+            # ── Centrifuge Pool Detail ────────────────────────────────────────────
+            if _cf_pools:
+                with st.expander(f"Centrifuge Pools ({len(_cf_pools)} active)"):
+                    _cf_rows = []
+                    for _cp in sorted(_cf_pools, key=lambda x: float(x.get("tvl_usd") or x.get("tvl") or 0), reverse=True)[:10]:
+                        _cp_tvl = float(_cp.get("tvl_usd") or _cp.get("tvl") or 0)
+                        _cf_rows.append({
+                            "Pool": str(_cp.get("name") or _cp.get("id") or "—"),
+                            "TVL":  f"${_cp_tvl/1e6:.1f}M" if _cp_tvl >= 1e6 else f"${_cp_tvl:,.0f}",
+                            "APY":  f"{float(_cp.get('apy') or _cp.get('yield') or 0):.2f}%",
+                            "Asset Class": str(_cp.get("asset_class") or _cp.get("type") or "Credit"),
+                        })
+                    if _cf_rows:
+                        import pandas as _pd_cf
+                        st.dataframe(_pd_cf.DataFrame(_cf_rows), hide_index=True, width="stretch")
+
+            _user_lvl_oc = st.session_state.get("user_level", "beginner")
+            if _user_lvl_oc == "beginner":
+                st.info("💡 **What does this mean for me?** This shows the total amount of real-world assets (treasuries, real estate, private credit) that have been tokenized on blockchain. Growing TVL means more institutions are adopting this technology. Centrifuge and Maple are two of the largest real-world lending protocols — they connect traditional businesses with on-chain capital.")
+
+        except Exception as _oc_rwa_err:
+            st.warning(f"RWA on-chain data unavailable: {_oc_rwa_err}")
+
+        # ── RLUSD / XRPL Live Data (Group 6) ─────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 🌊 RLUSD & XRP Ledger")
+        st.caption("XRPL ledger gateway_balances + CoinGecko · Ripple USD · Cached 15 min")
+
+        _rlusd = _load_xrpl_rlusd()
+
+        if _rlusd.get("error") and not _rlusd.get("circulating_supply"):
+            st.caption(f"RLUSD data unavailable: {_rlusd.get('error')}. XRPL cluster may be unreachable.")
+        else:
+            def _fmt_supply(v):
+                if v is None: return "—"
+                if v >= 1e9:  return f"${v/1e9:.2f}B"
+                if v >= 1e6:  return f"${v/1e6:.1f}M"
+                return f"${v:,.0f}"
+
+            _rl_xrpl  = _rlusd.get("xrpl_supply")
+            _rl_circ  = _rlusd.get("circulating_supply")
+            _rl_price = _rlusd.get("price_usd", 1.0)
+            _rl_mcap  = _rlusd.get("market_cap_usd")
+            _rl_src   = _rlusd.get("source", "—")
+
+            _rla, _rlb, _rlc, _rld = st.columns(4)
+            with _rla:
                 st.markdown(f"""
-<div style="background:#111827;border:1px solid {_r8c}33;border-top:3px solid {_r8c};
-            border-radius:8px;padding:12px;margin-bottom:8px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-    <div style="font-size:14px;font-weight:700;color:#e2e8f0">{_r8a['asset']}</div>
-    <div style="font-size:10px;color:{_r8c};background:{_r8c}22;padding:2px 7px;border-radius:4px">
-      {_r8_tvl_str} TVL</div>
-  </div>
-  <div style="font-size:11px;color:#6366f1;margin-bottom:4px">{_r8a['protocol']}</div>
-  <div style="font-size:10px;color:#6b7280;margin-bottom:4px">{_r8_ltv_str} · {_r8a['chains']}</div>
-  <div style="font-size:10px;color:#9ca3af;line-height:1.5">{_r8a['utility']}</div>
-</div>""", unsafe_allow_html=True)
-        # Bar chart — collateral TVL comparison
-        _r8_names = [a["asset"][:20] for a in _DEFI_COLLATERAL]
-        _r8_tvls  = [a["collateral_tvl_m"] for a in _DEFI_COLLATERAL]
-        _r8_fig = go.Figure(go.Bar(
-            x=_r8_names, y=_r8_tvls,
-            marker_color="#6366f1",
-            text=[f"${v:,.0f}M" if v < 1000 else f"${v/1000:.1f}B" for v in _r8_tvls],
-            textposition="outside",
-        ))
-        _r8_fig.update_layout(
-            title="RWA Collateral TVL by Asset",
-            height=280, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#e2e8f0", size=11),
-            margin=dict(l=0, r=0, t=40, b=40),
-            yaxis=dict(title="Collateral TVL ($M)", gridcolor="rgba(255,255,255,0.05)"),
-        )
-        st.plotly_chart(_r8_fig, width="stretch")
-        _user_level_r8 = st.session_state.get("user_level", "beginner")
-        if _user_level_r8 == "beginner":
-            st.info("💡 **What does this mean for me?** In DeFi, you can use your RWA tokens as collateral to borrow stablecoins — without selling your position. For example, deposit OUSG earning 4.37%, borrow USDC at 3%, and deploy that USDC elsewhere. This is called 'capital efficiency' — you're making your money work in multiple places at once.")
-    except Exception as _r8_err:
-        logger.debug("[R8] DeFi collateral panel skipped: %s", _r8_err)
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #3b82f6;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">XRPL On-Ledger Supply</div>
+          <div style="font-size:22px;font-weight:700;color:#3b82f6">{_fmt_supply(_rl_xrpl) if _rl_xrpl else "—"}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">RLUSD issued on XRPL ledger</div>
+        </div>
+        """, unsafe_allow_html=True)
+            with _rlb:
+                st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #06b6d4;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Circulating Supply</div>
+          <div style="font-size:22px;font-weight:700;color:#06b6d4">{_fmt_supply(_rl_circ)}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">All chains (CoinGecko)</div>
+        </div>
+        """, unsafe_allow_html=True)
+            with _rlc:
+                st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Market Cap</div>
+          <div style="font-size:22px;font-weight:700;color:#10b981">{_fmt_supply(_rl_mcap)}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">Target: $1.5B+ (Ripple 2026)</div>
+        </div>
+        """, unsafe_allow_html=True)
+            with _rld:
+                _peg_color = "#10b981" if abs((_rl_price or 1.0) - 1.0) < 0.005 else "#f59e0b"
+                st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_peg_color};border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Price</div>
+          <div style="font-size:28px;font-weight:700;color:{_peg_color}">${_rl_price:.4f}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">{'On peg' if abs((_rl_price or 1.0) - 1.0) < 0.005 else 'Off peg!'}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+            _rl_ts = _rlusd.get("timestamp", "")[:19]
+            st.caption(f"Source: {_rl_src} · {_rl_ts} UTC · XRPL issuer: {XRPL_RLUSD_ISSUER[:12]}…")
+
+        # ── XRPL MPT (XLS-33d Multi-Purpose Token) (#106) ────────────────────────
+        st.markdown("---")
+        st.markdown("#### 🔷 XRPL Multi-Purpose Tokens (XLS-33d)")
+        st.caption("XRPL JSON-RPC ledger_data · MPT issuances + RLUSD gateway supply · Cached 5 min")
+
+        _mpt = _load_xrpl_mpt()
+        if _mpt.get("source") == "unavailable":
+            st.caption("MPT data unavailable — XRPL RPC unreachable.")
+        else:
+            _mpt_rlusd = _mpt.get("rlusd_supply")
+            _mpt_total = _mpt.get("mpt_issuance_count", 0)
+            _mpt_a, _mpt_b = st.columns(2)
+            with _mpt_a:
+                _rlusd_fmt = f"${_mpt_rlusd/1e6:.1f}M" if _mpt_rlusd and _mpt_rlusd >= 1e6 else (f"${_mpt_rlusd:,.0f}" if _mpt_rlusd else "—")
+                st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #06b6d4;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Gateway Supply</div>
+          <div style="font-size:26px;font-weight:700;color:#06b6d4">{_rlusd_fmt}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">On-ledger RLUSD via gateway_balances</div>
+        </div>
+        """, unsafe_allow_html=True)
+            with _mpt_b:
+                st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #8b5cf6;border-radius:10px;padding:16px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Active MPT Issuances</div>
+          <div style="font-size:26px;font-weight:700;color:#8b5cf6">{_mpt_total:,}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">XLS-33d MPT objects on ledger</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── XRPL Basic Data (#97) — XRP price + RLUSD supply via fetch_xrpl_data() ─
+        st.markdown("---")
+        st.markdown("#### 🌐 XRPL Basic Integration (#97)")
+        st.caption("XRP price via CoinGecko · RLUSD supply via XRPL cluster / xrpl-py · Cached 15 min")
+
+        if st.button("⟳ Refresh XRPL Basic", key="btn_xrpl_basic"):
+            _load_xrpl_basic.clear()
+
+        with st.spinner("Fetching XRPL data…"):
+            _xrpl_basic = _load_xrpl_basic()
+
+        _xb_xrp   = _xrpl_basic.get("xrp_price_usd", 0)
+        _xb_rlusd = _xrpl_basic.get("rlusd_supply", 0)
+        _xb_avail = _xrpl_basic.get("xrpl_available", False)
+        _xb_src   = _xrpl_basic.get("source", "—")
+        _xb_ts    = (_xrpl_basic.get("timestamp") or "")[:19]
+
+        _xb_c1, _xb_c2, _xb_c3 = st.columns(3)
+        with _xb_c1:
+            _xrp_clr = "#10b981" if _xb_xrp > 0 else "#6b7280"
+            _xrp_fmt = f"${_xb_xrp:.4f}" if _xb_xrp else "—"
+            st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_xrp_clr};border-radius:10px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">XRP Price (USD)</div>
+          <div style="font-size:24px;font-weight:700;color:{_xrp_clr}">{_xrp_fmt}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">Source: CoinGecko</div>
+        </div>
+        """, unsafe_allow_html=True)
+        with _xb_c2:
+            _rlusd_s = (f"${_xb_rlusd/1e9:.2f}B" if _xb_rlusd and _xb_rlusd >= 1e9
+                        else f"${_xb_rlusd/1e6:.1f}M" if _xb_rlusd and _xb_rlusd >= 1e6
+                        else f"${_xb_rlusd:,.0f}" if _xb_rlusd else "—")
+            _rlusd_clr = "#3b82f6" if _xb_rlusd and _xb_rlusd > 0 else "#6b7280"
+            st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_rlusd_clr};border-radius:10px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">RLUSD Supply</div>
+          <div style="font-size:24px;font-weight:700;color:{_rlusd_clr}">{_rlusd_s}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">XRPL ledger issuance</div>
+        </div>
+        """, unsafe_allow_html=True)
+        with _xb_c3:
+            _lib_clr  = "#10b981" if _xb_avail else "#6b7280"
+            _lib_lbl  = "xrpl-py installed" if _xb_avail else "xrpl-py not installed"
+            st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_lib_clr};border-radius:10px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">xrpl-py Status</div>
+          <div style="font-size:16px;font-weight:700;color:{_lib_clr}">{_lib_lbl}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">Source: {_xb_src}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.caption(f"Source: {_xb_src} · {_xb_ts} UTC · pip install xrpl-py>=2.4.0 for direct ledger reads")
+
+        # ─── Chainlink Reference Price Feeds (#108 + #109) ───────────────────────
+        st.markdown("---")
+        st.markdown("#### 🔗 Chainlink Reference Price Feeds")
+        st.caption("Etherscan eth_call proxy · latestAnswer() + decimals() · Cached 1 min")
+
+        if feature_enabled("etherscan"):
+            _cl_data = _cl_prices()
+            if _cl_data:
+                _cl_cols = st.columns(len(_cl_data))
+                for _ci, (_pair, _pv) in enumerate(_cl_data.items()):
+                    _pv_fmt = f"${_pv:,.4f}" if _pv else "—"
+                    _clr = "#10b981" if _pv else "#6b7280"
+                    with _cl_cols[_ci]:
+                        st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:#6b7280;margin-bottom:4px">{_pair}</div>
+          <div style="font-size:18px;font-weight:700;color:{_clr}">{_pv_fmt}</div>
+          <div style="font-size:10px;color:#9ca3af">Chainlink</div>
+        </div>
+        """, unsafe_allow_html=True)
+            else:
+                st.caption("No Chainlink data — check ETHERSCAN_API_KEY.")
+        else:
+            st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable Chainlink price feeds.")
+
+        # ─── ERC-4626 Vault Reader (#103) ────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 🏦 ERC-4626 Tokenized Vault Metrics")
+        st.caption("Etherscan eth_call · pricePerShare() + totalAssets() · BUIDL / OUSG / USDY / wstETH")
+
+        if feature_enabled("erc4626") or feature_enabled("etherscan"):
+            _vaults = _vault_data()
+            _v_cols = st.columns(4)
+            for _vi, (_sym, _vd) in enumerate(_vaults.items()):
+                _err    = _vd.get("error")
+                _pps    = _vd.get("price_per_share")
+                _ta     = _vd.get("total_assets")
+                _pps_s  = f"${_pps:.6f}" if _pps else "—"
+                _ta_s   = (f"${_ta/1e9:.2f}B" if _ta and _ta >= 1e9 else f"${_ta/1e6:.1f}M" if _ta else "—")
+                _vc     = "#10b981" if _pps else "#6b7280"
+                with _v_cols[_vi]:
+                    st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_vc};border-radius:10px;padding:14px">
+          <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px">{_sym}</div>
+          <div style="font-size:10px;color:#6b7280">pricePerShare</div>
+          <div style="font-size:16px;font-weight:700;color:{_vc}">{_pps_s}</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:6px">totalAssets</div>
+          <div style="font-size:14px;color:#9ca3af">{_ta_s}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        else:
+            st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-4626 vault reader.")
+
+        # ─── ERC-7540 Redemption Queue (#104) ────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### ⏳ ERC-7540 Async Redemption Depth")
+        st.caption("Etherscan eth_call · totalPendingRedemptions() · BUIDL / OUSG")
+
+        if feature_enabled("erc4626") or feature_enabled("etherscan"):
+            _redeems = _redeem_data()
+            _rd_cols = st.columns(2)
+            for _ri, (_sym, _rd) in enumerate(_redeems.items()):
+                _pending = _rd.get("pending_redemptions")
+                _p_s     = (f"${_pending/1e6:.1f}M" if _pending and _pending >= 1e6 else
+                            f"${_pending:,.0f}" if _pending else "—")
+                _rc2     = "#f59e0b" if _pending and _pending > 0 else "#10b981"
+                with _rd_cols[_ri]:
+                    st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px">
+          <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px">{_sym} Pending Redemptions</div>
+          <div style="font-size:22px;font-weight:700;color:{_rc2};margin-top:6px">{_p_s}</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:4px">Queued for settlement (ERC-7540)</div>
+        </div>
+        """, unsafe_allow_html=True)
+        else:
+            st.caption("Set RWA_ETHERSCAN_API_KEY in .env to enable ERC-7540 queue depth.")
+
+        # ─── ERC-7540 Redemption Queue — Coverage & Risk Signal (#104 enhanced) ──
+        if _pro_mode and (feature_enabled("erc4626") or feature_enabled("etherscan")):
+            st.markdown("---")
+            st.markdown("#### 🔒 ERC-7540 Vault Coverage & Risk Signal (Pro)")
+            st.caption(
+                "totalAssets / totalSupply coverage ratio — below 1.0 = undercollateralized. "
+                "RED signal if coverage < 0.95."
+            )
+
+            _ERC7540_VAULTS = {
+                "BUIDL": "0x7712c34205737192402172409a8F7ccef8aA2AEc",
+                "OUSG":  "0x1B19C19393e2d034D8Ff31ff34c81252FcBbee92",
+            }
+
+            _rq_cols = st.columns(len(_ERC7540_VAULTS))
+            for _rqi, (_rq_sym, _rq_addr) in enumerate(_ERC7540_VAULTS.items()):
+                _rqd = _load_erc7540_queue(_rq_addr)
+                _cov     = _rqd.get("coverage_ratio", 1.0)
+                _sig     = _rqd.get("risk_signal", "GREEN")
+                _ta7     = _rqd.get("total_assets", 0.0)
+                _ts7     = _rqd.get("total_supply", 0.0)
+                _qdepth  = _rqd.get("queue_depth_usd")
+                _compat  = _rqd.get("erc7540_compatible", False)
+                _sig_clr = {"GREEN": "#10b981", "YELLOW": "#f59e0b", "RED": "#ef4444"}.get(_sig, "#6b7280")
+                _cov_str = f"{_cov:.4f}" if _cov else "—"
+                _qdep_str = (f"${_qdepth/1e6:.1f}M" if _qdepth and _qdepth >= 1e6
+                             else f"${_qdepth:,.0f}" if _qdepth else "N/A")
+                with _rq_cols[_rqi]:
+                    st.markdown(f"""
+        <div style="background:#111827;border:1px solid #1f2937;border-left:4px solid {_sig_clr};
+                border-radius:10px;padding:14px">
+          <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px">
+        {_rq_sym}
+        <span style="font-size:10px;font-weight:400;color:{_sig_clr};margin-left:8px">{_sig}</span>
+          </div>
+          <div style="font-size:10px;color:#6b7280">Coverage Ratio</div>
+          <div style="font-size:20px;font-weight:700;color:{_sig_clr}">{_cov_str}</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:6px">Queue Depth</div>
+          <div style="font-size:13px;color:#9ca3af">{_qdep_str}</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:4px">
+        ERC-7540: {"Compatible" if _compat else "Standard ERC-4626"}
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FOOTER
-# ─────────────────────────────────────────────────────────────────────────────
+        # ── R8: DeFi Collateral Utility Panel ────────────────────────────────────
+        try:
+            st.markdown("---")
+            st.markdown('<div class="section-header">DeFi Collateral Utility</div>', unsafe_allow_html=True)
+            st.caption("Tokenized RWA assets deployed as collateral in DeFi protocols — unlocking additional liquidity on top of base yield. Data: DeFiLlama + on-chain research.")
+            _DEFI_COLLATERAL = [
+                {
+                    "asset": "BUIDL", "protocol": "Aave Horizon / Ondo",
+                    "collateral_tvl_m": 180, "supported": True,
+                    "utility": "Used as collateral to borrow USDC — earn T-bill yield + DeFi borrow capacity. Aave Horizon institutional pool.",
+                    "ltv": 85, "chains": "Ethereum",
+                },
+                {
+                    "asset": "OUSG", "protocol": "Morpho Blue",
+                    "collateral_tvl_m": 220, "supported": True,
+                    "utility": "Listed as collateral on Morpho Blue. Users borrow USDC against OUSG at up to 86% LTV.",
+                    "ltv": 86, "chains": "Ethereum / Solana",
+                },
+                {
+                    "asset": "USDY", "protocol": "Pendle Finance",
+                    "collateral_tvl_m": 95, "supported": True,
+                    "utility": "USDY yield-tokenized on Pendle. Split into Principal Token + Yield Token — trade future yield.",
+                    "ltv": 0, "chains": "Ethereum / Mantle / Solana",
+                },
+                {
+                    "asset": "USDM", "protocol": "Curve + Aave",
+                    "collateral_tvl_m": 55, "supported": True,
+                    "utility": "USDM in Curve liquidity pools. Used as collateral in Aave v3 on Polygon. Rebasing yield passes to LP.",
+                    "ltv": 75, "chains": "Ethereum / Polygon",
+                },
+                {
+                    "asset": "sDAI (DAI via Maker)", "protocol": "MakerDAO Spark",
+                    "collateral_tvl_m": 1800, "supported": True,
+                    "utility": "DAI collateralized by US Treasuries via Maker RWA vaults. sDAI earns DSR (DAI Savings Rate).",
+                    "ltv": 80, "chains": "Ethereum",
+                },
+                {
+                    "asset": "stETH / sUSDe", "protocol": "Ethena x RWA",
+                    "collateral_tvl_m": 450, "supported": True,
+                    "utility": "sUSDe backed partially by tokenized Tbills as reserves. Used as DeFi collateral in Aave, Morpho.",
+                    "ltv": 77, "chains": "Ethereum",
+                },
+            ]
+            _r8_cols = st.columns(3)
+            for _r8i, _r8a in enumerate(_DEFI_COLLATERAL):
+                _r8c = "#00d4aa" if _r8a["supported"] else "#6b7280"
+                _r8_ltv_str = f"LTV: {_r8a['ltv']}%" if _r8a["ltv"] > 0 else "Yield-only (no LTV)"
+                with _r8_cols[_r8i % 3]:
+                    _r8_tvl = _r8a["collateral_tvl_m"]
+                    _r8_tvl_str = f"${_r8_tvl:,.0f}M" if _r8_tvl < 1000 else f"${_r8_tvl/1000:.1f}B"
+                    st.markdown(f"""
+        <div style="background:#111827;border:1px solid {_r8c}33;border-top:3px solid {_r8c};
+                border-radius:8px;padding:12px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:14px;font-weight:700;color:#e2e8f0">{_r8a['asset']}</div>
+        <div style="font-size:10px;color:{_r8c};background:{_r8c}22;padding:2px 7px;border-radius:4px">
+          {_r8_tvl_str} TVL</div>
+          </div>
+          <div style="font-size:11px;color:#6366f1;margin-bottom:4px">{_r8a['protocol']}</div>
+          <div style="font-size:10px;color:#6b7280;margin-bottom:4px">{_r8_ltv_str} · {_r8a['chains']}</div>
+          <div style="font-size:10px;color:#9ca3af;line-height:1.5">{_r8a['utility']}</div>
+        </div>""", unsafe_allow_html=True)
+            # Bar chart — collateral TVL comparison
+            _r8_names = [a["asset"][:20] for a in _DEFI_COLLATERAL]
+            _r8_tvls  = [a["collateral_tvl_m"] for a in _DEFI_COLLATERAL]
+            _r8_fig = go.Figure(go.Bar(
+                x=_r8_names, y=_r8_tvls,
+                marker_color="#6366f1",
+                text=[f"${v:,.0f}M" if v < 1000 else f"${v/1000:.1f}B" for v in _r8_tvls],
+                textposition="outside",
+            ))
+            _r8_fig.update_layout(
+                title="RWA Collateral TVL by Asset",
+                height=280, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0", size=11),
+                margin=dict(l=0, r=0, t=40, b=40),
+                yaxis=dict(title="Collateral TVL ($M)", gridcolor="rgba(255,255,255,0.05)"),
+            )
+            st.plotly_chart(_r8_fig, width="stretch")
+            _user_level_r8 = st.session_state.get("user_level", "beginner")
+            if _user_level_r8 == "beginner":
+                st.info("💡 **What does this mean for me?** In DeFi, you can use your RWA tokens as collateral to borrow stablecoins — without selling your position. For example, deposit OUSG earning 4.37%, borrow USDC at 3%, and deploy that USDC elsewhere. This is called 'capital efficiency' — you're making your money work in multiple places at once.")
+        except Exception as _r8_err:
+            logger.debug("[R8] DeFi collateral panel skipped: %s", _r8_err)
 
-st.markdown("""
-<div style="margin-top:40px;padding:16px;border-top:1px solid #1F2937;text-align:center">
-    <span style="font-size:11px;color:#374151">
-        ♾️ RWA INFINITY MODEL v1.0 &nbsp;·&nbsp;
-        Powered by Claude (claude-sonnet-4-6) &nbsp;·&nbsp;
-        Data: DeFiLlama · CoinGecko &nbsp;·&nbsp;
-        Protocols: Ondo · BlackRock · Pendle · Morpho · Ethena · EigenLayer · Lido · Jito · Lombard · Aave Horizon · Plume · Apollo · Clearpool · Falcon · Agora &nbsp;·&nbsp;
-        ⚠️ For informational purposes only — not financial advice &nbsp;·&nbsp;
-        Auto-refresh: every 60 minutes
-    </span>
-</div>
-""", unsafe_allow_html=True)
 
-# ─── Live scan progress fragment (Upgrade 9) ─────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────────────
+        # FOOTER
+        # ─────────────────────────────────────────────────────────────────────────────
+
+        st.markdown("""
+        <div style="margin-top:40px;padding:16px;border-top:1px solid #1F2937;text-align:center">
+        <span style="font-size:11px;color:#374151">
+            ♾️ RWA INFINITY MODEL v1.0 &nbsp;·&nbsp;
+            Powered by Claude (claude-sonnet-4-6) &nbsp;·&nbsp;
+            Data: DeFiLlama · CoinGecko &nbsp;·&nbsp;
+            Protocols: Ondo · BlackRock · Pendle · Morpho · Ethena · EigenLayer · Lido · Jito · Lombard · Aave Horizon · Plume · Apollo · Clearpool · Falcon · Agora &nbsp;·&nbsp;
+            ⚠️ For informational purposes only — not financial advice &nbsp;·&nbsp;
+            Auto-refresh: every 60 minutes
+        </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ─── Live scan progress fragment (Upgrade 9) ─────────────────────────────────
 # @st.fragment(run_every=3) polls only this fragment every 3 s while a scan is
 # running, avoiding costly full-page reruns.
 @st.fragment(run_every=3)
