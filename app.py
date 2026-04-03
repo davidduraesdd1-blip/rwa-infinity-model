@@ -1299,7 +1299,7 @@ st.session_state["portfolio_value_key"] = portfolio_value
 # MAIN TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro, tab_onchain, tab_options = st.tabs([
+tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, tab_trades, tab_reg, tab_screener, tab_macro, tab_onchain = st.tabs([
     "📊 Portfolio",
     "🌐 Asset Universe",
     "⚡ Arbitrage",
@@ -1311,8 +1311,7 @@ tab_portfolio, tab_universe, tab_arb, tab_carry, tab_compare, tab_ai, tab_news, 
     "🏛️ Regulatory",
     "🔍 Screener",
     "🌍 Macro",
-    "⛓️ On-Chain",
-    "📐 Options Flow",
+    "⛓️ RWA On-Chain",
 ])
 
 
@@ -5119,152 +5118,198 @@ with tab_macro:
     except Exception as _r5_err:
         logger.debug("[R5] Adoption velocity skipped: %s", _r5_err)
 
+    # ── Crypto Derivatives Context (moved from Options Flow tab) ──────────────
+    st.markdown("---")
+    with st.expander("📐 Crypto Derivatives Context — BTC/ETH Options (Deribit)", expanded=False):
+        st.caption("Deribit public API · no key required · Put/Call Ratio · Max Pain · IV Term Structure · Cached 15 min · Useful for macro timing of RWA entries/exits")
+        import plotly.graph_objects as _go_m
+        from plotly.subplots import make_subplots as _msp_m
+        _d_curr = st.selectbox("Currency", ["BTC", "ETH"], key="macro_opt_curr_sel")
+        _d_oc   = _load_deribit_options(_d_curr)
+        if _d_oc.get("error") and not _d_oc.get("oi_by_strike"):
+            st.warning(f"Options data unavailable: {_d_oc.get('error')}. Deribit may be temporarily unreachable.")
+        else:
+            _d_pc   = _d_oc.get("put_call_ratio")
+            _d_mp   = _d_oc.get("max_pain")
+            _d_tput = _d_oc.get("total_put_oi", 0)
+            _d_tcal = _d_oc.get("total_call_oi", 0)
+            _d_osig = _d_oc.get("signal", "N/A")
+            _d_spot = _d_oc.get("spot_price")
+            _d_sc = {
+                "EXTREME_PUTS":  "#ef4444", "BEARISH": "#f59e0b",
+                "NEUTRAL":       "#6b7280", "BULLISH": "#10b981",
+                "EXTREME_CALLS": "#00d4aa",
+            }.get(_d_osig, "#6b7280")
+            _dc1, _dc2, _dc3, _dc4 = st.columns(4)
+            with _dc1:
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_d_sc};border-radius:10px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Put/Call Ratio</div>
+  <div style="font-size:28px;font-weight:700;color:{_d_sc}">{f"{_d_pc:.3f}" if _d_pc is not None else "—"}</div>
+  <div style="font-size:12px;color:#9ca3af">{_d_osig.replace("_", " ")}</div>
+</div>""", unsafe_allow_html=True)
+            with _dc2:
+                _d_mp_dist = (f"{abs(_d_mp - _d_spot) / _d_spot * 100:.1f}% {'below' if _d_mp < _d_spot else 'above'} spot"
+                              if _d_mp and _d_spot else "")
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Max Pain</div>
+  <div style="font-size:24px;font-weight:700;color:#6366f1">{f"${_d_mp:,.0f}" if _d_mp else "—"}</div>
+  <div style="font-size:11px;color:#6b7280">{_d_mp_dist}</div>
+</div>""", unsafe_allow_html=True)
+            with _dc3:
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #ef4444;border-radius:10px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Total Put OI</div>
+  <div style="font-size:24px;font-weight:700;color:#ef4444">{f"{_d_tput:,.0f}" if _d_tput else "—"}</div>
+  <div style="font-size:11px;color:#6b7280">contracts</div>
+</div>""", unsafe_allow_html=True)
+            with _dc4:
+                st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:14px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">Total Call OI</div>
+  <div style="font-size:24px;font-weight:700;color:#10b981">{f"{_d_tcal:,.0f}" if _d_tcal else "—"}</div>
+  <div style="font-size:11px;color:#6b7280">contracts</div>
+</div>""", unsafe_allow_html=True)
+            _d_oi = _d_oc.get("oi_by_strike", [])
+            _d_ts = _d_oc.get("term_structure", [])
+            if _d_oi or _d_ts:
+                _dm_c1, _dm_c2 = st.columns([3, 2])
+                with _dm_c1:
+                    if _d_oi:
+                        _d_fig = _go_m.Figure()
+                        _d_strikes = [str(int(r["strike"])) for r in _d_oi]
+                        _d_fig.add_trace(_go_m.Bar(name="Puts", x=_d_strikes, y=[r["put_oi"] for r in _d_oi], marker_color="rgba(239,68,68,0.75)"))
+                        _d_fig.add_trace(_go_m.Bar(name="Calls", x=_d_strikes, y=[r["call_oi"] for r in _d_oi], marker_color="rgba(16,185,129,0.75)"))
+                        _d_fig.update_layout(barmode="group", height=280, paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0", size=10),
+                            margin=dict(l=0, r=0, t=30, b=0), title="OI by Strike",
+                            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+                            yaxis=dict(gridcolor="rgba(255,255,255,0.05)"))
+                        st.plotly_chart(_d_fig, width="stretch")
+                with _dm_c2:
+                    _d_ts_valid = [t for t in _d_ts if t.get("atm_iv") and t.get("dte") is not None]
+                    if _d_ts_valid:
+                        _d_figb = _go_m.Figure()
+                        _d_figb.add_trace(_go_m.Scatter(
+                            x=[t["dte"] for t in _d_ts_valid], y=[t["atm_iv"] for t in _d_ts_valid],
+                            mode="lines+markers", name="ATM IV",
+                            line=dict(color="#6366f1", width=2), marker=dict(size=7)))
+                        _d_figb.update_layout(height=280, paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#e2e8f0", size=10),
+                            margin=dict(l=0, r=0, t=30, b=0), title="IV Term Structure",
+                            xaxis=dict(title="DTE", gridcolor="rgba(255,255,255,0.04)"),
+                            yaxis=dict(title="IV (%)", gridcolor="rgba(255,255,255,0.05)"))
+                        st.plotly_chart(_d_figb, width="stretch")
+            _d_ts_str = _d_oc.get("timestamp", "")[:19]
+            st.caption(f"Source: Deribit · {_d_ts_str} UTC · For macro timing context — not a direct RWA signal")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ON-CHAIN TAB (Group 4)
+# ON-CHAIN TAB — RWA PROTOCOL TVL + ADOPTION METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_onchain:
-    st.markdown("### ⛓️ BTC On-Chain Intelligence")
-    st.caption("CoinMetrics Community API · free, no key · MVRV Z-Score · SOPR · Active Addresses")
+    st.markdown("### ⛓️ RWA On-Chain Intelligence")
+    st.caption("DeFiLlama RWA category · Centrifuge · Maple · Tokenized Treasury TVL · Protocol adoption trends · Cached 1h")
 
-    _oc = _load_coinmetrics_onchain(days=400)
+    # ── RWA Total TVL ─────────────────────────────────────────────────────────
+    try:
+        _rwa_total = _df.get_total_rwa_tvl()
+        _rwa_protos_raw = _df.fetch_defillama_protocols()
+        _rwa_protos = [
+            p for p in (_rwa_protos_raw or [])
+            if str(p.get("category") or "").lower() in ("rwa", "real world assets", "tokenized-assets")
+               or any(str(c).lower() in ("rwa", "tokenized assets", "real world assets") for c in (p.get("chains") or []))
+        ]
+        # Also pick known RWA protocols by slug
+        _RWA_SLUGS = {"ondo-finance", "centrifuge", "maple-finance", "goldfinch", "clearpool",
+                      "backed-finance", "superstate", "frax", "pendle", "morpho",
+                      "franklin-templeton", "blackrock-buidl"}
+        _rwa_protos_extra = [
+            p for p in (_rwa_protos_raw or [])
+            if any(slug in str(p.get("slug","")).lower() or slug in str(p.get("name","")).lower()
+                   for slug in _RWA_SLUGS)
+            and p not in _rwa_protos
+        ]
+        _rwa_protos = (_rwa_protos + _rwa_protos_extra)[:20]
 
-    if _oc.get("error") and not _oc.get("mvrv_z"):
-        st.warning(f"On-chain data unavailable: {_oc.get('error')}. CoinMetrics Community API may be rate-limited — try again in a minute.")
-    else:
-        # ── Snapshot metric cards ─────────────────────────────────────────────
-        _mz   = _oc.get("mvrv_z")
-        _msig = _oc.get("mvrv_signal", "N/A")
-        _sopr = _oc.get("sopr")
-        _ssig = _oc.get("sopr_signal", "N/A")
-        _rc   = _oc.get("realized_cap")
-        _aa   = _oc.get("active_addresses")
-        _mv   = _oc.get("mvrv_ratio")
+        _rwa_tvl_total_fmt = (f"${_rwa_total/1e9:.2f}B" if _rwa_total and _rwa_total >= 1e9
+                              else f"${_rwa_total/1e6:.0f}M" if _rwa_total and _rwa_total >= 1e6
+                              else f"${_rwa_total:,.0f}" if _rwa_total else "—")
 
-        _mz_color = {
-            "UNDERVALUED": "#00d4aa", "FAIR_VALUE": "#10b981",
-            "OVERVALUED": "#f59e0b",  "EXTREME_HEAT": "#ef4444",
-        }.get(_msig, "#6b7280")
-        _sp_color = {
-            "CAPITULATION": "#00d4aa", "MILD_LOSS": "#10b981",
-            "NORMAL": "#6b7280",       "PROFIT_TAKING": "#f59e0b",
-        }.get(_ssig, "#6b7280")
+        _rt1, _rt2, _rt3, _rt4 = st.columns(4)
+        with _rt1:
+            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #00d4aa;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Total RWA TVL</div>
+  <div style="font-size:28px;font-weight:700;color:#00d4aa">{_rwa_tvl_total_fmt}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">DeFiLlama RWA category</div>
+</div>""", unsafe_allow_html=True)
+        with _rt2:
+            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Tracked Protocols</div>
+  <div style="font-size:28px;font-weight:700;color:#6366f1">{len(_rwa_protos)}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">Active RWA issuers</div>
+</div>""", unsafe_allow_html=True)
+        # Centrifuge data
+        _cf_pools = _df.fetch_centrifuge_pools() or []
+        _cf_tvl = sum(float(p.get("tvl_usd") or p.get("tvl") or 0) for p in _cf_pools)
+        _cf_fmt = f"${_cf_tvl/1e6:.0f}M" if _cf_tvl >= 1e6 else f"${_cf_tvl:,.0f}"
+        with _rt3:
+            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #f59e0b;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Centrifuge TVL</div>
+  <div style="font-size:28px;font-weight:700;color:#f59e0b">{_cf_fmt if _cf_tvl else "—"}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">{len(_cf_pools)} active pools</div>
+</div>""", unsafe_allow_html=True)
+        # Maple data
+        _mpl = _df.fetch_maple_stats() or {}
+        _mpl_tvl = _mpl.get("tvl_usd") or _mpl.get("totalValueLocked") or 0
+        _mpl_fmt = f"${float(_mpl_tvl)/1e6:.0f}M" if float(_mpl_tvl or 0) >= 1e6 else f"${float(_mpl_tvl or 0):,.0f}"
+        with _rt4:
+            st.markdown(f"""<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
+  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Maple Finance TVL</div>
+  <div style="font-size:28px;font-weight:700;color:#10b981">{_mpl_fmt if float(_mpl_tvl or 0) > 0 else "—"}</div>
+  <div style="font-size:11px;color:#6b7280;margin-top:6px">Private credit pools</div>
+</div>""", unsafe_allow_html=True)
 
-        _oc1, _oc2, _oc3, _oc4 = st.columns(4)
-        with _oc1:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_mz_color};border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">MVRV Z-Score</div>
-  <div style="font-size:32px;font-weight:700;color:{_mz_color}">{f"{_mz:+.2f}" if _mz is not None else "—"}</div>
-  <div style="font-size:13px;color:#9ca3af;margin-top:4px">{_msig.replace("_", " ")}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">MVRV ratio: {f"{_mv:.3f}" if _mv else "—"}</div>
-</div>
-""", unsafe_allow_html=True)
-        with _oc2:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_sp_color};border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">SOPR</div>
-  <div style="font-size:32px;font-weight:700;color:{_sp_color}">{f"{_sopr:.4f}" if _sopr is not None else "—"}</div>
-  <div style="font-size:13px;color:#9ca3af;margin-top:4px">{_ssig.replace("_", " ")}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">&gt;1 profit-taking · &lt;1 capitulation</div>
-</div>
-""", unsafe_allow_html=True)
-        with _oc3:
-            def _fmt_b(v):
-                if v is None: return "—"
-                if v >= 1e12: return f"${v/1e12:.2f}T"
-                if v >= 1e9:  return f"${v/1e9:.1f}B"
-                return f"${v/1e6:.0f}M"
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Realized Cap</div>
-  <div style="font-size:24px;font-weight:700;color:#6366f1">{_fmt_b(_rc)}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">Sum of all BTC at last-moved price</div>
-</div>
-""", unsafe_allow_html=True)
-        with _oc4:
-            _aa_fmt = f"{_aa:,}" if _aa else "—"
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #8b5cf6;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Active Addresses</div>
-  <div style="font-size:24px;font-weight:700;color:#8b5cf6">{_aa_fmt}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">Unique BTC addresses active today</div>
-</div>
-""", unsafe_allow_html=True)
+        # ── RWA Protocol Table ────────────────────────────────────────────────
+        if _rwa_protos:
+            st.markdown("---")
+            st.markdown("#### Top RWA Protocols by TVL")
+            _rwa_rows = []
+            for _rp in sorted(_rwa_protos, key=lambda x: float(x.get("tvl") or 0), reverse=True)[:15]:
+                _rp_tvl = float(_rp.get("tvl") or 0)
+                _rp_chg = _rp.get("change_1d") or _rp.get("change_7d")
+                _rwa_rows.append({
+                    "Protocol":  str(_rp.get("name") or _rp.get("slug") or "—"),
+                    "TVL":       (f"${_rp_tvl/1e9:.2f}B" if _rp_tvl >= 1e9
+                                  else f"${_rp_tvl/1e6:.0f}M" if _rp_tvl >= 1e6
+                                  else f"${_rp_tvl:,.0f}"),
+                    "7d Change": (f"{float(_rp_chg):+.1f}%" if _rp_chg is not None else "—"),
+                    "Category":  str(_rp.get("category") or "RWA"),
+                    "Chains":    ", ".join((str(c) for c in (_rp.get("chains") or [])[:3])) or "—",
+                })
+            if _rwa_rows:
+                import pandas as _pd_oc
+                st.dataframe(_pd_oc.DataFrame(_rwa_rows), hide_index=True, width="stretch")
 
-        st.markdown("---")
+        # ── Centrifuge Pool Detail ────────────────────────────────────────────
+        if _cf_pools:
+            with st.expander(f"Centrifuge Pools ({len(_cf_pools)} active)"):
+                _cf_rows = []
+                for _cp in sorted(_cf_pools, key=lambda x: float(x.get("tvl_usd") or x.get("tvl") or 0), reverse=True)[:10]:
+                    _cp_tvl = float(_cp.get("tvl_usd") or _cp.get("tvl") or 0)
+                    _cf_rows.append({
+                        "Pool": str(_cp.get("name") or _cp.get("id") or "—"),
+                        "TVL":  f"${_cp_tvl/1e6:.1f}M" if _cp_tvl >= 1e6 else f"${_cp_tvl:,.0f}",
+                        "APY":  f"{float(_cp.get('apy') or _cp.get('yield') or 0):.2f}%",
+                        "Asset Class": str(_cp.get("asset_class") or _cp.get("type") or "Credit"),
+                    })
+                if _cf_rows:
+                    import pandas as _pd_cf
+                    st.dataframe(_pd_cf.DataFrame(_cf_rows), hide_index=True, width="stretch")
 
-        # ── Charts ────────────────────────────────────────────────────────────
-        import pandas as pd
-        import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
+        _user_lvl_oc = st.session_state.get("user_level", "beginner")
+        if _user_lvl_oc == "beginner":
+            st.info("💡 **What does this mean for me?** This shows the total amount of real-world assets (treasuries, real estate, private credit) that have been tokenized on blockchain. Growing TVL means more institutions are adopting this technology. Centrifuge and Maple are two of the largest real-world lending protocols — they connect traditional businesses with on-chain capital.")
 
-        _mvrv_h = _oc.get("mvrv_history", {})
-        _sopr_h = _oc.get("sopr_history", {})
-
-        if _mvrv_h or _sopr_h:
-            _fig_oc = make_subplots(
-                rows=2, cols=1, shared_xaxes=True,
-                subplot_titles=("MVRV Z-Score (365-day rolling)", "SOPR"),
-                vertical_spacing=0.12,
-            )
-            if _mvrv_h:
-                _mh_s   = pd.Series(_mvrv_h).sort_index()
-                _mh_z   = (_mh_s - _mh_s.rolling(365, min_periods=30).mean()) / _mh_s.rolling(365, min_periods=30).std().clip(lower=1e-6)
-                _z_clrs = ["#ef4444" if v > 3 else "#f59e0b" if v > 1.5 else "#10b981" if v > -0.5 else "#00d4aa" for v in _mh_z]
-                _fig_oc.add_trace(
-                    go.Scatter(x=_mh_z.index, y=_mh_z.values, mode="lines", name="MVRV Z",
-                               line=dict(color="#6366f1", width=2)),
-                    row=1, col=1,
-                )
-                for _thresh, _lbl, _clr in [(3.0, "Extreme (>3)", "#ef4444"), (1.5, "Overvalued (>1.5)", "#f59e0b"), (-0.5, "Undervalued (<-0.5)", "#00d4aa")]:
-                    _fig_oc.add_hline(y=_thresh, line_dash="dash", line_color=_clr, opacity=0.4,
-                                      annotation_text=_lbl, annotation_font_size=9, row=1, col=1)
-            if _sopr_h:
-                _sp_s = pd.Series(_sopr_h).sort_index()
-                _fig_oc.add_trace(
-                    go.Scatter(x=_sp_s.index, y=_sp_s.values, mode="lines", name="SOPR",
-                               line=dict(color="#10b981", width=2)),
-                    row=2, col=1,
-                )
-                _fig_oc.add_hline(y=1.0, line_dash="dash", line_color="rgba(255,255,255,0.3)",
-                                  annotation_text="Breakeven", annotation_font_size=9, row=2, col=1)
-            _fig_oc.update_layout(
-                height=480,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#e2e8f0", size=11),
-                margin=dict(l=0, r=0, t=40, b=0),
-                showlegend=False,
-            )
-            _fig_oc.update_yaxes(gridcolor="rgba(255,255,255,0.07)")
-            _fig_oc.update_xaxes(gridcolor="rgba(255,255,255,0.07)")
-            st.plotly_chart(_fig_oc, width="stretch")
-
-        # ── Funding rates from Coinalyze (cross-exchange context) ─────────────
-        st.markdown("---")
-        st.markdown("#### 📡 Cross-Exchange Funding Rates (via Coinalyze)")
-        _funding = _load_coinalyze_funding()
-        if _funding:
-            _fnd_cols = st.columns(len(_funding))
-            for _ci, (_sym, _fdata) in enumerate(_funding.items()):
-                _fr_pct = _fdata.get("funding_rate_pct", 0)
-                _fr_sig = _fdata.get("signal", "NEUTRAL")
-                _fr_clr = {"BEARISH": "#ef4444", "NEUTRAL": "#6b7280", "BULLISH": "#00d4aa"}.get(_fr_sig, "#6b7280")
-                with _fnd_cols[_ci % len(_fnd_cols)]:
-                    st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;text-align:center">
-  <div style="font-size:11px;color:#6b7280;margin-bottom:4px">{_sym.replace("USDT_PERP.A", "")}</div>
-  <div style="font-size:20px;font-weight:700;color:{_fr_clr}">{_fr_pct:+.4f}%</div>
-  <div style="font-size:11px;color:#9ca3af">{_fr_sig}</div>
-</div>
-""", unsafe_allow_html=True)
-        else:
-            st.caption("Set RWA_COINALYZE_API_KEY in .env for cross-exchange funding rates.")
-
-        _src = _oc.get("source", "coinmetrics_community")
-        _ts  = _oc.get("timestamp", "")[:19]
-        st.caption(f"Source: {_src} · {_ts} UTC · Cached 1h")
+    except Exception as _oc_rwa_err:
+        st.warning(f"RWA on-chain data unavailable: {_oc_rwa_err}")
 
     # ── RLUSD / XRPL Live Data (Group 6) ─────────────────────────────────────
     st.markdown("---")
@@ -5762,168 +5807,6 @@ with tab_onchain:
             st.info("💡 **What does this mean for me?** In DeFi, you can use your RWA tokens as collateral to borrow stablecoins — without selling your position. For example, deposit OUSG earning 4.37%, borrow USDC at 3%, and deploy that USDC elsewhere. This is called 'capital efficiency' — you're making your money work in multiple places at once.")
     except Exception as _r8_err:
         logger.debug("[R8] DeFi collateral panel skipped: %s", _r8_err)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 13: OPTIONS FLOW
-# ══════════════════════════════════════════════════════════════════════════════
-
-with tab_options:
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
-    st.markdown("### 📐 BTC Options Flow — Deribit")
-    st.caption("Deribit public API · no key required · OI by Strike · Put/Call Ratio · IV Term Structure · Max Pain · Cached 15 min")
-
-    _opt_curr = st.selectbox("Currency", ["BTC", "ETH"], key="opt_curr_sel")
-    _oc5 = _load_deribit_options(_opt_curr)
-
-    if _oc5.get("error") and not _oc5.get("oi_by_strike"):
-        st.warning(f"Options data unavailable: {_oc5.get('error')}. Deribit may be temporarily unreachable.")
-    else:
-        _pc   = _oc5.get("put_call_ratio")
-        _mp   = _oc5.get("max_pain")
-        _tput = _oc5.get("total_put_oi", 0)
-        _tcal = _oc5.get("total_call_oi", 0)
-        _osig = _oc5.get("signal", "N/A")
-        _spot = _oc5.get("spot_price")
-
-        _sig_color = {
-            "EXTREME_PUTS":  "#ef4444",
-            "BEARISH":       "#f59e0b",
-            "NEUTRAL":       "#6b7280",
-            "BULLISH":       "#10b981",
-            "EXTREME_CALLS": "#00d4aa",
-        }.get(_osig, "#6b7280")
-
-        _oc5a, _oc5b, _oc5c, _oc5d = st.columns(4)
-        with _oc5a:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid {_sig_color};border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Put/Call Ratio</div>
-  <div style="font-size:32px;font-weight:700;color:{_sig_color}">{f"{_pc:.3f}" if _pc is not None else "—"}</div>
-  <div style="font-size:13px;color:#9ca3af;margin-top:4px">{_osig.replace("_", " ")}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:6px">&gt;1.1 bearish · &lt;0.9 bullish</div>
-</div>
-""", unsafe_allow_html=True)
-        with _oc5b:
-            _mp_dist = f"{abs(_mp - _spot) / _spot * 100:.1f}% {'below' if _mp < _spot else 'above'} spot" if _mp and _spot else ""
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #6366f1;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Max Pain</div>
-  <div style="font-size:26px;font-weight:700;color:#6366f1">{f"${_mp:,.0f}" if _mp else "—"}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">{_mp_dist}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:2px">Strike minimising buyer payout</div>
-</div>
-""", unsafe_allow_html=True)
-        with _oc5c:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #ef4444;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Total Put OI</div>
-  <div style="font-size:28px;font-weight:700;color:#ef4444">{f"{_tput:,.0f}" if _tput else "—"}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">contracts</div>
-</div>
-""", unsafe_allow_html=True)
-        with _oc5d:
-            st.markdown(f"""
-<div style="background:#111827;border:1px solid #1f2937;border-top:3px solid #10b981;border-radius:10px;padding:16px">
-  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Total Call OI</div>
-  <div style="font-size:28px;font-weight:700;color:#10b981">{f"{_tcal:,.0f}" if _tcal else "—"}</div>
-  <div style="font-size:11px;color:#6b7280;margin-top:8px">contracts</div>
-</div>
-""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # ── Dual panel: OI by Strike + IV Term Structure ──────────────────────
-        _oi5  = _oc5.get("oi_by_strike", [])
-        _ts5  = _oc5.get("term_structure", [])
-        _col5a, _col5b = st.columns([3, 2])
-
-        with _col5a:
-            if _oi5:
-                _fig5a = go.Figure()
-                _strikes5 = [str(int(r["strike"])) for r in _oi5]
-                _fig5a.add_trace(go.Bar(
-                    name="Puts", x=_strikes5,
-                    y=[r["put_oi"] for r in _oi5],
-                    marker_color="rgba(239,68,68,0.8)",
-                ))
-                _fig5a.add_trace(go.Bar(
-                    name="Calls", x=_strikes5,
-                    y=[r["call_oi"] for r in _oi5],
-                    marker_color="rgba(16,185,129,0.8)",
-                ))
-                # add_vline() crashes on string categorical x-axes (Plotly internal _mean()
-                # fails with TypeError on str values). Use add_shape + add_annotation instead.
-                if _mp and _strikes5:
-                    _mp_str = str(int(_mp))
-                    if _mp_str in _strikes5:
-                        _mp_idx = _strikes5.index(_mp_str)
-                        _fig5a.add_shape(type="line", x0=_mp_idx - 0.5, x1=_mp_idx - 0.5,
-                                         y0=0, y1=1, yref="paper",
-                                         line=dict(dash="dash", color="#6366f1", width=1.5),
-                                         opacity=0.8)
-                        _fig5a.add_annotation(x=_mp_idx - 0.5, y=1, yref="paper",
-                                              text=f"Max Pain ${_mp:,.0f}",
-                                              showarrow=False, font=dict(size=10, color="#6366f1"),
-                                              yanchor="bottom")
-                if _spot and _strikes5:
-                    _spot_str = str(int(_spot))
-                    # Find closest strike to spot
-                    _closest = min(_strikes5, key=lambda s: abs(int(s) - int(_spot)))
-                    _spot_idx = _strikes5.index(_closest)
-                    _fig5a.add_shape(type="line", x0=_spot_idx - 0.5, x1=_spot_idx - 0.5,
-                                     y0=0, y1=1, yref="paper",
-                                     line=dict(dash="dot", color="#f59e0b", width=1.5),
-                                     opacity=0.6)
-                    _fig5a.add_annotation(x=_spot_idx - 0.5, y=0.95, yref="paper",
-                                          text="Spot",
-                                          showarrow=False, font=dict(size=10, color="#f59e0b"),
-                                          yanchor="bottom")
-                _fig5a.update_layout(
-                    title="OI by Strike (Top 20)", barmode="stack",
-                    height=360, paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0", size=11),
-                    margin=dict(l=0, r=0, t=40, b=60),
-                    legend=dict(orientation="h", y=1.08),
-                    xaxis=dict(tickangle=-45, gridcolor="rgba(255,255,255,0.05)"),
-                    yaxis=dict(gridcolor="rgba(255,255,255,0.07)", title="OI (contracts)"),
-                )
-                st.plotly_chart(_fig5a, width="stretch")
-            else:
-                st.info("No OI by strike data available.")
-
-        with _col5b:
-            _ts5_valid = [t for t in _ts5 if t.get("atm_iv") is not None and t.get("dte", 0) <= 365]
-            if _ts5_valid:
-                _fig5b = go.Figure()
-                _fig5b.add_trace(go.Scatter(
-                    x=[t["dte"] for t in _ts5_valid],
-                    y=[t["atm_iv"] for t in _ts5_valid],
-                    mode="lines+markers",
-                    name="ATM IV",
-                    line=dict(color="#6366f1", width=2),
-                    marker=dict(size=7),
-                    text=[t["expiry"] for t in _ts5_valid],
-                    hovertemplate="%{text}<br>DTE: %{x}<br>IV: %{y:.1f}%<extra></extra>",
-                ))
-                _fig5b.update_layout(
-                    title="IV Term Structure (ATM)",
-                    height=360, paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0", size=11),
-                    margin=dict(l=0, r=0, t=40, b=0),
-                    xaxis=dict(title="Days to Expiry", gridcolor="rgba(255,255,255,0.05)"),
-                    yaxis=dict(title="IV (%)", gridcolor="rgba(255,255,255,0.07)"),
-                )
-                st.plotly_chart(_fig5b, width="stretch")
-            else:
-                st.info("IV term structure unavailable.")
-
-        _ts5_str = _oc5.get("timestamp", "")[:19]
-        st.caption(f"Source: Deribit · {_ts5_str} UTC · Spot: ${_spot:,.0f}" if _spot else f"Source: Deribit · {_ts5_str} UTC")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
