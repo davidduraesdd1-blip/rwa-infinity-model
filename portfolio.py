@@ -285,13 +285,17 @@ def score_assets_batch(assets_df: pd.DataFrame) -> pd.DataFrame:
     """
     df = assets_df.copy()
 
+    # Helper: safe column access — df.get() was deprecated in pandas 2.0
+    def _col(name: str, default) -> "pd.Series":
+        return df[name] if name in df.columns else pd.Series(default, index=df.index)
+
     # Extract base numeric fields
-    yield_pct   = df.get("current_yield_pct", pd.Series(0.0, index=df.index)).fillna(
-                       df.get("expected_yield_pct", pd.Series(0.0, index=df.index))
+    yield_pct   = _col("current_yield_pct", 0.0).fillna(
+                       _col("expected_yield_pct", 0.0)
                   ).fillna(0.0)
-    risk        = df.get("risk_score", pd.Series(5, index=df.index)).fillna(5).clip(1, 10)
-    liquidity   = df.get("liquidity_score", pd.Series(5, index=df.index)).fillna(5).clip(1, 10)
-    regulatory  = df.get("regulatory_score", pd.Series(5, index=df.index)).fillna(5).clip(1, 10)
+    risk        = _col("risk_score", 5).fillna(5).clip(1, 10)
+    liquidity   = _col("liquidity_score", 5).fillna(5).clip(1, 10)
+    regulatory  = _col("regulatory_score", 5).fillna(5).clip(1, 10)
 
     # Yield attractiveness
     yield_spread = (yield_pct - RISK_FREE_RATE).clip(lower=0)
@@ -327,7 +331,7 @@ def score_assets_batch(assets_df: pd.DataFrame) -> pd.DataFrame:
             return any(str(t).lower() in _institutional_tags for t in tags_val)
         return False
 
-    _inst_mask = df.get("tags", pd.Series("", index=df.index)).apply(_has_institutional)
+    _inst_mask = _col("tags", "").apply(_has_institutional)
     score = (score * _inst_mask.map({True: 1.05, False: 1.0})).clip(upper=100)
 
     # Chain maturity discount (max 15%)
@@ -336,18 +340,18 @@ def score_assets_batch(assets_df: pd.DataFrame) -> pd.DataFrame:
         premium = CHAIN_VOL_PREMIUM.get(primary, 2.0)
         return 1.0 - min(premium / 50.0, 0.15)
 
-    chain_disc = df.get("chain", pd.Series("Ethereum", index=df.index)).apply(_chain_discount)
+    chain_disc = _col("chain", "Ethereum").apply(_chain_discount)
     score = score * chain_disc
 
     # Synthetic / DEX basis risk penalty (-10%)
-    subcat = df.get("subcategory", pd.Series("", index=df.index)).fillna("").str.lower()
+    subcat = _col("subcategory", "").fillna("").str.lower()
     _synth_mask = subcat.str.contains("synthetic", na=False) | (
         subcat.str.contains("dex", na=False) & subcat.str.contains("equit", na=False)
     )
     score = score * _synth_mask.map({True: 0.90, False: 1.0})
 
     # Multi-chain future-readiness bonus (+5%)
-    _multichain_mask = df.get("chain", pd.Series("", index=df.index)).fillna("").str.contains(" / ", na=False)
+    _multichain_mask = _col("chain", "").fillna("").str.contains(" / ", na=False)
     score = (score * _multichain_mask.map({True: 1.05, False: 1.0})).clip(upper=100)
 
     df["score"] = score.round(2)

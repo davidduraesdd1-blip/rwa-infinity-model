@@ -328,7 +328,7 @@ def scan_cross_chain_arb(assets: List[dict]) -> List[dict]:
         gross_spread = yield_a - yield_b
         gas_a        = GAS_COSTS.get(chain_a, 1.0)
         gas_b        = GAS_COSTS.get(chain_b, 1.0)
-        gas_cost_pct = (gas_a + gas_b) / MIN_TRADE_USD * 100 + BRIDGE_COST_PCT
+        gas_cost_pct = (gas_a + gas_b) / max(MIN_TRADE_USD, 1) * 100 + BRIDGE_COST_PCT
         tx_cost      = TX_COSTS.get(asset_a.get("category", ""), 0.30)
         net_spread   = gross_spread - gas_cost_pct - tx_cost
 
