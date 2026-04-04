@@ -20,7 +20,7 @@ from typing import List, Optional
 
 import requests
 
-from config import CLAUDE_MODEL
+from config import CLAUDE_HAIKU_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ def _classify_with_claude(headlines: List[str]) -> dict:
             '"key_theme": "<one short phrase summarizing the dominant RWA story>"}'
         )
         msg = client.messages.create(
-            model=CLAUDE_MODEL,
+            model=CLAUDE_HAIKU_MODEL,
             max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )
