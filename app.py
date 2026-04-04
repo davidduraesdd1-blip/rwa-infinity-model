@@ -396,7 +396,7 @@ with st.sidebar:
         "☀ Light Mode" if not _rwa_is_light else "🌙 Dark Mode",
         key="_rwa_theme_toggle",
         help="Switch between dark and light mode",
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state["_rwa_theme"] = "dark" if _rwa_is_light else "light"
         st.rerun()
@@ -410,7 +410,7 @@ with st.sidebar:
     st.markdown("---")
 
     # ── Refresh All Data (item 40) ────────────────────────────────────────────
-    if st.button("🔄 Refresh All Data", help="Clear all caches and reload fresh data", use_container_width=True):
+    if st.button("🔄 Refresh All Data", help="Clear all caches and reload fresh data", width="stretch"):
         try:
             st.cache_data.clear()
         except Exception:
