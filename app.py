@@ -1286,7 +1286,8 @@ def _fetch_top30_screener_syms() -> list:
     _STABLES = {"USDT","USDC","DAI","BUSD","TUSD","FDUSD","USDD","FRAX","GUSD","USDP","PYUSD"}
     _MUST    = {"XRP","XLM","XDC","HBAR","SHX","ZBCN"}
     try:
-        resp = requests.get(
+        _df._COINGECKO_LIMITER.acquire()
+        resp = _df._session.get(
             "https://api.coingecko.com/api/v3/coins/markets",
             params={"vs_currency":"usd","order":"market_cap_desc","per_page":60,"page":1},
             timeout=8,
