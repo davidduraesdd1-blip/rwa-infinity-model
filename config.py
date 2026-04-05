@@ -4612,6 +4612,18 @@ ALLOWED_DOMAINS: frozenset = frozenset({
     "xrplcluster.com",               # XRPL mainnet public cluster (#97)
     "eth.llamarpc.com",              # Public Ethereum RPC — no key needed (#103)
     "mainnet.infura.io",             # Infura Ethereum RPC (#103)
+    # RSS news feeds (data_feeds.py _RSS_FEED_SOURCES)
+    "cointelegraph.com",             # CoinTelegraph RWA RSS feed
+    "www.coindesk.com",              # CoinDesk RSS feed
+    "blockworks.co",                 # Blockworks RSS feed
+    "decrypt.co",                    # Decrypt RSS feed
+    "dlnews.com",                    # DL News RSS feed
+    # Social/sentiment analytics
+    "api.santiment.net",             # Santiment GraphQL social signals
+    # Market data (used in fetch functions)
+    "rpc.ankr.com",                  # Ankr public multi-chain RPC fallback
+    "ethereum.publicnode.com",       # PublicNode Ethereum RPC fallback
+    "cloudflare-eth.com",            # Cloudflare Ethereum RPC fallback
 })
 
 # ─────────────────────────────────────────────────────────────────────────────

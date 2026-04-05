@@ -545,7 +545,7 @@ def fetch_coinmarketcap_prices(symbols: List[str]) -> Dict[str, dict]:
 
     def _fetch():
         try:
-            r = requests.get(
+            r = _session.get(
                 f"{COINMARKETCAP_BASE}/cryptocurrency/quotes/latest",
                 headers={
                     "X-CMC_PRO_API_KEY": COINMARKETCAP_API_KEY,
@@ -4520,6 +4520,7 @@ def fetch_xrpl_rlusd() -> dict:
 
         # ── CoinGecko market data ─────────────────────────────────────────────
         try:
+            _COINGECKO_LIMITER.acquire()  # respect 25 req/min free-tier limit
             cg_resp = _session.get(
                 f"{COINGECKO_BASE}/coins/ripple-usd",
                 params={
@@ -6336,6 +6337,7 @@ def validate_api_keys() -> dict:
 
     # CoinGecko — free endpoint, no key needed but test connectivity
     try:
+        _COINGECKO_LIMITER.acquire()  # health check counts against the free-tier rate limit
         r = _session.get("https://api.coingecko.com/api/v3/ping", timeout=5)
         results["coingecko"] = "ok" if r.status_code == 200 else f"HTTP {r.status_code}"
     except Exception:
