@@ -2077,8 +2077,10 @@ _FRED_MACRO_SERIES = {
     "fed_balance_bn":    "WALCL",
     "wti_crude":         "DCOILWTICO",
     "dxy":               "DTWEXBGS",
-    "ten_yr_yield":      "DGS10",     # US 10-year Treasury yield
-    "ism_manufacturing": "NAPM",      # ISM Manufacturing PMI proxy
+    "ten_yr_yield":      "DGS10",       # US 10-year Treasury yield
+    "two_yr_yield":      "DGS2",        # C2: US 2-year Treasury yield (for 2Y10Y spread)
+    "cpi_yoy":           "CPIAUCSL_PC1", # C2: CPI YoY % change (direct from FRED)
+    "ism_manufacturing": "NAPM",        # ISM Manufacturing PMI proxy
 }
 
 _MACRO_FALLBACKS = {
@@ -2087,6 +2089,8 @@ _MACRO_FALLBACKS = {
     "wti_crude":             67.5,
     "dxy":                  104.0,
     "ten_yr_yield":           4.35,   # Fed cut 75bp since Sep 2024
+    "two_yr_yield":           4.70,   # C2: 2Y yield fallback (approx April 2026)
+    "cpi_yoy":                3.2,    # C2: CPI YoY % fallback (approx March 2026)
     "ism_manufacturing":     52.0,    # approx March 2026
 }
 
@@ -2161,6 +2165,11 @@ def fetch_macro_indicators() -> dict:
 
         for k, v in _MACRO_FALLBACKS.items():
             result.setdefault(k, v)
+        # C2: Compute yield curve spread for composite signal
+        _ten = result.get("ten_yr_yield")
+        _two = result.get("two_yr_yield")
+        if _ten is not None and _two is not None:
+            result["yield_spread_2y10y"] = round(float(_ten) - float(_two), 4)
         result["source"] = "FRED"
         result["timestamp"] = datetime.now(timezone.utc).isoformat()
         return result
