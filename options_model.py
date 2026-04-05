@@ -110,6 +110,10 @@ def black_scholes(
     if T <= 0 or S <= 0 or K <= 0:
         return (0.0, 0.0, 0.0, 0.0, 0.0)
 
+    # Guard against non-finite r: inf*0=nan in theta formula (IEEE 754)
+    if not math.isfinite(r):
+        r = 0.0
+
     if sigma <= 0 or not math.isfinite(sigma):
         # Zero-vol: price = intrinsic, no time value, delta is step function
         intrinsic = max(0.0, S - K) if option_type == "call" else max(0.0, K - S)
