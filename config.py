@@ -4624,6 +4624,8 @@ ALLOWED_DOMAINS: frozenset = frozenset({
     "rpc.ankr.com",                  # Ankr public multi-chain RPC fallback
     "ethereum.publicnode.com",       # PublicNode Ethereum RPC fallback
     "cloudflare-eth.com",            # Cloudflare Ethereum RPC fallback
+    # E1: Hyperliquid — public REST API (no key required)
+    "api.hyperliquid.xyz",           # Hyperliquid DEX — perpetual funding rates + open interest
 })
 
 # ─────────────────────────────────────────────────────────────────────────────

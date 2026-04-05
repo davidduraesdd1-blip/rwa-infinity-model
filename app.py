@@ -5872,6 +5872,58 @@ with tab_research:
         except Exception as _oc_rwa_err:
             st.warning(f"RWA on-chain data unavailable: {_oc_rwa_err}")
 
+        # ── E1: Hyperliquid DEX — Funding Rates + Open Interest ─────────────────
+        st.markdown("---")
+        st.markdown("#### ⚡ Hyperliquid DEX — Perpetual Funding Rates")
+        st.caption(
+            "Hyperliquid public API · No key required · Perpetual funding rates + open interest "
+            "for major assets · High positive funding = over-leveraged longs (bearish signal). "
+            "Negative funding = shorts dominating (possible reversal signal). Cached 5 min."
+        )
+        try:
+            _hl_data = _df.fetch_hyperliquid_funding()
+            if _hl_data:
+                _hl_rows = []
+                for _hl_sym, _hl_v in sorted(_hl_data.items(), key=lambda x: -abs(x[1].get("open_interest_usd", 0))):
+                    _hl_ann   = _hl_v.get("funding_rate_pct", 0)
+                    _hl_8h    = _hl_v.get("funding_rate_8h", 0)
+                    _hl_oi    = _hl_v.get("open_interest_usd", 0)
+                    _hl_px    = _hl_v.get("mark_price", 0)
+                    _hl_sig   = _hl_v.get("signal", "NEUTRAL")
+                    _sig_col  = "#22c55e" if _hl_sig == "BULLISH" else "#ef4444" if _hl_sig == "BEARISH" else "#6B7280"
+                    _hl_rows.append({
+                        "Asset":         _hl_sym,
+                        "Mark Price":    f"${_hl_px:,.2f}",
+                        "8h Funding":    f"{_hl_8h*100:.4f}%",
+                        "Ann. Funding":  f"{_hl_ann:+.2f}%",
+                        "OI (USD)":      f"${_hl_oi/1e6:.0f}M" if _hl_oi >= 1e6 else f"${_hl_oi:,.0f}",
+                        "Signal":        _hl_sig,
+                    })
+                if _hl_rows:
+                    import pandas as _pd_hl
+                    _hl_df_display = _pd_hl.DataFrame(_hl_rows)
+
+                    def _hl_sig_style(val):
+                        return ("color:#22c55e" if val == "BULLISH" else
+                                "color:#ef4444" if val == "BEARISH" else
+                                "color:#6B7280")
+
+                    st.dataframe(
+                        _hl_df_display.style.map(_hl_sig_style, subset=["Signal"])
+                            .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
+                        hide_index=True, width="stretch",
+                        height=min(350, 55 + 35 * len(_hl_rows)),
+                    )
+                    st.caption(
+                        "Positive 8h funding → longs paying shorts (market over-bought). "
+                        "Negative → shorts paying longs (market over-sold). "
+                        "Annualized funding = 8h rate × 3 × 365."
+                    )
+            else:
+                st.caption("Hyperliquid data unavailable — will retry on next refresh.")
+        except Exception as _hl_err:
+            st.caption(f"Hyperliquid: {_hl_err}")
+
         # ── RLUSD / XRPL Live Data (Group 6) ─────────────────────────────────────
         st.markdown("---")
         st.markdown("#### 🌊 RLUSD & XRP Ledger")

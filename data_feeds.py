@@ -2574,6 +2574,82 @@ def fetch_coinalyze_funding(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# E1: HYPERLIQUID DEX — perpetual funding rates + open interest (no API key)
+# Public REST endpoint — no auth required. Rate limit: generous (public data).
+# Data quality: real-time perpetual data, highly liquid venue, institutional grade.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_HL_API = "https://api.hyperliquid.xyz/info"
+
+_HL_SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "HBAR", "AVAX", "MATIC", "LINK", "ATOM", "ARB"]
+
+
+def fetch_hyperliquid_funding() -> Dict[str, Any]:
+    """
+    E1: Fetch perpetual funding rates + open interest from Hyperliquid DEX.
+
+    Returns dict:
+        {symbol: {
+            "funding_rate_8h": float,   # 8-hour rate as decimal (e.g. 0.0001 = 0.01%)
+            "funding_rate_pct": float,  # annualised %  (8h rate × 3 × 365)
+            "open_interest_usd": float,
+            "mark_price": float,
+            "signal": "BULLISH" | "NEUTRAL" | "BEARISH",
+        }}
+    Cached 5 minutes. Falls back to {} on error.
+    """
+    def _fetch() -> Optional[dict]:
+        try:
+            resp = _session.post(
+                _HL_API,
+                json={"type": "metaAndAssetCtxs"},
+                timeout=REQUEST_TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            if not isinstance(data, list) or len(data) < 2:
+                return None
+            meta      = data[0]
+            asset_ctx = data[1]
+            universe  = (meta.get("universe") or [])
+            result: dict = {}
+            for i, asset in enumerate(universe):
+                sym = asset.get("name", "")
+                if sym not in _HL_SYMBOLS:
+                    continue
+                if i >= len(asset_ctx):
+                    continue
+                ctx = asset_ctx[i]
+                # Hyperliquid returns 8-hour funding rate as a string decimal
+                fr_raw       = float(ctx.get("funding", 0) or 0)
+                oi_raw       = float(ctx.get("openInterest", 0) or 0)
+                mark_px      = float(ctx.get("markPx", 0) or 0)
+                oi_usd       = oi_raw * mark_px
+                ann_pct      = fr_raw * 3 * 365 * 100   # 8h → annual %
+
+                signal = (
+                    "BULLISH" if fr_raw > 0.0003 else   # high positive = over-leveraged longs
+                    "BEARISH" if fr_raw < -0.0001 else  # negative = shorts dominating
+                    "NEUTRAL"
+                )
+                result[sym] = {
+                    "funding_rate_8h":   round(fr_raw, 6),
+                    "funding_rate_pct":  round(ann_pct, 2),
+                    "open_interest_usd": round(oi_usd, 0),
+                    "mark_price":        round(mark_px, 4),
+                    "signal":            signal,
+                }
+            return result if result else None
+        except Exception as e:
+            logger.debug("[Hyperliquid] fetch failed: %s", e)
+            return None
+
+    cached = _cached_get("hyperliquid_funding", CACHE_TTL["prices"], _fetch)
+    return cached if cached else {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # UPGRADE 10: STABLECOIN SUPPLY TRACKER
 # USDT + USDC market caps from CoinGecko (Pro key used if available).
 # Rising stablecoin supply = dry powder waiting to deploy = bullish signal.
