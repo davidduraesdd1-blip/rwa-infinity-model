@@ -202,6 +202,11 @@ def get_rolling_win_rate_history(agent_name: str, window_days: int = 30,
     Returns list of dicts: [{date: str, win_rate: float, total: int}, ...]
     sorted by date ascending. Empty list if no data.
     """
+    if window_days <= 0 or rolling_window <= 0:
+        logger.debug("[ai_feedback] get_rolling_win_rate_history: invalid params "
+                     "window_days=%d rolling_window=%d", window_days, rolling_window)
+        return []
+
     conn = _db._get_conn()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days + rolling_window)).isoformat()
     try:

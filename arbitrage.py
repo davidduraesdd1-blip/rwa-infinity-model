@@ -244,11 +244,13 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
         if current_price <= 0:
             continue
 
+        # Compute cat/tags once at top of loop (used for both NAV inference and APY multiplier)
+        cat  = asset.get("category", "")
+        tags = [str(t).lower() for t in (asset.get("tags") or [])]
+
         # D3: compute nav_price dynamically if not supplied
         nav_price = asset.get("nav_price", 0.0) or 0.0
         if nav_price <= 0:
-            cat  = asset.get("category", "")
-            tags = [str(t).lower() for t in (asset.get("tags") or [])]
             if cat in _STABLE_CATEGORIES or any(t in _STABLE_TAGS for t in tags):
                 nav_price = 1.0   # stablecoins / T-bill tokens should equal $1.00
             else:
@@ -276,9 +278,7 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
             "ARB"
         )
 
-        cat  = asset.get("category", "")
-        tags = [str(t).lower() for t in (asset.get("tags") or [])]
-        apy_mult     = _nav_apy_multiplier(cat, tags)
+        apy_mult     = _nav_apy_multiplier(cat, tags)  # cat/tags already set at loop top
         est_apy      = round(net_spread * apy_mult, 4)
         conv_days    = round(365.0 / apy_mult)
 
