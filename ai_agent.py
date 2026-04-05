@@ -621,6 +621,13 @@ CONSTRAINTS (HARD LIMITS — you cannot override these):
 - Only suggest assets from the approved RWA universe
 - Prioritize yield quality over quantity
 
+EXTENDED REASONING REQUIREMENTS (G10 — alternatives_considered):
+In your rationale field, always include:
+1. PRIMARY DRIVER: The single most important data point that drove this decision
+2. ALTERNATIVES CONSIDERED: What other actions you evaluated and why you rejected them
+   (e.g., "Considered REDUCE but yield metrics remain above target; chose HOLD instead")
+3. FLIP CONDITION: The one condition that would change this decision to the opposite action
+
 Call tools first to gather intelligence, then respond with ONLY the JSON object."""
 
     try:
@@ -1018,6 +1025,50 @@ def _node_post_risk(state: AgentState) -> AgentState:
     return state
 
 
+# ─── G6: Realistic Paper Trade Slippage Model ────────────────────────────────
+# Ported from DeFi Model agents/paper_trader.py — adapted for RWA tokenized assets.
+# Tokenized assets have lower liquidity than crypto spot, so slippage is category-aware.
+
+import random as _random
+
+_RWA_SLIPPAGE_BY_CATEGORY = {
+    "Government Bonds":  0.0005,   # 0.05% — very liquid (ONDO, BUIDL)
+    "Stablecoins":       0.0001,   # 0.01% — pegged, near-zero slippage
+    "Corporate Bonds":   0.0020,   # 0.20% — less liquid secondary market
+    "Real Estate":       0.0050,   # 0.50% — illiquid, hard to trade
+    "Private Credit":    0.0030,   # 0.30% — moderate illiquidity premium
+    "Commodities":       0.0015,   # 0.15% — gold/silver tokenized
+    "Crypto":            0.0010,   # 0.10% — liquid CEX/DEX
+}
+_RWA_SLIPPAGE_DEFAULT = 0.0020     # 0.20% fallback for unknown categories
+
+
+def _simulate_rwa_slippage(size_usd: float, category: str = "") -> float:
+    """
+    Realistic slippage model for RWA tokenized asset paper trades.
+    Category-aware: government bonds near-zero, real estate up to 0.5%.
+    Size-adjusted: larger trades face more market impact.
+    """
+    base    = _RWA_SLIPPAGE_BY_CATEGORY.get(category, _RWA_SLIPPAGE_DEFAULT)
+    impact  = min(size_usd / 100_000, 1.0) * base * 0.5   # up to 50% extra for large trades
+    noise   = _random.uniform(-base * 0.1, base * 0.1)     # ±10% random noise
+    return max(0.0, base + impact + noise)
+
+
+def _simulate_rwa_gas(chain: str = "") -> float:
+    """
+    Gas/transaction cost for RWA protocol interactions.
+    Ethereum L1: ~$5-30. L2 (Base/Polygon): ~$0.01-0.50.
+    """
+    _CHAIN_GAS = {
+        "ethereum": _random.uniform(5.0, 30.0),
+        "base":     _random.uniform(0.01, 0.50),
+        "polygon":  _random.uniform(0.01, 0.30),
+        "flare":    _random.uniform(0.001, 0.01),
+    }
+    return _CHAIN_GAS.get((chain or "").lower(), _random.uniform(0.50, 5.0))
+
+
 def _node_execute(state: AgentState) -> AgentState:
     """Execute approved trades (paper or live)."""
     is_dry_run = state.get("is_dry_run", True)
@@ -1029,23 +1080,35 @@ def _node_execute(state: AgentState) -> AgentState:
 
     for action in state.get("proposed_actions", []):
         try:
+            _size     = float(action.get("size_usd", 0))
+            _category = action.get("category", "")
+            _chain    = action.get("chain", "")
+            # G6: Simulate realistic slippage + gas cost for paper fills
+            _slip     = _simulate_rwa_slippage(_size, _category) if is_dry_run else 0.0
+            _gas      = _simulate_rwa_gas(_chain)               if is_dry_run else 0.0
+            _nav      = 1.0  # RWA tokens typically $1 NAV
+            _fill_price = _nav * (1 + _slip)
+            _effective  = _size * (1 + _slip) + _gas
             trade = {
-                "timestamp":  datetime.now(timezone.utc).isoformat(),
-                "agent_name": state["agent_name"],
-                "asset_id":   action["asset_id"],
-                "action":     action["action_type"],
-                "size_usd":   action["size_usd"],
-                "price_usd":  1.0,  # RWA tokens typically $1 NAV
-                "protocol":   "",
-                "chain":      "",
-                "status":     "DRY_RUN" if is_dry_run else "PENDING",
-                "notes":      action.get("reason", ""),
+                "timestamp":     datetime.now(timezone.utc).isoformat(),
+                "agent_name":    state["agent_name"],
+                "asset_id":      action["asset_id"],
+                "action":        action["action_type"],
+                "size_usd":      _size,
+                "price_usd":     round(_fill_price, 6),
+                "slippage_pct":  round(_slip * 100, 4),
+                "gas_usd":       round(_gas, 4),
+                "effective_usd": round(_effective, 4),
+                "protocol":      action.get("protocol", ""),
+                "chain":         _chain,
+                "status":        "DRY_RUN" if is_dry_run else "PENDING",
+                "notes":         action.get("reason", ""),
             }
             _db.log_trade(trade)
             result["executed"].append(action)
             state["cycle_notes"].append(
                 f"{'DRY RUN' if is_dry_run else 'LIVE'}: {action['action_type']} "
-                f"{action['asset_id']} ${action['size_usd']:,.0f}"
+                f"{action['asset_id']} ${_size:,.0f} (slip={_slip*100:.3f}%)"
             )
         except Exception as e:
             result["errors"].append({"action": action, "error": str(e)})
