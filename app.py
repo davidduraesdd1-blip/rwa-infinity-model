@@ -451,6 +451,51 @@ def _fmt_usd(n, decimals=0):
     if n >= 1e3:  return f"${n/1e3:.0f}K"
     return f"${n:,.{decimals}f}"
 
+
+def _freshness_badge(cache_key: str, ttl_seconds: int, label: str = "") -> str:
+    """
+    F6 — Return an HTML freshness badge for a data panel.
+    Shows how old the cached data is with a color-coded age indicator:
+      Green  = fresh (within 50% of TTL)
+      Yellow = aging (50–90% of TTL)
+      Red    = stale (>90% of TTL) or never fetched
+    Args:
+      cache_key   : key passed to _df._cached_get (e.g. "coingecko_prices")
+      ttl_seconds : expected TTL in seconds — same value used in the feed
+      label       : optional prefix text (e.g. "Prices" or "Yields")
+    Returns inline HTML string safe for st.markdown(unsafe_allow_html=True).
+    """
+    age = _df.get_cache_age_seconds(cache_key)
+    if age is None:
+        color = "#6B7280"
+        text  = "No data yet"
+    else:
+        age_min = int(age // 60)
+        if age_min < 1:
+            age_str = "< 1 min ago"
+        elif age_min == 1:
+            age_str = "1 min ago"
+        elif age_min < 60:
+            age_str = f"{age_min} min ago"
+        else:
+            age_str = f"{age_min // 60}h {age_min % 60}m ago"
+
+        ratio = age / max(ttl_seconds, 1)
+        if ratio < 0.5:
+            color = "#22c55e"   # green
+        elif ratio < 0.9:
+            color = "#f59e0b"   # amber
+        else:
+            color = "#ef4444"   # red (stale)
+        text = age_str
+
+    prefix = f"{label} · " if label else ""
+    return (
+        f'<span style="font-size:11px;color:{color};font-family:monospace;'
+        f'background:rgba(0,0,0,0.15);border-radius:4px;padding:1px 6px;">'
+        f'⏱ {prefix}{text}</span>'
+    )
+
 def _fmt_pct(n, decimals=2):
     if n is None: return "—"
     return f"{n:.{decimals}f}%"
@@ -464,6 +509,24 @@ def _color_for_value(v, low, high, invert=False):
     if ratio > 0.6: return "#34D399"
     if ratio > 0.3: return "#FBBF24"
     return "#EF4444"
+
+def _csv_button(df: "pd.DataFrame", filename: str, label: str = "⬇ Export CSV",
+                key: str | None = None) -> None:
+    """
+    F5 — Render a Streamlit download_button that exports *df* as UTF-8 CSV.
+    No-op if df is None or empty. key must be unique per page render.
+    """
+    if df is None or df.empty:
+        return
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label=label,
+        data=csv_bytes,
+        file_name=filename,
+        mime="text/csv",
+        key=key or f"csv_{filename}_{id(df)}",
+    )
+
 
 def _metric_card(label, value, delta=None, delta_label="", color=None, tooltip=None):
     color_str = f"color: {color};" if color else ""
@@ -1376,7 +1439,12 @@ tab_portfolio, tab_universe, tab_yield, tab_compare, tab_ai, tab_news, tab_trade
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_portfolio:
-
+    # F6: freshness badge for portfolio data sources
+    _port_badges = " &nbsp; ".join([
+        _freshness_badge("coingecko_prices", 300, "Prices"),
+        _freshness_badge("defillama_yields", 3600, "Yields"),
+    ])
+    st.markdown(_port_badges, unsafe_allow_html=True)
 
     portfolio = _load_portfolio(selected_tier, portfolio_value)
     if _demo_mode:
@@ -1689,6 +1757,9 @@ with tab_portfolio:
                                 "border": "1px solid #1F2937"})
         )
         st.dataframe(styled, width="stretch", height=min(400, 55 + 35 * len(display_df)))
+        # F5: CSV export for portfolio holdings
+        _csv_button(display_df, "portfolio_holdings.csv", "⬇ Export Holdings CSV",
+                    key="csv_holdings_table")
 
     # ── Yield Breakdown Bar Chart (Phase 7 UI) ───────────────────────────────
     # OPT-14: figure construction wrapped in @st.cache_data via _build_yield_bar()
@@ -1901,21 +1972,64 @@ with tab_portfolio:
                     height=280,
                 )
 
-                # Duration breakdown
-                with st.expander("Duration by Holding", expanded=False):
+                # F2: DV01 by category visualization
+                _dur_by_cat: dict = {}
+                for hd in dur.get("holdings_duration", []):
+                    cat   = hd.get("category", "Other")
+                    w_pct = hd.get("weight_pct", 0) / 100
+                    dur_y = hd.get("duration_years", 0)
+                    _dv01_asset = portfolio_value * w_pct * dur_y * 0.0001
+                    _dur_by_cat[cat] = _dur_by_cat.get(cat, 0) + _dv01_asset
+
+                if _dur_by_cat:
+                    _dbc_df = pd.DataFrame([
+                        {"Category": k, "DV01 ($)": round(v, 2)}
+                        for k, v in sorted(_dur_by_cat.items(), key=lambda x: -x[1])
+                        if v > 0
+                    ])
+                    if not _dbc_df.empty:
+                        _dbc_fig = px.bar(
+                            _dbc_df, x="DV01 ($)", y="Category", orientation="h",
+                            title="DV01 by Category — $ loss per 1bp rate rise",
+                            color_discrete_sequence=["#00d4aa"],
+                            template="plotly_dark",
+                        )
+                        _dbc_fig.update_layout(height=max(200, 50 * len(_dbc_df)),
+                                               margin=dict(l=0, r=0, t=40, b=0))
+                        st.plotly_chart(_dbc_fig, width="stretch")
+
+                # Duration breakdown with DV01 per asset
+                with st.expander("Duration by Holding — DV01 Detail", expanded=False):
                     hdur_df = pd.DataFrame(dur["holdings_duration"])
                     if not hdur_df.empty:
+                        # F2: compute per-asset DV01
+                        hdur_df["dv01_usd"] = (
+                            portfolio_value
+                            * (hdur_df["weight_pct"] / 100)
+                            * hdur_df["duration_years"]
+                            * 0.0001
+                        ).round(2)
+                        hdur_display = hdur_df[["id", "category", "weight_pct",
+                                                 "duration_years", "contribution_years",
+                                                 "dv01_usd"]].rename(columns={
+                            "id": "Asset", "category": "Category",
+                            "weight_pct": "Weight %",
+                            "duration_years": "Duration (yrs)",
+                            "contribution_years": "Contribution (yrs)",
+                            "dv01_usd": "DV01 ($)",
+                        })
                         st.dataframe(
-                            hdur_df[["id", "category", "weight_pct",
-                                     "duration_years", "contribution_years"]].rename(columns={
-                                "id": "Asset", "category": "Category",
-                                "weight_pct": "Weight %",
-                                "duration_years": "Duration (yrs)",
-                                "contribution_years": "Contribution (yrs)",
-                            }).style.format({"Weight %": "{:.1f}", "Duration (yrs)": "{:.2f}",
-                                             "Contribution (yrs)": "{:.4f}"}),
+                            hdur_display.style.format({
+                                "Weight %": "{:.1f}",
+                                "Duration (yrs)": "{:.2f}",
+                                "Contribution (yrs)": "{:.4f}",
+                                "DV01 ($)": "${:,.2f}",
+                            }),
                             width="stretch",
                         )
+                        # F5: CSV export for DV01 per asset table
+                        _csv_button(hdur_display, "dv01_by_holding.csv",
+                                    "⬇ Export DV01 CSV", key="csv_dv01_holding")
         except Exception as e:
             logger.warning("[UI] Duration section failed: %s", e)
 
@@ -2339,6 +2453,15 @@ with tab_portfolio:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_universe:
+    # F6: freshness badges
+    st.markdown(
+        " &nbsp; ".join([
+            _freshness_badge("coingecko_prices", 300, "Prices"),
+            _freshness_badge("defillama_yields", 3600, "DeFiLlama Yields"),
+            _freshness_badge("defillama_protocols", 3600, "TVL"),
+        ]),
+        unsafe_allow_html=True,
+    )
     st.markdown('<div class="section-header">Complete RWA Asset Universe</div>',
                 unsafe_allow_html=True)
 
@@ -2500,6 +2623,9 @@ with tab_universe:
             width="stretch",
             height=min(600, 55 + 35 * len(table_df)),
         )
+        # F5: CSV export for Asset Universe
+        _csv_button(table_df, "rwa_asset_universe.csv", "⬇ Export Universe CSV",
+                    key="csv_universe_table")
 
         # ── Collateral Quality Scoring (item 38) ──────────────────────────────
         st.markdown('<div class="section-header">Collateral Quality Scoring</div>',
@@ -2830,6 +2956,14 @@ with tab_universe:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_yield:
+    # F6: freshness badges for yield data sources
+    _yield_badges = " &nbsp; ".join([
+        _freshness_badge("defillama_yields", 3600, "DeFiLlama Yields"),
+        _freshness_badge("lending_borrow_rates", 3600, "Borrow Rates"),
+        _freshness_badge("coingecko_prices", 300, "Prices"),
+    ])
+    st.markdown(_yield_badges, unsafe_allow_html=True)
+
     _ys_mode = st.radio(
         "Strategy",
         ["⚡ Arbitrage", "💱 Carry Trade"],
@@ -3001,17 +3135,29 @@ with tab_yield:
         else:
             st.info("No XRPL DEX arbitrage opportunities detected. Try refreshing or check xrpl-py installation.")
 
-        # ── PDF Export ────────────────────────────────────────────────────────────
-        if _pdf._REPORTLAB and not arb_df.empty:
-            pdf_arb_bytes = _pdf.generate_arb_pdf(arb_df.to_dict("records"))
-            st.download_button(
-                label="📄 Download Arbitrage PDF",
-                data=pdf_arb_bytes,
-                file_name=f"rwa_arbitrage_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",
-                key="btn_arb_pdf",
-                help="Download a formatted PDF report of all current arbitrage opportunities.",
-            )
+        # ── Export buttons ────────────────────────────────────────────────────────
+        if not arb_df.empty:
+            _exp1, _exp2 = st.columns(2)
+            with _exp1:
+                # F5: CSV export for arbitrage
+                _arb_csv_cols = [c for c in [
+                    "type", "asset_a_name", "asset_b_name", "spread_pct",
+                    "net_spread_pct", "estimated_apy", "signal", "tx_cost_pct",
+                    "protocol_a", "chain_a", "action",
+                ] if c in arb_df.columns]
+                _csv_button(arb_df[_arb_csv_cols], "arbitrage_opportunities.csv",
+                            "⬇ Export Arb CSV", key="csv_arb_table")
+            with _exp2:
+                if _pdf._REPORTLAB:
+                    pdf_arb_bytes = _pdf.generate_arb_pdf(arb_df.to_dict("records"))
+                    st.download_button(
+                        label="📄 Download Arbitrage PDF",
+                        data=pdf_arb_bytes,
+                        file_name=f"rwa_arbitrage_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf",
+                        mime="application/pdf",
+                        key="btn_arb_pdf",
+                        help="Download a formatted PDF report of all current arbitrage opportunities.",
+                    )
 
 
     else:
@@ -3161,6 +3307,15 @@ with tab_yield:
                     .set_properties(**{"background-color": "#111827", "color": "#E2E8F0"}),
                     width="stretch",
                     height=min(500, 55 + 35 * len(show_carry.head(50))),
+                )
+                # F5: CSV export for carry trade table
+                _csv_button(
+                    show_carry[["RWA Asset", "Category", "RWA Yield %", "Borrow From",
+                                "Borrow Chain", "Borrow APY %", "Gross Spread %",
+                                "Net Spread %", "Exit Speed", "Risk"]].head(50),
+                    "carry_trade_opportunities.csv",
+                    "⬇ Export Carry Trades CSV",
+                    key="csv_carry_table",
                 )
 
                 # ── Carry trade calculator ────────────────────────────────────────
@@ -3619,6 +3774,9 @@ with tab_ai:
             width="stretch",
             height=300,
         )
+        # F5: CSV export for agent decisions
+        _csv_button(show_d, "agent_decisions.csv", "⬇ Export Decisions CSV",
+                    key="csv_decisions_table")
     else:
         st.info("No agent decisions yet. Start an agent or run a manual cycle above.")
 
@@ -4042,6 +4200,14 @@ with tab_ai:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_news:
+    # F6: freshness badge
+    st.markdown(
+        " &nbsp; ".join([
+            _freshness_badge("rwa_news", 1800, "News"),
+            _freshness_badge("live_rss_news", 900, "RSS"),
+        ]),
+        unsafe_allow_html=True,
+    )
     st.markdown('<div class="section-header">RWA News & Sentiment</div>', unsafe_allow_html=True)
 
     nb1, nb2 = st.columns([1, 1])
@@ -4187,6 +4353,8 @@ with tab_trades:
             width="stretch",
             height=500,
         )
+        # F5: CSV export for trade log
+        _csv_button(t_df, "trade_log.csv", "⬇ Export Trade Log CSV", key="csv_trade_log")
     else:
         st.info("No trades logged yet. Start an AI agent to begin trading.")
 
@@ -4580,6 +4748,11 @@ with tab_screener:
         "</p>",
         unsafe_allow_html=True,
     )
+    # F6: freshness badge
+    st.markdown(
+        _freshness_badge("coingecko_prices", 300, "Prices"),
+        unsafe_allow_html=True,
+    )
 
     _scr_refresh = st.button("⟳ Refresh Screener", key="btn_scr_refresh")
 
@@ -4794,6 +4967,15 @@ with tab_screener:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_research:
+    # F6: freshness badges for research data sources
+    _res_badges = " &nbsp; ".join([
+        _freshness_badge("macro_indicators", 3600, "FRED Macro"),
+        _freshness_badge("yfinance_macro", 3600, "yfinance"),
+        _freshness_badge("fear_greed_index", 3600, "Fear & Greed"),
+        _freshness_badge("fred_extended", 3600, "FRED Extended"),
+    ])
+    st.markdown(_res_badges, unsafe_allow_html=True)
+
     with st.expander("🌍 Macro Intelligence", expanded=True):
         st.markdown('<div class="section-header">Macro Intelligence Dashboard</div>', unsafe_allow_html=True)
         st.caption("FRED + yfinance macro data · Rolling correlations with BTC · M2 84-day lead indicator")

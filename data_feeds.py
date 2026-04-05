@@ -193,6 +193,19 @@ def _cached_get(key: str, ttl: int, fetch_fn):
         return None
 
 
+def get_cache_age_seconds(key: str) -> float | None:
+    """
+    F6 — Freshness badges: return how many seconds ago the cache entry for
+    *key* was last successfully populated. Returns None if never populated.
+    Used by app.py to render colored data-age indicators on each panel.
+    """
+    with _cache_lock:
+        entry = _cache.get(key)
+    if entry is None:
+        return None
+    return time.time() - entry["_ts"]
+
+
 def _get(url: str, params: dict = None, timeout: int = REQUEST_TIMEOUT) -> Optional[dict]:
     """GET with exponential retry, SSRF allowlist check, and per-API rate limiting."""
     if not _is_allowed_url(url):
