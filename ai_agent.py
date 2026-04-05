@@ -30,6 +30,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional, TypedDict
 
+from pathlib import Path
+
 import database as _db
 from config import (
     AI_AGENTS, PORTFOLIO_TIERS, CLAUDE_MODEL, CLAUDE_HAIKU_MODEL, CLAUDE_TIMEOUT, AI_CACHE_TTL,
@@ -38,6 +40,139 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ─── G2: Sliding Presets System (ported from DeFi Model agents/config.py) ─────
+# Users can tune agent risk parameters from the AI tab UI without editing code.
+# Overrides stored in agent_overrides.json, applied at every cycle start.
+# Static config (agent names, risk tiers, strategy type) is never overridable.
+
+_RWA_DATA_DIR          = Path(__file__).parent / "data" / "agent"
+_RWA_OVERRIDES_FILE    = _RWA_DATA_DIR / "rwa_agent_overrides.json"
+
+# Per-agent overridable numeric defaults — these mirror the AI_AGENTS values
+# as starting points, but users can tune them from the UI.
+_RWA_AGENT_DEFAULTS: dict = {
+    "min_confidence_pct":    60.0,   # % — minimum Claude confidence to act
+    "max_trade_size_pct":    10.0,   # % of portfolio per single rebalance
+    "daily_loss_limit_pct":  3.0,    # % — daily loss halt
+    "max_drawdown_pct":      15.0,   # % from peak → emergency stop
+    "rebalance_threshold_pct": 5.0,  # % drift before rebalance triggered
+    "max_positions":         8,      # max simultaneous holdings
+    "dry_run":               True,   # paper-trade by default
+}
+
+_RWA_OVERRIDABLE_KEYS: frozenset = frozenset(_RWA_AGENT_DEFAULTS.keys())
+
+
+def save_agent_overrides(overrides: dict) -> None:
+    """Write agent parameter overrides from the AI tab UI."""
+    try:
+        _RWA_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        safe = {k: v for k, v in overrides.items() if k in _RWA_OVERRIDABLE_KEYS}
+        _RWA_OVERRIDES_FILE.write_text(json.dumps(safe, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning("[Agent] save_agent_overrides failed: %s", e)
+
+
+def load_agent_overrides() -> dict:
+    """Read current UI overrides. Returns {} on missing file or parse error."""
+    try:
+        if _RWA_OVERRIDES_FILE.exists():
+            return json.loads(_RWA_OVERRIDES_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def get_agent_params(agent_name: str) -> dict:
+    """
+    Return effective agent parameters for agent_name, merging defaults with
+    any user overrides from the AI tab sliders.
+    """
+    base_cfg = AI_AGENTS.get(agent_name, {})
+    params = dict(_RWA_AGENT_DEFAULTS)
+    # Apply base config values
+    for key in ("max_trade_size_pct", "daily_loss_limit_pct"):
+        if key in base_cfg:
+            params[key] = float(base_cfg[key])
+    # Apply user overrides (from UI sliders)
+    try:
+        overrides = load_agent_overrides()
+        for k, v in overrides.items():
+            if k in _RWA_OVERRIDABLE_KEYS:
+                params[k] = type(_RWA_AGENT_DEFAULTS[k])(v)
+    except Exception as e:
+        logger.warning("[Agent] get_agent_params override merge failed: %s", e)
+    return params
+
+
+def get_active_agent_limits() -> dict:
+    """
+    Return human-readable current effective limits for the Active Limits panel in the UI.
+    Shows 'custom' badge when any value differs from default.
+    """
+    overrides = load_agent_overrides()
+    limits = {}
+    for key, default in _RWA_AGENT_DEFAULTS.items():
+        effective = overrides.get(key, default)
+        limits[key] = {
+            "value":   effective,
+            "default": default,
+            "custom":  key in overrides,
+        }
+    return limits
+
+
+# ─── G9: Composite Signal Gate — cached 30 min ───────────────────────────────
+# Evaluates macro + on-chain environment before allowing new carry/arb entries.
+# RISK_OFF (score <= -0.30) suppresses new entries for the cycle.
+
+_RWA_COMPOSITE_GATE_CACHE: dict = {"result": None, "ts": 0.0}
+_RWA_COMPOSITE_GATE_TTL  = 1800  # 30 minutes — avoids API calls on every tick
+
+
+def _get_rwa_composite_gate() -> dict:
+    """
+    Return cached composite signal (refreshes every 30 min).
+    Uses FRED + yfinance macro data + CoinMetrics on-chain + Fear & Greed.
+    Gracefully handles missing data — each sub-indicator returns 0.0 when None.
+    """
+    import time as _time_mod
+    now = _time_mod.time()
+    if _RWA_COMPOSITE_GATE_CACHE["result"] and now - _RWA_COMPOSITE_GATE_CACHE["ts"] < _RWA_COMPOSITE_GATE_TTL:
+        return _RWA_COMPOSITE_GATE_CACHE["result"]
+
+    try:
+        import data_feeds as _df
+        import composite_signal as _cs
+
+        macro    = _df.fetch_macro_indicators()    # has: dxy
+        yf_mac   = _df.fetch_yfinance_macro()      # has: vix, gold_spot, spx
+        oc       = _df.fetch_coinmetrics_onchain()  # has: mvrv_z, sopr
+        fg_raw   = _df.fetch_fear_greed_index()
+        fg_value = fg_raw.get("value") if isinstance(fg_raw, dict) else None
+
+        macro_data = {
+            "dxy":               macro.get("dxy"),
+            "vix":               yf_mac.get("vix"),
+            "yield_spread_2y10y": macro.get("yield_spread_2y10y"),  # None until C item adds it
+            "cpi_yoy":           macro.get("cpi_yoy"),              # None until C item adds it
+        }
+        onchain_data = {
+            "sopr":              oc.get("sopr"),
+            "mvrv_z":            oc.get("mvrv_z"),
+            "hash_ribbon_signal": oc.get("hash_ribbon_signal"),     # None — CoinMetrics proxy
+            "puell_multiple":    oc.get("puell_multiple"),          # None — not in free tier
+        }
+
+        result = _cs.compute_composite_signal(macro_data, onchain_data, fg_value)
+        _RWA_COMPOSITE_GATE_CACHE["result"] = result
+        _RWA_COMPOSITE_GATE_CACHE["ts"]     = now
+        return result
+    except Exception as exc:
+        logger.debug("[Agent] composite gate fetch failed (allowing action): %s", exc)
+        return {"score": 0.0, "signal": "NEUTRAL", "risk_off": False}
+
 
 # ─── Optional imports (graceful fallback) ────────────────────────────────────
 # OPT-16: langgraph, coinbase_agentkit, and x402 are imported lazily inside
@@ -154,6 +289,17 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
     port = state["portfolio_state"]
     snap = port.get("snapshot", {})
     metrics = snap.get("metrics", {})
+
+    # G9: Composite signal gate — RISK_OFF suppresses new carry/arb entries
+    try:
+        gate = _get_rwa_composite_gate()
+        if gate.get("risk_off", False):
+            return False, (
+                f"Market environment is {gate.get('signal', 'RISK_OFF')} "
+                f"(score={gate.get('score', 0):.2f}) — suppressing new carry/arb entries"
+            )
+    except Exception:
+        pass  # gate errors never block — fail-open
 
     # Check max drawdown not breached
     portfolio_vol = metrics.get("portfolio_volatility_pct", 0)

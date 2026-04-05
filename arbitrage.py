@@ -200,18 +200,43 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
     Find tokens trading at a discount or premium to NAV.
     Discount → buy token, redeem at NAV = instant profit.
     Premium  → sell token, create new token at NAV = instant profit.
+
+    D3 FIX: Compute price_vs_nav_pct dynamically per category so the scanner
+    produces real signals even when assets don't have nav_price pre-populated.
+    Category-specific NAV logic:
+      - Stablecoins / T-bill tokens: NAV = $1.00 (peg-monitoring)
+      - Government Bonds (yield-bearing stables): NAV = $1.00
+      - Precious Metals: nav_price set in asset dict (CoinGecko gold/silver price)
+      - All others: use provided nav_price or skip (can't compute without oracle)
     """
     opportunities = []
     now = datetime.now(timezone.utc).isoformat()
 
+    # Categories where NAV = $1.00 (should always trade at par)
+    _STABLE_CATEGORIES = {"Government Bonds", "Stablecoins"}
+    _STABLE_TAGS = {"stablecoin", "t-bill", "treasury", "tbill"}
+
     for asset in assets:
-        price_vs_nav = asset.get("price_vs_nav_pct", 0) or 0
-        if abs(price_vs_nav) < ARB_MIN_PRICE_SPREAD_PCT:
+        current_price = asset.get("current_price", 0.0) or 0.0
+        if current_price <= 0:
             continue
 
-        current_price = asset.get("current_price", 1.0) or 1.0
-        nav_price     = asset.get("nav_price", 1.0) or 1.0
+        # D3: compute nav_price dynamically if not supplied
+        nav_price = asset.get("nav_price", 0.0) or 0.0
         if nav_price <= 0:
+            cat  = asset.get("category", "")
+            tags = [str(t).lower() for t in (asset.get("tags") or [])]
+            if cat in _STABLE_CATEGORIES or any(t in _STABLE_TAGS for t in tags):
+                nav_price = 1.0   # stablecoins / T-bill tokens should equal $1.00
+            else:
+                continue          # no NAV oracle available — skip
+
+        price_vs_nav = asset.get("price_vs_nav_pct", 0.0) or 0.0
+        if price_vs_nav == 0.0 and nav_price > 0:
+            # recompute from raw prices (more accurate than pre-stored value)
+            price_vs_nav = (current_price - nav_price) / nav_price * 100
+
+        if abs(price_vs_nav) < ARB_MIN_PRICE_SPREAD_PCT:
             continue
 
         direction   = "DISCOUNT" if price_vs_nav < 0 else "PREMIUM"
@@ -461,7 +486,8 @@ def scan_stablecoin_yield_arb(assets: List[dict]) -> List[dict]:
             return raw
         if isinstance(raw, str):
             try:
-                return json.loads(raw)
+                result = json.loads(raw)
+                return result if isinstance(result, list) else []  # A2: guard non-list JSON (e.g. "null" → None → TypeError)
             except Exception:
                 return []
         return []
@@ -570,18 +596,18 @@ def scan_defi_pool_arb() -> List[dict]:
             "PT-USDY",  # Pendle PT (fixed-rate T-bill)
             "RTBILL",   # Plume Network T-bill token — uppercased to match .upper() comparison
         }
-        if sym in rwa_syms and pool.get("apy", 0) > 0:
+        if sym in rwa_syms and (pool.get("apy") or 0) > 0:  # A1: (or 0) handles apy=None (TypeError guard)
             by_sym.setdefault(sym, []).append(pool)
 
     for sym, sym_pools in by_sym.items():
         if len(sym_pools) < 2:
             continue
 
-        sorted_pools = sorted(sym_pools, key=lambda x: x["apy"], reverse=True)
+        sorted_pools = sorted(sym_pools, key=lambda x: x.get("apy") or 0, reverse=True)
         high = sorted_pools[0]
         low  = sorted_pools[-1]
 
-        if high["apy"] <= 0 or low["apy"] <= 0:
+        if (high.get("apy") or 0) <= 0 or (low.get("apy") or 0) <= 0:
             continue
 
         gross_spread = high["apy"] - low["apy"]

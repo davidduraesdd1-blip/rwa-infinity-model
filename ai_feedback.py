@@ -17,7 +17,8 @@ import database as _db
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-_LOOKBACK_DAYS   = 30       # rolling accuracy window
+_LOOKBACK_DAYS   = 30       # primary rolling accuracy window (30-day)
+_LOOKBACK_7D     = 7        # G3: secondary short-window (7-day, matches DeFi Model)
 _MIN_SAMPLES     = 3        # minimum records before grading activates
 _EXP_HALF_LIFE   = 14.0    # exponential time-weight half-life in days
 _RETURN_THRESHOLD = 0.5     # within 0.5% of expected return = "accurate"
@@ -29,9 +30,14 @@ _agent_weights_lock = __import__("threading").Lock()
 
 # ─── Core Accuracy Computation ────────────────────────────────────────────────
 
-def compute_accuracy(agent_name: str) -> dict:
+def compute_accuracy(agent_name: str, window_days: int = None) -> dict:
     """
     Compute rolling accuracy metrics for a given AI agent.
+
+    Args:
+        agent_name:   agent identifier (e.g. "GUARDIAN")
+        window_days:  lookback window in days (default: _LOOKBACK_DAYS=30).
+                      Pass 7 for short-window comparison (G3 — matches DeFi Model dual-window).
 
     Returns:
         accuracy_pct:       % of decisions where actual return was positive
@@ -42,9 +48,11 @@ def compute_accuracy(agent_name: str) -> dict:
         grade:              A / B / C / D / F
         health_score:       0–100 composite for UI display
         message:            human-readable status string
+        window_days:        which window was used (added for G3 dual-window display)
     """
+    days = window_days if window_days is not None else _LOOKBACK_DAYS
     conn = _db._get_conn()
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     try:
         rows = conn.execute(
             """
@@ -150,7 +158,39 @@ def compute_accuracy(agent_name: str) -> dict:
         "grade":           grade,
         "health_score":    health_score,
         "message":         _health_message(health_score, grade),
+        "window_days":     days,   # G3: expose window for dual-window UI display
     }
+
+
+# ─── G3: Dual-window accuracy summary (30-day vs 7-day) ──────────────────────
+
+def get_dual_window_accuracy(agent_name: str) -> dict:
+    """
+    G3: Return both 30-day and 7-day accuracy metrics for an agent.
+    Matches DeFi Model's dual-window evaluation pattern.
+
+    Returns:
+        acc_30d:  compute_accuracy result over 30-day window
+        acc_7d:   compute_accuracy result over 7-day window
+        trend:    'improving' if 7d win_rate > 30d win_rate by >5pp,
+                  'declining' if 7d < 30d by >5pp, else 'stable' or 'building'
+    """
+    acc_30d = compute_accuracy(agent_name, window_days=30)
+    acc_7d  = compute_accuracy(agent_name, window_days=7)
+
+    wr_30 = acc_30d.get("win_rate")
+    wr_7  = acc_7d.get("win_rate")
+
+    if wr_30 is None or wr_7 is None:
+        trend = "building"
+    elif wr_7 > wr_30 + 5:
+        trend = "improving"
+    elif wr_7 < wr_30 - 5:
+        trend = "declining"
+    else:
+        trend = "stable"
+
+    return {"acc_30d": acc_30d, "acc_7d": acc_7d, "trend": trend}
 
 
 def _empty_result(agent_name: str) -> dict:

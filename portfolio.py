@@ -31,6 +31,10 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# C1: Live risk-free rate cache — fetched from FRED, falls back to hardcoded 4.25%
+_rfr_cache: dict = {"rate": None, "ts": 0.0}
+_RFR_CACHE_TTL = 3600 * 2   # refresh every 2 hours (rates move slowly)
+
 # ─── Monte Carlo cache (UPGRADE 13) ───────────────────────────────────────────
 _mc_cache: Dict[str, dict] = {}
 _MC_CACHE_TTL = 600  # 10-minute TTL for Monte Carlo results
@@ -54,8 +58,33 @@ def _mc_cache_key(portfolio: dict) -> str:
         return ""
 
 
+# ─── C1: Live risk-free rate (FRED 3-month T-bill, fallback 4.25%) ─────────────
+def get_live_risk_free_rate() -> float:
+    """
+    C1: Return the live 3-month US T-bill rate from FRED (DGS3MO series).
+    Uses data_feeds.get_risk_free_rate() which already fetches the yield curve.
+    Cached for 2 hours via _rfr_cache; falls back to 4.25% if FRED unavailable.
+    """
+    global _rfr_cache
+    now = time.time()
+    if _rfr_cache["rate"] is not None and now - _rfr_cache["ts"] < _RFR_CACHE_TTL:
+        return float(_rfr_cache["rate"])
+    try:
+        import data_feeds as _df
+        val = _df.get_risk_free_rate()   # already calls fetch_treasury_yield_curve
+        if isinstance(val, (int, float)) and 0 < val < 20:
+            _rfr_cache["rate"] = float(val)
+            _rfr_cache["ts"]   = now
+            return float(val)
+    except Exception as e:
+        logger.debug("[Portfolio] FRED risk-free rate fetch failed: %s", e)
+    _rfr_cache["rate"] = 4.25
+    _rfr_cache["ts"]   = now
+    return 4.25
+
+
 # ─── Constants ────────────────────────────────────────────────────────────────
-RISK_FREE_RATE      = 4.25  # % — 3-month T-bill yield (March 2026) — matches tokenized T-bill products yielding 4.3-4.5%
+RISK_FREE_RATE      = 4.25  # % — static fallback; call get_live_risk_free_rate() for live value
 TRADING_DAYS        = 252
 MC_SIMULATIONS      = 10_000
 MC_HORIZON_DAYS     = 365
@@ -1697,3 +1726,105 @@ def optimize_factor_portfolio(
         "source":                     source,
         "optimizer_success":          bool(result_obj and result_obj.success) if result_obj else False,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G4: KELLY CRITERION — LIVE WIN-RATE CONNECTION
+# Uses empirical per-agent win rates from ai_feedback to size positions.
+# Matches DeFi Model's get_profile_win_rates() → Kelly Criterion pattern.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MAX_KELLY_FRACTION  = 0.20   # cap Kelly at 20% of portfolio per rebalance action
+_MIN_KELLY_WIN_RATE  = 0.40   # need ≥40% win rate to size any position
+_KELLY_SCALE_FACTOR  = 0.50   # use Half-Kelly for conservatism (standard for uncertain win rates)
+
+
+def kelly_rebalance_size(
+    agent_name: str,
+    portfolio_value_usd: float,
+    avg_win_pct: float = 3.0,
+    avg_loss_pct: float = 1.5,
+) -> dict:
+    """
+    G4: Kelly Criterion position sizing for RWA rebalancing decisions.
+
+    Uses empirical win rates from ai_feedback (get_agent_win_rates) if available,
+    otherwise falls back to the agent's historical win rate from its profile.
+
+    Args:
+        agent_name:         active agent (e.g. "GUARDIAN")
+        portfolio_value_usd: current portfolio value
+        avg_win_pct:         average return when right (default 3%)
+        avg_loss_pct:        average loss when wrong (default 1.5%)
+
+    Returns:
+        fraction:       Half-Kelly fraction (capped at _MAX_KELLY_FRACTION)
+        position_usd:   recommended rebalance size in USD
+        win_rate:       empirical win rate used (decimal)
+        source:         'empirical' | 'agent_default' | 'insufficient_data'
+        basis:          human-readable explanation
+    """
+    # Try to get empirical win rate from ai_feedback
+    win_rate_decimal = None
+    source = "insufficient_data"
+    try:
+        import ai_feedback as _fb
+        agent_win_rates = _fb.get_agent_win_rates()
+        if agent_name in agent_win_rates:
+            win_rate_decimal = float(agent_win_rates[agent_name])
+            source = "empirical"
+    except Exception as e:
+        logger.debug("[Kelly] ai_feedback win rate fetch failed: %s", e)
+
+    # Fallback to agent-tier based default
+    if win_rate_decimal is None:
+        tier_win_defaults = {1: 0.62, 2: 0.60, 3: 0.58, 4: 0.55, 5: 0.52}
+        agent_cfg = AI_AGENTS.get(agent_name, {})
+        tier = agent_cfg.get("risk_tier", 3)
+        win_rate_decimal = tier_win_defaults.get(tier, 0.58)
+        source = "agent_default"
+
+    if win_rate_decimal < _MIN_KELLY_WIN_RATE:
+        return {
+            "fraction":     0.0,
+            "position_usd": 0.0,
+            "win_rate":     round(win_rate_decimal, 4),
+            "source":       source,
+            "basis":        f"Win rate {win_rate_decimal:.0%} below minimum {_MIN_KELLY_WIN_RATE:.0%} — no Kelly sizing.",
+        }
+
+    b = avg_win_pct / max(avg_loss_pct, 0.01)
+    w = win_rate_decimal
+    raw_kelly = (w * b - (1 - w)) / b
+    raw_kelly = max(0.0, raw_kelly)
+    half_kelly = round(min(raw_kelly * _KELLY_SCALE_FACTOR, _MAX_KELLY_FRACTION), 4)
+    position_usd = round(half_kelly * portfolio_value_usd, 2)
+
+    return {
+        "fraction":     half_kelly,
+        "position_usd": position_usd,
+        "win_rate":     round(win_rate_decimal, 4),
+        "source":       source,
+        "avg_win_pct":  avg_win_pct,
+        "avg_loss_pct": avg_loss_pct,
+        "reward_risk":  round(b, 2),
+        "raw_kelly":    round(raw_kelly, 4),
+        "basis":        (
+            f"Half-Kelly({w:.0%} win, {b:.2f}R:R) "
+            f"→ {half_kelly:.1%} of ${portfolio_value_usd:,.0f} = ${position_usd:,.0f} "
+            f"[source: {source}]"
+        ),
+    }
+
+
+def get_all_agent_kelly_sizes(portfolio_value_usd: float) -> dict:
+    """
+    G4: Compute Kelly position sizes for all 5 agents.
+    Returns {agent_name: kelly_result_dict}.
+    Useful for the AI tab dashboard to show recommended sizes alongside win rates.
+    """
+    return {
+        name: kelly_rebalance_size(name, portfolio_value_usd)
+        for name in AI_AGENTS
+    }
+
