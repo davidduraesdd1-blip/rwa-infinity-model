@@ -3521,6 +3521,64 @@ with tab_ai:
             </div>
             """, unsafe_allow_html=True)
 
+    # G2: Agent Risk Parameters — sliding presets (overrides stored in rwa_agent_overrides.json)
+    with st.expander("⚙️ Agent Risk Parameters", expanded=False):
+        st.caption("Adjust risk limits for the selected agent. Values are saved persistently and take effect on the next cycle.")
+        with st.form("rwa_agent_params_form"):
+            _params = _agent.get_agent_params(selected_agent)
+            _lim_info = _agent.get_active_agent_limits()
+            ap1, ap2 = st.columns(2)
+            with ap1:
+                _p_min_conf = st.slider(
+                    "Min Confidence to Act (%)", min_value=40.0, max_value=95.0,
+                    value=float(_params.get("min_confidence_pct", 60.0)), step=1.0,
+                    help="Claude must assign at least this confidence before the agent acts",
+                )
+                _p_max_trade = st.slider(
+                    "Max Trade Size (% of portfolio)", min_value=1.0, max_value=25.0,
+                    value=float(_params.get("max_trade_size_pct", 10.0)), step=0.5,
+                    help="Hard cap on any single rebalance action",
+                )
+                _p_max_dd = st.slider(
+                    "Max Drawdown from Peak (%)", min_value=5.0, max_value=40.0,
+                    value=float(_params.get("max_drawdown_pct", 15.0)), step=1.0,
+                    help="Agent halts if portfolio falls this % from its peak value",
+                )
+            with ap2:
+                _p_loss_lim = st.slider(
+                    "Daily Loss Limit (%)", min_value=0.5, max_value=20.0,
+                    value=float(_params.get("daily_loss_limit_pct", 3.0)), step=0.5,
+                    help="Pause all actions when daily P&L breaches this loss threshold",
+                )
+                _p_rebal_thresh = st.slider(
+                    "Rebalance Threshold (% drift)", min_value=1.0, max_value=20.0,
+                    value=float(_params.get("rebalance_threshold_pct", 5.0)), step=0.5,
+                    help="How far an allocation must drift from target before triggering a rebalance",
+                )
+                _p_max_pos = st.number_input(
+                    "Max Simultaneous Positions", min_value=1, max_value=20,
+                    value=int(_params.get("max_positions", 8)), step=1,
+                    help="Maximum number of distinct holdings the agent can hold at once",
+                )
+            if st.form_submit_button("💾 Save Parameters", type="primary", width="stretch"):
+                _agent.save_agent_overrides({
+                    "min_confidence_pct":      float(_p_min_conf),
+                    "max_trade_size_pct":      float(_p_max_trade),
+                    "daily_loss_limit_pct":    float(_p_loss_lim),
+                    "max_drawdown_pct":        float(_p_max_dd),
+                    "rebalance_threshold_pct": float(_p_rebal_thresh),
+                    "max_positions":           int(_p_max_pos),
+                })
+                st.success("Agent parameters saved — will take effect on the next cycle.")
+        # Active Limits display
+        _active = _agent.get_active_agent_limits()
+        if any(v["custom"] for v in _active.values()):
+            st.caption("🔧 Custom overrides active:")
+            for key, info in _active.items():
+                if info["custom"]:
+                    _label = key.replace("_", " ").title()
+                    st.caption(f"  • {_label}: **{info['value']}** (default: {info['default']})")
+
     # AI Insights
     st.markdown('<div class="section-header">AI Market Insights</div>', unsafe_allow_html=True)
     if st.button(f"🧠 Generate {agent_detail['name']} Insights", key="btn_insights"):
@@ -3550,6 +3608,27 @@ with tab_ai:
         )
     else:
         st.info("No agent decisions yet. Start an agent or run a manual cycle above.")
+
+    # G3: Dual-window accuracy panel
+    try:
+        from ai_feedback import get_dual_window_accuracy as _get_dwa
+        _dwa = _get_dwa(agent_name=selected_agent)
+        _acc30 = _dwa.get("acc_30d", {})
+        _acc7  = _dwa.get("acc_7d",  {})
+        _trend = _dwa.get("trend", "stable")
+        _wr30  = _acc30.get("win_rate", 0) or 0
+        _wr7   = _acc7.get("win_rate",  0) or 0
+        _trend_icon = {"improving": "📈", "degrading": "📉", "stable": "➡️"}.get(_trend, "➡️")
+        _dwa_c1, _dwa_c2, _dwa_c3 = st.columns(3)
+        _dwa_c1.metric("30-Day Win Rate", f"{_wr30:.0%}",
+                       help=f"Correct decisions over the past 30 days ({_acc30.get('total', 0)} trades)")
+        _dwa_c2.metric("7-Day Win Rate", f"{_wr7:.0%}",
+                       delta=f"{(_wr7 - _wr30) * 100:+.1f}pp vs 30d",
+                       help=f"Correct decisions over the past 7 days ({_acc7.get('total', 0)} trades)")
+        _dwa_c3.metric("Accuracy Trend", f"{_trend_icon} {_trend.title()}",
+                       help="Improving = 7-day win rate at least 5pp above 30-day baseline")
+    except Exception:
+        pass
 
     # ── Macro Factor Allocation Bias (Group 7) ───────────────────────────────────
     st.markdown('<div class="section-header">Macro Factor Allocation Bias</div>', unsafe_allow_html=True)
