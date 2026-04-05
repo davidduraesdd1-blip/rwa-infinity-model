@@ -208,9 +208,32 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
       - Government Bonds (yield-bearing stables): NAV = $1.00
       - Precious Metals: nav_price set in asset dict (CoinGecko gold/silver price)
       - All others: use provided nav_price or skip (can't compute without oracle)
+
+    D2 FIX — NAV arb APY annualization:
+    APY is computed using category-specific holding period assumptions:
+      - Stablecoins / Government Bonds (T-bill tokens): 7-day convergence → APY = net * 52
+      - Precious Metals / Commodities: 14-day convergence → APY = net * 26
+      - All others (illiquid RWA): 30-day convergence → APY = net * 12
+    This replaces the flat x4 (quarterly) multiplier which ignored convergence speed.
     """
     opportunities = []
     now = datetime.now(timezone.utc).isoformat()
+
+    # D2: category → expected convergence days → annualization multiplier
+    _CONVERGENCE_DAYS: Dict[str, int] = {
+        "Stablecoins": 7, "Government Bonds": 7,
+        "Precious Metals": 14, "Commodities": 14,
+    }
+    _DEFAULT_CONVERGENCE_DAYS = 30   # illiquid RWA default
+
+    def _nav_apy_multiplier(cat: str, tags: list) -> float:
+        """Return 365 / expected_convergence_days for a NAV arb opportunity."""
+        if cat in _CONVERGENCE_DAYS:
+            return 365.0 / _CONVERGENCE_DAYS[cat]
+        tag_set = {t.lower() for t in tags}
+        if tag_set & {"stablecoin", "t-bill", "treasury", "tbill"}:
+            return 365.0 / 7
+        return 365.0 / _DEFAULT_CONVERGENCE_DAYS
 
     # Categories where NAV = $1.00 (should always trade at par)
     _STABLE_CATEGORIES = {"Government Bonds", "Stablecoins"}
@@ -253,6 +276,12 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
             "ARB"
         )
 
+        cat  = asset.get("category", "")
+        tags = [str(t).lower() for t in (asset.get("tags") or [])]
+        apy_mult     = _nav_apy_multiplier(cat, tags)
+        est_apy      = round(net_spread * apy_mult, 4)
+        conv_days    = round(365.0 / apy_mult)
+
         action = (
             f"{'BUY' if direction == 'DISCOUNT' else 'SHORT'} {asset['id']}: "
             f"Token at ${current_price:.4f} vs NAV ${nav_price:.4f} "
@@ -275,8 +304,8 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
             "yield_b_pct":   0,
             "spread_pct":    round(gross_spread, 4),
             "net_spread_pct":round(net_spread, 4),
-            "estimated_apy": round(net_spread * 4, 4),  # assume quarterly opportunity
-            "category":      asset.get("category", ""),
+            "estimated_apy": est_apy,   # D2: category-specific convergence (7/14/30 days)
+            "category":      cat,
             "tx_cost_pct":   tx_cost,
             "direction":     direction,
             "signal":        signal,
@@ -284,6 +313,7 @@ def scan_price_vs_nav_arb(assets: List[dict]) -> List[dict]:
             "notes": (
                 f"{asset['id']} currently trades at {abs(price_vs_nav):.2f}% "
                 f"{'below' if direction == 'DISCOUNT' else 'above'} NAV. "
+                f"APY assumes {conv_days}-day convergence. "
                 f"Liquidity score: {asset.get('liquidity_score', 'N/A')}/10."
             ),
         }

@@ -357,10 +357,18 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
     return True, "Pre-risk gates passed"
 
 
-def _check_post_risk(actions: list, cfg: dict, portfolio_value: float) -> tuple[bool, str]:
+def _check_post_risk(
+    actions: list,
+    cfg: dict,
+    portfolio_value: float,
+    holdings: list | None = None,
+) -> tuple[bool, str]:
     """
     Post-decision risk gates. Validates proposed actions before execution.
     Returns (passed, reason).
+
+    D3 FIX: Added concentration risk gate — single-asset cap at 40% of portfolio.
+    Prevents the agent from overloading into one asset (e.g. 90% in one T-bill token).
     """
     total_usd = sum(abs(a.get("size_usd", 0)) for a in actions)
     max_size  = portfolio_value * cfg["max_trade_size_pct"] / 100
@@ -372,6 +380,31 @@ def _check_post_risk(actions: list, cfg: dict, portfolio_value: float) -> tuple[
         size = abs(action.get("size_usd", 0))
         if size > max_size:
             return False, f"Single trade ${size:,.0f} exceeds max ${max_size:,.0f} ({cfg['max_trade_size_pct']}%)"
+
+    # D3: Concentration risk gate — single-asset 40% cap
+    _MAX_SINGLE_ASSET_PCT = 40.0
+    if holdings and portfolio_value > 0:
+        # Build current holdings value map
+        holding_values: dict[str, float] = {}
+        for h in holdings:
+            hid = str(h.get("id") or h.get("asset_id") or "")
+            if hid:
+                holding_values[hid] = float(h.get("value_usd") or 0)
+
+        for action in actions:
+            atype = str(action.get("action_type", "")).upper()
+            if atype not in ("BUY", "ENTER", "INCREASE"):
+                continue
+            asset_id = str(action.get("asset_id") or action.get("id") or "")
+            buy_usd  = abs(action.get("size_usd", 0))
+            current  = holding_values.get(asset_id, 0.0)
+            new_val  = current + buy_usd
+            new_pct  = new_val / portfolio_value * 100
+            if new_pct > _MAX_SINGLE_ASSET_PCT:
+                return False, (
+                    f"Concentration gate: {asset_id} would reach {new_pct:.1f}% "
+                    f"of portfolio — exceeds {_MAX_SINGLE_ASSET_PCT:.0f}% single-asset cap"
+                )
 
     return True, "Post-risk gates passed"
 
@@ -1013,8 +1046,13 @@ def _node_post_risk(state: AgentState) -> AgentState:
 
     try:
         portfolio_value = (state["portfolio"].get("portfolio_value_usd") or 100_000)
+        snap_holdings   = (
+            state["portfolio_state"].get("snapshot", {}).get("holdings") or
+            state["portfolio_state"].get("holdings") or []
+        )
         passed, reason  = _check_post_risk(
-            state["proposed_actions"], state["agent_cfg"], portfolio_value
+            state["proposed_actions"], state["agent_cfg"],
+            portfolio_value, holdings=snap_holdings,
         )
         state["risk_post_passed"] = passed
         state["risk_post_reason"] = reason

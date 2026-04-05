@@ -252,7 +252,7 @@ def score_asset(asset: dict) -> float:
     regulatory  = asset.get("regulatory_score", 5)
 
     # Yield attractiveness: how much above risk-free rate
-    yield_spread = max(yield_pct - RISK_FREE_RATE, 0)
+    yield_spread = max(yield_pct - get_live_risk_free_rate(), 0)
     yield_score  = min(yield_spread / 15, 1.0)  # 15% spread = max score
 
     # Risk-adjusted yield: yield per unit of risk
@@ -327,7 +327,7 @@ def score_assets_batch(assets_df: pd.DataFrame) -> pd.DataFrame:
     regulatory  = _col("regulatory_score", 5).fillna(5).clip(1, 10)
 
     # Yield attractiveness
-    yield_spread = (yield_pct - RISK_FREE_RATE).clip(lower=0)
+    yield_spread = (yield_pct - get_live_risk_free_rate()).clip(lower=0)
     yield_score  = (yield_spread / 15).clip(upper=1.0)
 
     # Risk-adjusted yield
@@ -637,7 +637,8 @@ def compute_portfolio_metrics(holdings: List[dict], portfolio_value: float,
     portfolio_vol = math.sqrt(max(portfolio_var, 0))
 
     # Sharpe ratio: (return - risk_free) / volatility
-    excess_return  = avg_yield - RISK_FREE_RATE
+    live_rf        = get_live_risk_free_rate()   # D1: live 3-month T-bill, 2-hr cache
+    excess_return  = avg_yield - live_rf
     sharpe         = excess_return / max(portfolio_vol, 0.01)
 
     # Sortino ratio: (return - risk_free) / downside_deviation
@@ -949,7 +950,7 @@ def compute_efficient_frontier(assets: List[dict], n_portfolios: int = 500) -> d
         # Use category-aware covariance instead of flat 0.3 correlation assumption
         port_var = float(w @ cov_ef @ w)
         vol  = float(math.sqrt(max(port_var, 0)))
-        sharpe = (ret - RISK_FREE_RATE) / max(vol, 0.01)
+        sharpe = (ret - get_live_risk_free_rate()) / max(vol, 0.01)
         portfolios.append({
             "return_pct": round(ret, 3),
             "vol_pct":    round(vol, 3),
@@ -1135,7 +1136,7 @@ def stress_test_correlations(portfolio: dict, scenario: str = "crisis") -> dict:
     stressed_vol = math.sqrt(max(stressed_var, 0))
 
     avg_yield     = float(np.dot(weights, yields))
-    excess_return = avg_yield - RISK_FREE_RATE
+    excess_return = avg_yield - get_live_risk_free_rate()
     sharpe        = excess_return / max(stressed_vol, 0.01)
     downside_vol  = stressed_vol * 0.56
     sortino       = excess_return / max(downside_vol, 0.01)
@@ -1529,7 +1530,7 @@ def compute_factor_tilted_portfolio(
         ret = float(np.dot(w, tilted_yields))
         var = float(w @ cov @ w)
         vol = math.sqrt(max(var, 1e-8))
-        sr  = (ret - RISK_FREE_RATE) / vol
+        sr  = (ret - get_live_risk_free_rate()) / vol
         if sr > best_sharpe:
             best_sharpe = sr
             best_weights = w
