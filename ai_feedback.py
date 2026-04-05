@@ -193,6 +193,75 @@ def get_dual_window_accuracy(agent_name: str) -> dict:
     return {"acc_30d": acc_30d, "acc_7d": acc_7d, "trend": trend}
 
 
+def get_rolling_win_rate_history(agent_name: str, window_days: int = 30,
+                                  rolling_window: int = 7) -> list:
+    """
+    F1: Return daily rolling win-rate history for the agent over the past
+    *window_days* days, computed using a *rolling_window*-day rolling window.
+
+    Returns list of dicts: [{date: str, win_rate: float, total: int}, ...]
+    sorted by date ascending. Empty list if no data.
+    """
+    conn = _db._get_conn()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days + rolling_window)).isoformat()
+    try:
+        rows = conn.execute(
+            """
+            SELECT DATE(timestamp) AS day, outcome
+            FROM ai_feedback
+            WHERE agent_name = ? AND timestamp >= ? AND outcome IS NOT NULL
+            ORDER BY day ASC
+            """,
+            (agent_name, cutoff),
+        ).fetchall()
+    except Exception as e:
+        logger.debug("[ai_feedback] rolling win rate query failed: %s", e)
+        return []
+    finally:
+        conn.close()
+
+    if not rows:
+        return []
+
+    import collections
+    from datetime import date, timedelta as _td
+
+    # Group outcomes by day
+    daily: dict[str, list] = collections.defaultdict(list)
+    for row in rows:
+        daily[row[0]].append(str(row[1]).upper())
+
+    # Build list of all days in range
+    all_days = sorted(daily.keys())
+    if not all_days:
+        return []
+
+    start_day = datetime.now(timezone.utc).date() - timedelta(days=window_days)
+    results = []
+    today = datetime.now(timezone.utc).date()
+    d = start_day
+    while d <= today:
+        ds = d.isoformat()
+        # Collect rolling_window days of data ending on d
+        window_days_list = [
+            (d - _td(days=i)).isoformat()
+            for i in range(rolling_window)
+        ]
+        outcomes = []
+        for wd in window_days_list:
+            outcomes.extend(daily.get(wd, []))
+        if outcomes:
+            wins = sum(1 for o in outcomes if o == "WIN")
+            results.append({
+                "date": ds,
+                "win_rate": round(wins / len(outcomes) * 100, 1),
+                "total": len(outcomes),
+            })
+        d += _td(days=1)
+
+    return results
+
+
 def _empty_result(agent_name: str) -> dict:
     return {
         "agent_name":      agent_name,

@@ -1686,11 +1686,47 @@ with tab_portfolio:
 
     with chart_left:
         st.markdown('<div class="section-header">Allocation by Category</div>', unsafe_allow_html=True)
+        # F3: chart view toggle — pie or treemap
+        _chart_view = st.radio("View", ["Donut", "Treemap"], horizontal=True,
+                               key="port_chart_view", label_visibility="collapsed")
         if cat_sum:
-            # UPGRADE 21: use cached chart builder
-            _weighted_yield = float(metrics.get("weighted_yield_pct") or 0)
-            fig_pie = _build_pie_chart(cat_sum, _weighted_yield)
-            st.plotly_chart(fig_pie, width="stretch")
+            if _chart_view == "Donut":
+                # UPGRADE 21: use cached chart builder
+                _weighted_yield = float(metrics.get("weighted_yield_pct") or 0)
+                fig_pie = _build_pie_chart(cat_sum, _weighted_yield)
+                st.plotly_chart(fig_pie, width="stretch")
+            else:
+                # F3: Treemap — holdings sized by weight, colored by yield
+                if holdings:
+                    _tm_df = pd.DataFrame(holdings)
+                    _tm_cols = {"name", "category", "weight_pct", "current_yield_pct"}
+                    if _tm_cols.issubset(_tm_df.columns):
+                        _tm_df = _tm_df[_tm_df["weight_pct"].fillna(0) > 0].copy()
+                        _tm_df["yield_pct"] = _tm_df["current_yield_pct"].fillna(0)
+                        _tm_df["label"] = (
+                            _tm_df["name"].str[:20] + "<br>"
+                            + _tm_df["weight_pct"].apply(lambda x: f"{x:.1f}%")
+                            + " · " + _tm_df["yield_pct"].apply(lambda x: f"{x:.1f}% APY")
+                        )
+                        _tm_fig = px.treemap(
+                            _tm_df,
+                            path=[px.Constant("Portfolio"), "category", "name"],
+                            values="weight_pct",
+                            color="yield_pct",
+                            color_continuous_scale=[[0, "#ef4444"], [0.5, "#f59e0b"], [1, "#22c55e"]],
+                            color_continuous_midpoint=float(_tm_df["yield_pct"].median()),
+                            custom_data=["yield_pct", "weight_pct"],
+                            title="Portfolio Holdings Treemap — Size: Weight %, Color: Yield %",
+                        )
+                        _tm_fig.update_traces(
+                            hovertemplate="<b>%{label}</b><br>Weight: %{customdata[1]:.1f}%<br>Yield: %{customdata[0]:.2f}%<extra></extra>"
+                        )
+                        _tm_fig.update_layout(
+                            template="plotly_dark",
+                            margin=dict(l=0, r=0, t=40, b=0),
+                            coloraxis_colorbar=dict(title="Yield %", tickformat=".1f"),
+                        )
+                        st.plotly_chart(_tm_fig, width="stretch")
 
     with chart_right:
         st.markdown('<div class="section-header">Holdings — Yield vs Risk</div>', unsafe_allow_html=True)
@@ -2626,6 +2662,44 @@ with tab_universe:
         # F5: CSV export for Asset Universe
         _csv_button(table_df, "rwa_asset_universe.csv", "⬇ Export Universe CSV",
                     key="csv_universe_table")
+
+        # ── F4: APY Trend History ──────────────────────────────────────────────
+        with st.expander("📈 APY Trend History", expanded=False):
+            st.caption(
+                "Yield history per asset, recorded on each data scan. "
+                "History accumulates over time — new installations will see more data after each refresh."
+            )
+            _avail_ids = sorted(filtered_df["id"].dropna().unique().tolist()) if "id" in filtered_df.columns else []
+            if _avail_ids:
+                _sel_asset = st.selectbox("Select asset", _avail_ids, key="yield_hist_asset")
+                _hist_days = st.radio("Period", [7, 14, 30, 90], index=2, horizontal=True,
+                                      format_func=lambda d: f"{d}d", key="yield_hist_days")
+                if _sel_asset:
+                    _yh_df = _db.get_yield_history(_sel_asset, days=_hist_days)
+                    if not _yh_df.empty and "yield_pct" in _yh_df.columns:
+                        _yh_df["timestamp"] = pd.to_datetime(_yh_df["timestamp"], errors="coerce")
+                        _yh_fig = px.line(
+                            _yh_df, x="timestamp", y="yield_pct",
+                            title=f"{_sel_asset} — Yield % ({_hist_days}-day history)",
+                            labels={"timestamp": "Date", "yield_pct": "Yield %"},
+                            template="plotly_dark",
+                            color_discrete_sequence=["#00d4aa"],
+                        )
+                        _yh_fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=300)
+                        _yh_fig.add_hline(
+                            y=_yh_df["yield_pct"].mean(), line_dash="dash",
+                            line_color="#f59e0b",
+                            annotation_text=f"Avg {_yh_df['yield_pct'].mean():.2f}%",
+                        )
+                        st.plotly_chart(_yh_fig, width="stretch")
+                        _csv_button(_yh_df[["timestamp", "yield_pct", "tvl_usd"]],
+                                    f"yield_history_{_sel_asset}.csv",
+                                    "⬇ Export Yield History CSV",
+                                    key="csv_yield_history")
+                    else:
+                        st.info(f"No yield history yet for {_sel_asset}. Run a data refresh to start recording.")
+            else:
+                st.info("Load assets first.")
 
         # ── Collateral Quality Scoring (item 38) ──────────────────────────────
         st.markdown('<div class="section-header">Collateral Quality Scoring</div>',
@@ -3782,7 +3856,7 @@ with tab_ai:
 
     # G3: Dual-window accuracy panel
     try:
-        from ai_feedback import get_dual_window_accuracy as _get_dwa
+        from ai_feedback import get_dual_window_accuracy as _get_dwa, get_rolling_win_rate_history as _get_rwrh
         _dwa = _get_dwa(agent_name=selected_agent)
         _acc30 = _dwa.get("acc_30d", {})
         _acc7  = _dwa.get("acc_7d",  {})
@@ -3798,6 +3872,25 @@ with tab_ai:
                        help=f"Correct decisions over the past 7 days ({_acc7.get('total', 0)} trades)")
         _dwa_c3.metric("Accuracy Trend", f"{_trend_icon} {_trend.title()}",
                        help="Improving = 7-day win rate at least 5pp above 30-day baseline")
+
+        # F1: Rolling win rate chart
+        _rwrh = _get_rwrh(agent_name=selected_agent, window_days=30, rolling_window=7)
+        if _rwrh:
+            _rwrh_df = pd.DataFrame(_rwrh)
+            _rwrh_fig = px.line(
+                _rwrh_df, x="date", y="win_rate",
+                title="7-Day Rolling Win Rate (past 30 days)",
+                labels={"date": "Date", "win_rate": "Win Rate (%)"},
+                template="plotly_dark",
+                color_discrete_sequence=["#00d4aa"],
+            )
+            _rwrh_fig.add_hline(y=50, line_dash="dash", line_color="#6B7280",
+                                annotation_text="50% breakeven")
+            _rwrh_fig.update_layout(height=220, margin=dict(l=0, r=0, t=40, b=0),
+                                    yaxis=dict(range=[0, 100], ticksuffix="%"))
+            st.plotly_chart(_rwrh_fig, width="stretch")
+        else:
+            st.caption("Win rate history builds up as the agent makes and evaluates decisions.")
     except Exception:
         pass
 
