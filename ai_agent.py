@@ -281,6 +281,29 @@ def _get_live_portfolio_state(tier: int) -> dict:
 # HARD RISK GATES (Python-enforced — LLM cannot override these)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EMERGENCY STOP — G8
+# Set via ai_agent.set_emergency_stop(True) from AI Agent tab in app.py.
+# Checked at the top of every pre-risk gate. Cleared only via explicit reset.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RWA_EMERGENCY_STOP: bool = False
+_RWA_EMERGENCY_STOP_LOCK  = threading.Lock()
+
+
+def set_emergency_stop(active: bool) -> None:
+    """Activate or deactivate the emergency stop from the AI Agent Control Panel."""
+    global _RWA_EMERGENCY_STOP
+    with _RWA_EMERGENCY_STOP_LOCK:
+        _RWA_EMERGENCY_STOP = bool(active)
+    logger.warning("[Agent] Emergency stop %s", "ACTIVATED" if active else "CLEARED")
+
+
+def is_emergency_stop() -> bool:
+    with _RWA_EMERGENCY_STOP_LOCK:
+        return _RWA_EMERGENCY_STOP
+
+
 def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
     """
     Pre-trade risk gates. Returns (passed, reason).
@@ -289,6 +312,10 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
     port = state["portfolio_state"]
     snap = port.get("snapshot", {})
     metrics = snap.get("metrics", {})
+
+    # G8 Check 0: Emergency stop — highest priority
+    if is_emergency_stop():
+        return False, "EMERGENCY STOP is active — no actions until manually reset from AI Agent tab"
 
     # G9: Composite signal gate — RISK_OFF suppresses new carry/arb entries
     try:
@@ -301,7 +328,7 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
     except Exception:
         pass  # gate errors never block — fail-open
 
-    # Check max drawdown not breached
+    # G8: Check max drawdown not breached
     portfolio_vol = metrics.get("portfolio_volatility_pct", 0)
     _tier_key     = max(1, min(5, int(cfg.get("risk_tier", 3))))
     tier_cfg      = PORTFOLIO_TIERS.get(_tier_key, list(PORTFOLIO_TIERS.values())[0])
@@ -309,10 +336,23 @@ def _check_pre_risk(state: AgentState, cfg: dict) -> tuple[bool, str]:
     if portfolio_vol > max_dd:
         return False, f"Portfolio volatility {portfolio_vol:.1f}% > max drawdown limit {max_dd:.1f}%"
 
-    # Check recent trade count limit (max 20 trades in last 50 DB rows)
+    # G8: Check recent trade count limit (max 20 trades in last 50 DB rows)
     recent_trades = port.get("recent_trades", 0)
     if recent_trades > 20:
         return False, f"Trade count {recent_trades} exceeds daily limit"
+
+    # G8: Max simultaneous positions — count current holdings from snapshot
+    holdings      = snap.get("holdings", []) or port.get("holdings", [])
+    max_positions = int(cfg.get("max_positions", 8))
+    if isinstance(holdings, list) and len(holdings) >= max_positions:
+        return False, f"Max positions reached ({len(holdings)}/{max_positions} holdings)"
+
+    # G8: Minimum trade size sanity — avoid micro-trades where fees > profit
+    _tier_value = tier_cfg.get("value_usd", 1_000)
+    max_trade_pct = float(cfg.get("max_trade_size_pct", 10.0))
+    trade_usd = _tier_value * max_trade_pct / 100.0
+    if trade_usd < 1.0:
+        return False, f"Computed trade size ${trade_usd:.2f} is below $1 minimum — adjust portfolio tier value"
 
     return True, "Pre-risk gates passed"
 

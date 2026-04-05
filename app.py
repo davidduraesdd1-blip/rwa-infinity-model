@@ -3521,6 +3521,19 @@ with tab_ai:
             </div>
             """, unsafe_allow_html=True)
 
+    # G8: Emergency Stop — kill switch, shown prominently before config sliders
+    _emg_is_active = _agent.is_emergency_stop()
+    if _emg_is_active:
+        st.error("🚨 **EMERGENCY STOP ACTIVE** — agent will reject all new entries until cleared.")
+        if st.button("✅ Clear Emergency Stop", key="btn_rwa_emg_clear", type="primary"):
+            _agent.set_emergency_stop(False)
+            st.success("Emergency stop cleared.")
+            st.rerun()
+    else:
+        if st.button("🚨 Activate Emergency Stop", key="btn_rwa_emg_activate", type="secondary"):
+            _agent.set_emergency_stop(True)
+            st.rerun()
+
     # G2: Agent Risk Parameters — sliding presets (overrides stored in rwa_agent_overrides.json)
     with st.expander("⚙️ Agent Risk Parameters", expanded=False):
         st.caption("Adjust risk limits for the selected agent. Values are saved persistently and take effect on the next cycle.")
